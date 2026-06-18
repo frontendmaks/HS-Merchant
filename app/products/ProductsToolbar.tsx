@@ -38,7 +38,6 @@ export default function ProductsToolbar({ total }: { total: number }) {
 
   return (
     <div className="flex items-center gap-3">
-      {/* Search */}
       <div className="relative flex-1 max-w-sm">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm">🔍</span>
         <input
@@ -52,10 +51,7 @@ export default function ProductsToolbar({ total }: { total: number }) {
           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">...</span>
         )}
       </div>
-
       <div className="text-xs text-zinc-500">{total} товарів</div>
-
-      {/* Sync button */}
       <button
         onClick={handleSync}
         disabled={syncing}

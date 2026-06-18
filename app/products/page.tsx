@@ -1,13 +1,17 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import { Suspense } from 'react'
 import ProductsToolbar from './ProductsToolbar'
+import SortableHeader from './SortableHeader'
 import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
 
 const PER_PAGE = 50
 
-async function getProducts(q: string, page: number) {
+const ALLOWED_SORT = ['name', 'price', 'stock', 'status'] as const
+type SortCol = typeof ALLOWED_SORT[number]
+
+async function getProducts(q: string, page: number, sort: SortCol, dir: 'asc' | 'desc') {
   const supabase = createServiceClient()
   const from = (page - 1) * PER_PAGE
   const to = from + PER_PAGE - 1
@@ -15,7 +19,7 @@ async function getProducts(q: string, page: number) {
   let query = supabase
     .from('products')
     .select('id, name, sku, price, stock, status, images, external_id', { count: 'exact' })
-    .order('name')
+    .order(sort, { ascending: dir === 'asc', nullsFirst: false })
     .range(from, to)
 
   if (q) query = query.ilike('name', `%${q}%`)
@@ -27,43 +31,53 @@ async function getProducts(q: string, page: number) {
 export default async function ProductsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; page?: string }>
+  searchParams: Promise<{ q?: string; page?: string; sort?: string; dir?: string }>
 }) {
-  const { q = '', page: pageStr = '1' } = await searchParams
+  const { q = '', page: pageStr = '1', sort: sortRaw = 'name', dir: dirRaw = 'asc' } = await searchParams
   const page = Math.max(1, parseInt(pageStr) || 1)
-  const { products, total } = await getProducts(q, page)
+  const sort = (ALLOWED_SORT.includes(sortRaw as SortCol) ? sortRaw : 'name') as SortCol
+  const dir = dirRaw === 'desc' ? 'desc' : 'asc'
+
+  const { products, total } = await getProducts(q, page, sort, dir)
   const totalPages = Math.ceil(total / PER_PAGE)
+
+  const buildPageUrl = (p: number) => {
+    const sp = new URLSearchParams({ ...(q && { q }), sort, dir, page: String(p) })
+    return `/products?${sp.toString()}`
+  }
 
   return (
     <div className="max-w-6xl">
-      {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-white">Товари</h1>
-          <p className="text-zinc-500 text-sm mt-1">Каталог товарів синхронізований з WooCommerce</p>
-        </div>
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold text-white">Товари</h1>
+        <p className="text-zinc-500 text-sm mt-1">Каталог синхронізований з WooCommerce</p>
       </div>
 
-      {/* Toolbar */}
       <div className="mb-4">
         <Suspense>
           <ProductsToolbar total={total} />
         </Suspense>
       </div>
 
-      {/* Table */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        {/* Header */}
-        <div className="grid grid-cols-[56px_1fr_120px_100px_80px_80px] gap-4 px-4 py-3 border-b border-zinc-800 bg-zinc-800/50">
+        {/* Table header */}
+        <div className="grid grid-cols-[56px_1fr_120px_110px_90px_90px] gap-4 px-4 py-3 border-b border-zinc-800 bg-zinc-800/50">
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Фото</div>
-          <div className="text-xs text-zinc-500 uppercase tracking-wide">Назва / Артикул</div>
+          <Suspense>
+            <SortableHeader column="name" label="Назва" />
+          </Suspense>
           <div className="text-xs text-zinc-500 uppercase tracking-wide">WC ID</div>
-          <div className="text-xs text-zinc-500 uppercase tracking-wide text-right">Ціна</div>
-          <div className="text-xs text-zinc-500 uppercase tracking-wide text-right">Сток</div>
-          <div className="text-xs text-zinc-500 uppercase tracking-wide text-center">Статус</div>
+          <Suspense>
+            <SortableHeader column="price" label="Ціна" className="justify-end" />
+          </Suspense>
+          <Suspense>
+            <SortableHeader column="stock" label="Сток" className="justify-end" />
+          </Suspense>
+          <Suspense>
+            <SortableHeader column="status" label="Статус" className="justify-center" />
+          </Suspense>
         </div>
 
-        {/* Rows */}
         <div className="divide-y divide-zinc-800">
           {products.length === 0 && (
             <div className="py-16 text-center text-zinc-600">
@@ -74,31 +88,32 @@ export default async function ProductsPage({
             const img = (p.images as string[])?.[0]
             const noImg = !img
             const noPrice = !p.price || Number(p.price) <= 0
-            const zeroStock = p.stock === 0 && p.status === 'active'
+            const stockVal = p.stock as number | null
+            const zeroStock = stockVal === 0 && p.status === 'active'
 
             return (
               <div
                 key={p.id}
-                className="grid grid-cols-[56px_1fr_120px_100px_80px_80px] gap-4 px-4 py-3 items-center hover:bg-zinc-800/40 transition-colors"
+                className="grid grid-cols-[56px_1fr_120px_110px_90px_90px] gap-4 px-4 py-3 items-center hover:bg-zinc-800/40 transition-colors"
               >
                 {/* Image */}
                 <div className="w-10 h-10 rounded-lg overflow-hidden bg-zinc-800 shrink-0">
                   {img ? (
                     <img src={img} alt={p.name} className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-zinc-600 text-lg">□</div>
+                    <div className="w-full h-full flex items-center justify-center text-zinc-600">□</div>
                   )}
                 </div>
 
                 {/* Name */}
                 <div className="min-w-0">
-                  <div className="text-sm text-white truncate flex items-center gap-2">
-                    {p.name}
+                  <div className="text-sm text-white truncate flex items-center gap-1.5">
+                    <span className="truncate">{p.name}</span>
                     {noImg && <span title="Немає фото" className="text-amber-500 text-xs shrink-0">📷</span>}
                     {noPrice && <span title="Немає ціни" className="text-red-500 text-xs shrink-0">₴</span>}
                   </div>
-                  <div className="text-xs text-zinc-600 mt-0.5">
-                    {p.sku ? `SKU: ${p.sku}` : <span className="text-zinc-700">без артикулу</span>}
+                  <div className="text-xs text-zinc-600 mt-0.5 font-mono">
+                    {p.sku || <span className="text-zinc-700">без артикулу</span>}
                   </div>
                 </div>
 
@@ -112,9 +127,7 @@ export default async function ProductsPage({
                     >
                       #{p.external_id} ↗
                     </a>
-                  ) : (
-                    <span className="text-xs text-zinc-700">—</span>
-                  )}
+                  ) : <span className="text-xs text-zinc-700">—</span>}
                 </div>
 
                 {/* Price */}
@@ -124,8 +137,13 @@ export default async function ProductsPage({
 
                 {/* Stock */}
                 <div className={`text-sm text-right font-medium ${zeroStock ? 'text-red-400' : 'text-zinc-300'}`}>
-                  {p.stock ?? '—'}
-                  {zeroStock && <span className="ml-1 text-xs">⚠</span>}
+                  {stockVal === null
+                    ? <span className="text-zinc-500 text-xs">∞</span>
+                    : <>
+                        {stockVal}
+                        {zeroStock && <span className="ml-1 text-xs text-red-400">⚠</span>}
+                      </>
+                  }
                 </div>
 
                 {/* Status */}
@@ -150,20 +168,15 @@ export default async function ProductsPage({
           <div className="text-xs text-zinc-500">
             Сторінка {page} з {totalPages} · {total} товарів
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             {page > 1 && (
-              <Link
-                href={`/products?${new URLSearchParams({ ...(q && { q }), page: String(page - 1) })}`}
-                className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors"
-              >
+              <Link href={buildPageUrl(page - 1)} className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors">
                 ← Попередня
               </Link>
             )}
+            <span className="text-xs text-zinc-600 px-2">{page} / {totalPages}</span>
             {page < totalPages && (
-              <Link
-                href={`/products?${new URLSearchParams({ ...(q && { q }), page: String(page + 1) })}`}
-                className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors"
-              >
+              <Link href={buildPageUrl(page + 1)} className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors">
                 Наступна →
               </Link>
             )}

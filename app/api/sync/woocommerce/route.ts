@@ -34,7 +34,8 @@ function mapProduct(p: any) {
     price: parseFloat(p.regular_price || p.price || '0') || 0,
     price_old: p.sale_price ? parseFloat(p.regular_price || '0') : null,
     currency: 'UAH' as const,
-    stock: p.stock_quantity ?? (p.stock_status === 'instock' ? 1 : 0),
+    // null = без управління залишками (необмежено), 0 = немає в наявності
+    stock: p.manage_stock ? (p.stock_quantity ?? 0) : null,
     status: 'active' as const,
     images,
     attributes,
