@@ -5,7 +5,8 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string }> }
 ) {
-  const { slug } = await params
+  const { slug: rawSlug } = await params
+  const slug = rawSlug.replace(/\.xml$/, '')
   const supabase = createServiceClient()
 
   const { data: feed, error } = await supabase
