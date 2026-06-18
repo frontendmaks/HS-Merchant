@@ -1,5 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/service'
 
+export const dynamic = 'force-dynamic'
+
 async function getStats() {
   const supabase = createServiceClient()
   const [products, feeds, marketplaces, changelog] = await Promise.all([
