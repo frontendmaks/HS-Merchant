@@ -4,26 +4,58 @@ import { NextResponse } from 'next/server'
 const WC_URL = process.env.WC_URL!
 const CK = process.env.WC_CONSUMER_KEY!
 const CS = process.env.WC_CONSUMER_SECRET!
+const WAREHOUSE = process.env.WC_WAREHOUSE ?? 'Гуртівня онлайн'
+
+function wcFetch(path: string) {
+  const sep = path.includes('?') ? '&' : '?'
+  return fetch(`${WC_URL}/wp-json/wc/v3${path}${sep}consumer_key=${CK}&consumer_secret=${CS}`, {
+    cache: 'no-store',
+  })
+}
 
 async function fetchWCPage(page: number) {
-  const url = `${WC_URL}/wp-json/wc/v3/products?consumer_key=${CK}&consumer_secret=${CS}&per_page=100&page=${page}&status=publish`
-  const res = await fetch(url, { cache: 'no-store' })
+  const res = await wcFetch(`/products?per_page=100&page=${page}&status=publish`)
   const total = Number(res.headers.get('x-wp-total') ?? 0)
   const data = await res.json()
   return { data, total }
 }
 
-function mapProduct(p: any) {
+// Отримуємо варіацію конкретного складу для змінного товару
+async function fetchWarehouseVariation(productId: number): Promise<{ price: number | null; stock: number | null } | null> {
+  const res = await wcFetch(`/products/${productId}/variations?per_page=100`)
+  if (!res.ok) return null
+  const variations: any[] = await res.json()
+
+  const match = variations.find(v =>
+    v.attributes?.some((a: any) =>
+      (a.name?.includes('Storage') || a.name?.includes('Склад')) &&
+      a.option === WAREHOUSE
+    )
+  )
+  if (!match) return null
+
+  return {
+    price: parseFloat(match.price || match.regular_price || '0') || null,
+    stock: match.manage_stock ? (match.stock_quantity ?? 0) : null,
+  }
+}
+
+function mapProduct(p: any, variation?: { price: number | null; stock: number | null } | null) {
   const images = (p.images ?? []).map((img: any) => img.src).filter(Boolean)
+
+  // Прибираємо атрибут складів (не потрібен в XML)
   const attributes: Record<string, string> = {}
   for (const attr of p.attributes ?? []) {
-    if (attr.name && attr.options?.length) {
-      attributes[attr.name] = attr.options.join(', ')
-    }
+    const name: string = attr.name ?? ''
+    if (name.includes('Storage') || name.includes('Склад')) continue
+    if (attr.options?.length) attributes[name] = attr.options.join(', ')
   }
-
-  // Вага як атрибут
   if (p.weight) attributes['Вага'] = `${p.weight} кг`
+
+  const price = variation?.price ?? parseFloat(p.regular_price || p.price || '0') || 0
+  const stock = variation !== undefined
+    ? (variation?.stock ?? null)
+    : (p.manage_stock ? (p.stock_quantity ?? 0) : null)
 
   return {
     external_id: String(p.id),
@@ -31,11 +63,10 @@ function mapProduct(p: any) {
     slug: p.slug,
     description: p.description?.replace(/<[^>]*>/g, '').trim() || p.short_description?.replace(/<[^>]*>/g, '').trim() || null,
     sku: p.sku || null,
-    price: parseFloat(p.regular_price || p.price || '0') || 0,
+    price,
     price_old: p.sale_price ? parseFloat(p.regular_price || '0') : null,
     currency: 'UAH' as const,
-    // null = без управління залишками (необмежено), 0 = немає в наявності
-    stock: p.manage_stock ? (p.stock_quantity ?? 0) : null,
+    stock,
     status: 'active' as const,
     images,
     attributes,
@@ -47,35 +78,48 @@ export async function POST() {
   try {
     const supabase = createServiceClient()
 
-    // Дізнаємось скільки сторінок
+    // 1. Тягнемо всі продукти
     const { data: firstPage, total } = await fetchWCPage(1)
     const totalPages = Math.ceil(total / 100)
 
-    // Завантажуємо всі сторінки паралельно (батчами по 5)
-    let allProducts = [...firstPage]
+    let allProducts: any[] = [...firstPage]
     for (let batch = 2; batch <= totalPages; batch += 5) {
       const pages = Array.from({ length: Math.min(5, totalPages - batch + 1) }, (_, i) => batch + i)
       const results = await Promise.all(pages.map(p => fetchWCPage(p)))
       allProducts.push(...results.flatMap(r => r.data))
     }
 
-    // Маппінг і upsert в Supabase
-    const mapped = allProducts.map(mapProduct)
+    // 2. Для variable продуктів — тягнемо варіацію "Гуртівня онлайн" батчами по 10
+    const variableProducts = allProducts.filter(p => p.type === 'variable')
+    const variationMap = new Map<number, { price: number | null; stock: number | null } | null>()
 
-    const { error, count } = await supabase
+    for (let i = 0; i < variableProducts.length; i += 10) {
+      const batch = variableProducts.slice(i, i + 10)
+      const results = await Promise.all(batch.map(p => fetchWarehouseVariation(p.id)))
+      batch.forEach((p, idx) => variationMap.set(p.id, results[idx]))
+    }
+
+    // 3. Маппінг
+    const mapped = allProducts.map(p => {
+      const variation = variationMap.has(p.id) ? variationMap.get(p.id) : undefined
+      return mapProduct(p, variation)
+    })
+
+    // 4. Upsert в Supabase
+    const { error } = await supabase
       .from('products')
-      .upsert(mapped, {
-        onConflict: 'external_id',
-        ignoreDuplicates: false,
-      })
+      .upsert(mapped, { onConflict: 'external_id', ignoreDuplicates: false })
 
     if (error) throw error
 
+    const withVariation = [...variationMap.values()].filter(Boolean).length
     return NextResponse.json({
       success: true,
       synced: mapped.length,
       total,
-      pages: totalPages,
+      warehouse: WAREHOUSE,
+      with_warehouse_stock: withVariation,
+      without_variation: variableProducts.length - withVariation,
     })
   } catch (err: any) {
     console.error('WC sync error:', err)
@@ -83,9 +127,8 @@ export async function POST() {
   }
 }
 
-// GET — статус (скільки зараз в БД)
 export async function GET() {
   const supabase = createServiceClient()
   const { count } = await supabase.from('products').select('*', { count: 'exact', head: true })
-  return NextResponse.json({ products_in_db: count })
+  return NextResponse.json({ products_in_db: count, warehouse: WAREHOUSE })
 }
