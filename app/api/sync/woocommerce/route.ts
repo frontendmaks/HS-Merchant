@@ -53,9 +53,18 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   if (p.weight) attributes['Вага'] = `${p.weight} кг`
 
   const price = (variation?.price) ?? (parseFloat(p.regular_price || p.price || '0') || 0)
-  const stock = variation !== undefined
-    ? (variation?.stock ?? null)
-    : (p.manage_stock ? (p.stock_quantity ?? 0) : null)
+
+  let stock: number | null
+  if (variation === undefined) {
+    // Не змінний товар — беремо з рівня продукту
+    stock = p.manage_stock ? (p.stock_quantity ?? 0) : null
+  } else if (variation === null) {
+    // Змінний товар, але варіацію складу не знайдено → 0
+    stock = 0
+  } else {
+    // Знайшли варіацію складу
+    stock = variation.stock
+  }
 
   return {
     external_id: String(p.id),
