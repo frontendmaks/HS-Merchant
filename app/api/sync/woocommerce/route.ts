@@ -40,6 +40,14 @@ async function fetchWarehouseVariation(productId: number): Promise<{ price: numb
   }
 }
 
+function extractWeight(name: string): string | null {
+  // Шукаємо число + одиниця (г, кг, мл, л)
+  // Виключаємо: в/г, н/г, 1/г (гатунок), 14б (цифра+буква без пробілу)
+  const match = name.match(/(?<![/а-яА-ЯіІїЇєЄa-zA-Z])(\d+(?:[.,]\d+)?)\s*(кг|мл|л(?!а)|г)(?![а-яА-ЯіІїЇєЄa-zA-Z/\d])/)
+  if (!match) return null
+  return `${match[1]} ${match[2]}`
+}
+
 function extractBrand(name: string): string {
   // Підтримуємо кирилицю ТМ і латиницю TM, різні типи лапок
   const match = name.match(/[ТT][МM]\s+["'"«„"]([^"'"»",]+)/)
@@ -56,7 +64,9 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
     if (name.includes('Storage') || name.includes('Склад')) continue
     if (attr.options?.length) attributes[name] = attr.options.join(', ')
   }
-  if (p.weight) attributes['Вага'] = `${p.weight} кг`
+  // Вага з назви (безпечний regex, ігнорує в/г, 1/г тощо)
+  const weight = extractWeight(p.name)
+  if (weight) attributes['Вага'] = weight
 
   // Перша категорія = головна
   const category_name = p.categories?.[0]?.name ?? null
