@@ -52,7 +52,7 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   }
   if (p.weight) attributes['Вага'] = `${p.weight} кг`
 
-  const price = variation?.price ?? parseFloat(p.regular_price || p.price || '0') || 0
+  const price = (variation?.price) ?? (parseFloat(p.regular_price || p.price || '0') || 0)
   const stock = variation !== undefined
     ? (variation?.stock ?? null)
     : (p.manage_stock ? (p.stock_quantity ?? 0) : null)
