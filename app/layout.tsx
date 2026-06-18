@@ -9,6 +9,10 @@ const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-mono' })
 export const metadata: Metadata = {
   title: 'HS Merchant',
   description: 'Агрегатор XML фідів для маркетплейсів',
+  icons: {
+    icon: '/favicon.svg',
+    shortcut: '/favicon.svg',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

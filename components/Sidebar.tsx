@@ -17,7 +17,7 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="px-6 py-5 border-b border-zinc-800">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded bg-red-600 flex items-center justify-center text-white font-bold text-sm">ГС</div>
+          <img src="/logo.svg" alt="Галицька Свіжина" className="w-9 h-9 rounded-full" />
           <div>
             <div className="text-white font-semibold text-sm leading-tight">HS Merchant</div>
             <div className="text-zinc-500 text-xs">Агрегатор фідів</div>
