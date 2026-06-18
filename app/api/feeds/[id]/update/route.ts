@@ -10,12 +10,12 @@ export async function POST(
 
   try {
     const body = await request.json()
-    const { status, settings, overrides } = body
+    const { name, slug, status, settings, overrides } = body
 
     // Update feed settings
     const { error: feedError } = await supabase
       .from('feeds')
-      .update({ status, settings, updated_at: new Date().toISOString() })
+      .update({ name, slug, status, settings, updated_at: new Date().toISOString() })
       .eq('id', id)
 
     if (feedError) throw feedError

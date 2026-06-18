@@ -50,6 +50,8 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
 
+  const [feedName, setFeedName] = useState(feed.name)
+  const [feedSlug, setFeedSlug] = useState(feed.slug)
   const [status, setStatus] = useState(feed.status)
   const [trigger, setTrigger] = useState(feed.settings?.trigger ?? 'manual')
   const [cronExpr, setCronExpr] = useState(feed.settings?.cron ?? '0 * * * *')
@@ -101,7 +103,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
   const selectAllVisible = () => {
     const updates: Record<string, Override> = {}
-    filteredProducts.slice(0, 500).forEach(p => {
+    filteredProducts.forEach(p => {
       updates[p.id] = { ...overrides[p.id], is_active: true }
     })
     setOverrides(prev => ({ ...prev, ...updates }))
@@ -109,7 +111,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
   const deselectAllVisible = () => {
     const updates: Record<string, Override> = {}
-    filteredProducts.slice(0, 500).forEach(p => {
+    filteredProducts.forEach(p => {
       updates[p.id] = { ...overrides[p.id], is_active: false }
     })
     setOverrides(prev => ({ ...prev, ...updates }))
@@ -123,6 +125,8 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          name: feedName,
+          slug: feedSlug,
           status,
           settings: {
             trigger,
@@ -159,10 +163,23 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   return (
     <div className="space-y-6">
       {/* Top bar */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-white">{feed.name}</h1>
-          <div className="text-xs text-zinc-500 font-mono mt-1">/api/feeds/{feed.slug}</div>
+      <div className="flex items-center justify-between gap-6">
+        <div className="flex-1 min-w-0 space-y-1">
+          <input
+            value={feedName}
+            onChange={e => setFeedName(e.target.value)}
+            className="text-2xl font-semibold text-white bg-transparent border-b border-transparent hover:border-zinc-700 focus:border-red-500 focus:outline-none w-full transition-colors"
+            placeholder="Назва фіду"
+          />
+          <div className="flex items-center gap-1 text-xs text-zinc-500 font-mono">
+            <span className="text-zinc-600">/api/feeds/</span>
+            <input
+              value={feedSlug}
+              onChange={e => setFeedSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
+              className="bg-transparent border-b border-transparent hover:border-zinc-700 focus:border-red-500 focus:outline-none text-zinc-400 transition-colors"
+              placeholder="slug"
+            />
+          </div>
         </div>
         <div className="flex gap-3">
           <button
