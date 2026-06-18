@@ -1,5 +1,5 @@
 'use client'
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 
 type Product = {
@@ -38,22 +38,28 @@ type Props = {
   marketplaces: { id: string; name: string }[]
 }
 
+type Override = {
+  custom_price?: string
+  custom_stock?: string
+  is_active?: boolean
+}
+
 export default function FeedEditor({ feed, feedProducts, allProducts, categories, marketplaces }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
 
-  // Settings state
   const [status, setStatus] = useState(feed.status)
   const [trigger, setTrigger] = useState(feed.settings?.trigger ?? 'manual')
   const [cronExpr, setCronExpr] = useState(feed.settings?.cron ?? '0 * * * *')
   const [filterType, setFilterType] = useState(feed.settings?.filter?.type ?? 'all')
   const [selectedCategories, setSelectedCategories] = useState<string[]>(feed.settings?.filter?.categories ?? [])
 
-  // Products overrides
-  const fpMap = new Map(feedProducts.map(fp => [fp.product_id, fp]))
-  const [overrides, setOverrides] = useState<Record<string, { custom_price?: string; custom_stock?: string; is_active?: boolean }>>(
+  // Build overrides map — only from saved feed_products, everything else defaults to inactive
+  const fpMap = useMemo(() => new Map(feedProducts.map(fp => [fp.product_id, fp])), [feedProducts])
+
+  const [overrides, setOverrides] = useState<Record<string, Override>>(
     Object.fromEntries(feedProducts.map(fp => [fp.product_id, {
       custom_price: fp.custom_price != null ? String(fp.custom_price) : '',
       custom_stock: fp.custom_stock != null ? String(fp.custom_stock) : '',
@@ -63,8 +69,8 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
   const [productSearch, setProductSearch] = useState('')
 
-  // Filtered products based on settings
-  const filteredProducts = allProducts.filter(p => {
+  // Filtered products list based on category filter setting
+  const filteredProducts = useMemo(() => allProducts.filter(p => {
     if (filterType === 'categories' && selectedCategories.length > 0) {
       if (!p.category_name || !selectedCategories.includes(p.category_name)) return false
     }
@@ -72,7 +78,13 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
       return p.name.toLowerCase().includes(productSearch.toLowerCase())
     }
     return true
-  })
+  }), [allProducts, filterType, selectedCategories, productSearch])
+
+  // Count actually selected (active) products across ALL products
+  const selectedCount = useMemo(() =>
+    allProducts.filter(p => overrides[p.id]?.is_active === true).length,
+    [allProducts, overrides]
+  )
 
   const toggleCategory = (cat: string) => {
     setSelectedCategories(prev =>
@@ -80,16 +92,33 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     )
   }
 
-  const setOverride = (productId: string, field: string, value: string | boolean) => {
+  const setOverride = (productId: string, field: keyof Override, value: string | boolean) => {
     setOverrides(prev => ({
       ...prev,
       [productId]: { ...prev[productId], [field]: value }
     }))
   }
 
+  const selectAllVisible = () => {
+    const updates: Record<string, Override> = {}
+    filteredProducts.slice(0, 500).forEach(p => {
+      updates[p.id] = { ...overrides[p.id], is_active: true }
+    })
+    setOverrides(prev => ({ ...prev, ...updates }))
+  }
+
+  const deselectAllVisible = () => {
+    const updates: Record<string, Override> = {}
+    filteredProducts.slice(0, 500).forEach(p => {
+      updates[p.id] = { ...overrides[p.id], is_active: false }
+    })
+    setOverrides(prev => ({ ...prev, ...updates }))
+  }
+
   const handleSave = async () => {
     setSaving(true)
     try {
+      // Only send overrides that have been explicitly set
       const res = await fetch(`/api/feeds/${feed.id}/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -121,10 +150,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const handleGenerate = async () => {
     setGenerating(true)
     try {
-      const res = await fetch(`/api/feeds/${feed.slug}`)
-      if (res.ok) {
-        window.open(`/api/feeds/${feed.slug}`, '_blank')
-      }
+      window.open(`/api/feeds/${feed.slug}`, '_blank')
     } finally {
       setGenerating(false)
     }
@@ -144,7 +170,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             disabled={generating}
             className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-sm rounded-lg transition-colors"
           >
-            {generating ? '⏳' : '↗'} Переглянути XML
+            ↗ Переглянути XML
           </button>
           <button
             onClick={handleSave}
@@ -162,19 +188,17 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           {/* Status */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
             <h2 className="text-sm font-semibold text-white mb-4">Налаштування фіду</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-zinc-500 mb-1 block">Статус</label>
-                <select
-                  value={status}
-                  onChange={e => setStatus(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-500"
-                >
-                  <option value="active">Активний</option>
-                  <option value="draft">Чернетка</option>
-                  <option value="inactive">Вимкнений</option>
-                </select>
-              </div>
+            <div>
+              <label className="text-xs text-zinc-500 mb-1 block">Статус</label>
+              <select
+                value={status}
+                onChange={e => setStatus(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-500"
+              >
+                <option value="active">Активний</option>
+                <option value="draft">Чернетка</option>
+                <option value="inactive">Вимкнений</option>
+              </select>
             </div>
           </div>
 
@@ -183,14 +207,12 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             <h2 className="text-sm font-semibold text-white mb-4">⏱ Тригер оновлення</h2>
             <div className="space-y-3">
               {[
-                { value: 'manual', label: '🖱 Вручну', desc: 'Оновлення тільки при запиті' },
-                { value: 'scheduled', label: '⏱ За розкладом', desc: 'Автоматично по cron' },
-                { value: 'webhook', label: '🔗 Вебхук', desc: 'При зміні товарів у WC' },
+                { value: 'manual', label: '🖱 Вручну', desc: 'Оновлення тільки при відкритті URL' },
+                { value: 'scheduled', label: '⏱ За розкладом', desc: 'Кешується автоматично по cron' },
+                { value: 'webhook', label: '🔗 Вебхук', desc: 'Тригер при зміні товарів у WC' },
               ].map(opt => (
                 <label key={opt.value} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                  trigger === opt.value
-                    ? 'border-red-600 bg-red-950/30'
-                    : 'border-zinc-800 hover:border-zinc-600'
+                  trigger === opt.value ? 'border-red-600 bg-red-950/30' : 'border-zinc-800 hover:border-zinc-600'
                 }`}>
                   <input
                     type="radio"
@@ -216,7 +238,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-red-500"
                     placeholder="0 * * * *"
                   />
-                  <div className="mt-1 flex flex-wrap gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     {[
                       ['Щогодини', '0 * * * *'],
                       ['Кожні 6год', '0 */6 * * *'],
@@ -236,9 +258,9 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               )}
 
               {trigger === 'webhook' && (
-                <div className="text-xs text-zinc-500 bg-zinc-800 rounded-lg p-3 mt-2">
-                  Додай у WooCommerce → Налаштування → Вебхуки:<br />
-                  <span className="font-mono text-zinc-300">POST https://hs-merchant.vercel.app/api/sync/woocommerce</span>
+                <div className="text-xs text-zinc-500 bg-zinc-800 rounded-lg p-3 mt-2 leading-relaxed">
+                  WooCommerce → Налаштування → Вебхуки → Додати:<br />
+                  <span className="font-mono text-zinc-300 text-[11px]">POST https://hs-merchant.vercel.app/api/sync/woocommerce</span>
                 </div>
               )}
             </div>
@@ -246,16 +268,15 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
           {/* Filter */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-            <h2 className="text-sm font-semibold text-white mb-4">🗂 Фільтр товарів</h2>
+            <h2 className="text-sm font-semibold text-white mb-4">🗂 Фільтр товарів у таблиці</h2>
+            <p className="text-xs text-zinc-600 mb-3">Звужує список товарів праворуч для зручнішого вибору</p>
             <div className="space-y-3">
               {[
-                { value: 'all', label: 'Всі товари', desc: 'Включати всі активні товари' },
-                { value: 'categories', label: 'За категоріями', desc: 'Обрати конкретні категорії' },
+                { value: 'all', label: 'Всі товари', desc: 'Показувати весь каталог' },
+                { value: 'categories', label: 'За категоріями', desc: 'Тільки обрані категорії' },
               ].map(opt => (
                 <label key={opt.value} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                  filterType === opt.value
-                    ? 'border-red-600 bg-red-950/30'
-                    : 'border-zinc-800 hover:border-zinc-600'
+                  filterType === opt.value ? 'border-red-600 bg-red-950/30' : 'border-zinc-800 hover:border-zinc-600'
                 }`}>
                   <input
                     type="radio"
@@ -295,18 +316,43 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
         {/* === PRODUCTS TABLE === */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col">
-          <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-white shrink-0">
-              Товари у фіді
-              <span className="ml-2 text-xs text-zinc-500 font-normal">{filteredProducts.length} шт</span>
-            </h2>
-            <input
-              type="text"
-              placeholder="Пошук..."
-              value={productSearch}
-              onChange={e => setProductSearch(e.target.value)}
-              className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-red-500 w-44"
-            />
+          {/* Header */}
+          <div className="px-5 py-4 border-b border-zinc-800 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-white">
+                  Товари у фіді
+                </h2>
+                <div className="text-xs text-zinc-500 mt-0.5">
+                  <span className="text-emerald-400 font-medium">{selectedCount}</span> вибрано
+                  <span className="mx-1.5 text-zinc-700">·</span>
+                  {allProducts.length} всього
+                </div>
+              </div>
+              <input
+                type="text"
+                placeholder="Пошук..."
+                value={productSearch}
+                onChange={e => setProductSearch(e.target.value)}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-red-500 w-40"
+              />
+            </div>
+
+            {/* Bulk actions */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={selectAllVisible}
+                className="text-xs px-3 py-1.5 bg-emerald-900/40 hover:bg-emerald-900/60 border border-emerald-800 text-emerald-400 rounded-lg transition-colors"
+              >
+                ✓ Вибрати всі видимі ({filteredProducts.length})
+              </button>
+              <button
+                onClick={deselectAllVisible}
+                className="text-xs px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 rounded-lg transition-colors"
+              >
+                ✕ Зняти всі видимі
+              </button>
+            </div>
           </div>
 
           {/* Column headers */}
@@ -317,17 +363,19 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Залишок</div>
           </div>
 
-          <div className="overflow-y-auto flex-1 max-h-[600px] divide-y divide-zinc-800">
-            {filteredProducts.slice(0, 100).map(p => {
+          <div className="overflow-y-auto flex-1 max-h-[560px] divide-y divide-zinc-800">
+            {filteredProducts.length === 0 && (
+              <div className="py-12 text-center text-zinc-600 text-sm">Немає товарів</div>
+            )}
+            {filteredProducts.slice(0, 500).map(p => {
               const ov = overrides[p.id] ?? {}
-              const isActive = ov.is_active !== undefined ? ov.is_active : true
-              const inFeed = fpMap.has(p.id)
+              // Default: unchecked unless explicitly set to true in feed_products
+              const isActive = ov.is_active === true
 
               return (
                 <div key={p.id} className={`grid grid-cols-[24px_1fr_90px_90px] gap-2 px-5 py-2.5 items-center transition-colors ${
                   isActive ? 'hover:bg-zinc-800/40' : 'opacity-40 hover:bg-zinc-800/20'
                 }`}>
-                  {/* Toggle */}
                   <input
                     type="checkbox"
                     checked={isActive}
@@ -335,13 +383,11 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     className="accent-red-500 cursor-pointer"
                   />
 
-                  {/* Name */}
                   <div className="min-w-0">
                     <div className="text-xs text-zinc-300 truncate">{p.name}</div>
                     <div className="text-xs text-zinc-600">{p.category_name}</div>
                   </div>
 
-                  {/* Custom price */}
                   <div>
                     <input
                       type="number"
@@ -352,7 +398,6 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     />
                   </div>
 
-                  {/* Custom stock */}
                   <div>
                     <input
                       type="number"
@@ -366,6 +411,12 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               )
             })}
           </div>
+
+          {filteredProducts.length > 500 && (
+            <div className="px-5 py-2 border-t border-zinc-800 text-xs text-zinc-600 text-center">
+              Показано 500 з {filteredProducts.length}. Уточніть пошук або категорію.
+            </div>
+          )}
         </div>
       </div>
     </div>

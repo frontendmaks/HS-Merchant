@@ -5,15 +5,23 @@ export const dynamic = 'force-dynamic'
 
 async function getFeeds() {
   const supabase = createServiceClient()
-  const { data } = await supabase
-    .from('feeds')
-    .select(`
-      id, name, slug, status, last_generated_at, updated_at, settings,
-      marketplace:marketplaces(id, name, slug),
-      feed_products(count)
-    `)
-    .order('created_at', { ascending: false })
-  return data ?? []
+  const [{ data: feeds }, { data: activeCounts }] = await Promise.all([
+    supabase
+      .from('feeds')
+      .select('id, name, slug, status, last_generated_at, updated_at, settings, marketplace:marketplaces(id, name, slug)')
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('feed_products')
+      .select('feed_id')
+      .eq('is_active', true),
+  ])
+
+  const countMap = new Map<string, number>()
+  for (const row of activeCounts ?? []) {
+    countMap.set(row.feed_id, (countMap.get(row.feed_id) ?? 0) + 1)
+  }
+
+  return (feeds ?? []).map(f => ({ ...f, activeProductCount: countMap.get(f.id) ?? 0 }))
 }
 
 function timeAgo(d: string | null) {
@@ -58,7 +66,7 @@ export default async function FeedsPage() {
         )}
         {feeds.map((feed: any) => {
           const trigger = feed.settings?.trigger ?? 'manual'
-          const productCount = feed.feed_products?.[0]?.count ?? 0
+          const productCount = feed.activeProductCount ?? 0
           const filterType = feed.settings?.filter?.type ?? 'all'
 
           return (
