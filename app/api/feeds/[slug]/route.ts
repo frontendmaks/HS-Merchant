@@ -3,11 +3,12 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
+  const { slug } = await params
   const supabase = createServiceClient()
 
-  const { data: feed } = await supabase
+  const { data: feed, error } = await supabase
     .from('feeds')
     .select(`
       *,
@@ -17,11 +18,12 @@ export async function GET(
         product:products(*)
       )
     `)
-    .eq('slug', params.slug)
+    .eq('slug', slug)
     .eq('status', 'active')
     .single()
 
-  if (!feed) {
+  if (error || !feed) {
+    console.error('Feed error:', error)
     return new NextResponse('Feed not found', { status: 404 })
   }
 
@@ -68,7 +70,7 @@ function generateYML(feed: any): string {
 <!DOCTYPE yml_catalog SYSTEM "shops.dtd">
 <yml_catalog date="${new Date().toISOString()}">
   <shop>
-    <name>${escapeXml(feed.marketplace.settings?.company ?? 'Галицька Свіжина')}</name>
+    <name>${escapeXml(feed.marketplace?.settings?.company ?? 'Галицька Свіжина')}</name>
     <company>Галицька Свіжина</company>
     <url>https://halytska-svizhyna.ua</url>
     <currencies>
@@ -82,6 +84,7 @@ function generateYML(feed: any): string {
 }
 
 function escapeXml(str: string): string {
+  if (!str) return ''
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
