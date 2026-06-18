@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 
 const PER_PAGE = 50
 
-const ALLOWED_SORT = ['name', 'price', 'stock', 'status'] as const
+const ALLOWED_SORT = ['name', 'price', 'stock', 'status', 'category_name', 'brand'] as const
 type SortCol = typeof ALLOWED_SORT[number]
 
 async function getProducts(q: string, page: number, sort: SortCol, dir: 'asc' | 'desc') {
@@ -18,7 +18,7 @@ async function getProducts(q: string, page: number, sort: SortCol, dir: 'asc' | 
 
   let query = supabase
     .from('products')
-    .select('id, name, sku, price, stock, status, images, external_id', { count: 'exact' })
+    .select('id, name, sku, price, price_old, stock, status, images, external_id, category_name, brand, attributes', { count: 'exact' })
     .order(sort, { ascending: dir === 'asc', nullsFirst: false })
     .range(from, to)
 
@@ -47,7 +47,7 @@ export default async function ProductsPage({
   }
 
   return (
-    <div className="max-w-6xl">
+    <div className="w-full">
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-white">Товари</h1>
         <p className="text-zinc-500 text-sm mt-1">Каталог синхронізований з WooCommerce</p>
@@ -61,21 +61,16 @@ export default async function ProductsPage({
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
         {/* Table header */}
-        <div className="grid grid-cols-[56px_1fr_120px_110px_90px_90px] gap-4 px-4 py-3 border-b border-zinc-800 bg-zinc-800/50">
+        <div className="grid gap-3 px-4 py-3 border-b border-zinc-800 bg-zinc-800/50"
+          style={{ gridTemplateColumns: '72px 1fr 160px 160px 100px 90px 90px 90px' }}>
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Фото</div>
-          <Suspense>
-            <SortableHeader column="name" label="Назва" />
-          </Suspense>
-          <div className="text-xs text-zinc-500 uppercase tracking-wide">WC ID</div>
-          <Suspense>
-            <SortableHeader column="price" label="Ціна" className="justify-end" />
-          </Suspense>
-          <Suspense>
-            <SortableHeader column="stock" label="Сток" className="justify-end" />
-          </Suspense>
-          <Suspense>
-            <SortableHeader column="status" label="Статус" className="justify-center" />
-          </Suspense>
+          <Suspense><SortableHeader column="name" label="Назва / Артикул" /></Suspense>
+          <Suspense><SortableHeader column="category_name" label="Категорія" /></Suspense>
+          <Suspense><SortableHeader column="brand" label="Бренд" /></Suspense>
+          <Suspense><SortableHeader column="price" label="Ціна" className="justify-end" /></Suspense>
+          <Suspense><SortableHeader column="stock" label="Залишок" className="justify-end" /></Suspense>
+          <div className="text-xs text-zinc-500 uppercase tracking-wide text-center">Вага</div>
+          <Suspense><SortableHeader column="status" label="Статус" className="justify-center" /></Suspense>
         </div>
 
         <div className="divide-y divide-zinc-800">
@@ -90,49 +85,79 @@ export default async function ProductsPage({
             const noPrice = !p.price || Number(p.price) <= 0
             const stockVal = p.stock as number | null
             const zeroStock = stockVal === 0 && p.status === 'active'
+            const attrs = p.attributes as Record<string, string> | null
+            const weight = attrs?.['Вага'] ?? null
 
             return (
               <div
                 key={p.id}
-                className="grid grid-cols-[56px_1fr_120px_110px_90px_90px] gap-4 px-4 py-3 items-center hover:bg-zinc-800/40 transition-colors"
+                className="grid gap-3 px-4 py-2.5 items-center hover:bg-zinc-800/40 transition-colors"
+                style={{ gridTemplateColumns: '72px 1fr 160px 160px 100px 90px 90px 90px' }}
               >
-                {/* Image */}
-                <div className="w-10 h-10 rounded-lg overflow-hidden bg-zinc-800 shrink-0">
+                {/* Image — більша */}
+                <div className="w-14 h-14 rounded-lg overflow-hidden bg-zinc-800 shrink-0">
                   {img ? (
                     <img src={img} alt={p.name} className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-zinc-600">□</div>
+                    <div className="w-full h-full flex items-center justify-center text-zinc-600 text-xl">□</div>
                   )}
                 </div>
 
-                {/* Name */}
+                {/* Name + SKU */}
                 <div className="min-w-0">
-                  <div className="text-sm text-white truncate flex items-center gap-1.5">
-                    <span className="truncate">{p.name}</span>
-                    {noImg && <span title="Немає фото" className="text-amber-500 text-xs shrink-0">📷</span>}
-                    {noPrice && <span title="Немає ціни" className="text-red-500 text-xs shrink-0">₴</span>}
+                  <div className="text-sm text-white leading-snug flex items-start gap-1.5">
+                    <span className="line-clamp-2">{p.name}</span>
+                    <div className="flex gap-1 shrink-0 mt-0.5">
+                      {noImg && <span title="Немає фото" className="text-amber-500 text-xs">📷</span>}
+                      {noPrice && <span title="Немає ціни" className="text-red-500 text-xs">₴</span>}
+                    </div>
                   </div>
-                  <div className="text-xs text-zinc-600 mt-0.5 font-mono">
-                    {p.sku || <span className="text-zinc-700">без артикулу</span>}
+                  <div className="text-xs text-zinc-600 mt-0.5 font-mono flex items-center gap-2">
+                    {p.sku
+                      ? <span>{p.sku}</span>
+                      : <span className="text-zinc-700">без артикулу</span>
+                    }
+                    {p.external_id && (
+                      <a
+                        href={`https://halytska-svizhyna.ua/?p=${p.external_id}`}
+                        target="_blank"
+                        className="text-zinc-600 hover:text-red-400"
+                      >
+                        #{p.external_id} ↗
+                      </a>
+                    )}
                   </div>
                 </div>
 
-                {/* WC ID */}
-                <div>
-                  {p.external_id ? (
-                    <a
-                      href={`https://halytska-svizhyna.ua/?p=${p.external_id}`}
-                      target="_blank"
-                      className="text-xs text-zinc-500 hover:text-red-400 font-mono"
-                    >
-                      #{p.external_id} ↗
-                    </a>
-                  ) : <span className="text-xs text-zinc-700">—</span>}
+                {/* Category */}
+                <div className="text-xs text-zinc-400 truncate">
+                  {p.category_name ?? <span className="text-zinc-700">—</span>}
+                </div>
+
+                {/* Brand */}
+                <div className="text-xs truncate">
+                  {p.brand === 'Галицька Свіжина'
+                    ? <span className="text-red-400">{p.brand}</span>
+                    : <span className="text-zinc-300">{p.brand}</span>
+                  }
                 </div>
 
                 {/* Price */}
-                <div className={`text-sm font-semibold text-right ${noPrice ? 'text-red-500' : 'text-white'}`}>
-                  {noPrice ? '—' : `${Number(p.price).toLocaleString('uk-UA')} ₴`}
+                <div className="text-right">
+                  {noPrice ? (
+                    <span className="text-red-500 text-sm">—</span>
+                  ) : (
+                    <div>
+                      <div className="text-sm font-semibold text-white">
+                        {Number(p.price).toLocaleString('uk-UA')} ₴
+                      </div>
+                      {p.price_old && (
+                        <div className="text-xs text-zinc-600 line-through">
+                          {Number(p.price_old).toLocaleString('uk-UA')} ₴
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Stock */}
@@ -140,10 +165,15 @@ export default async function ProductsPage({
                   {stockVal === null
                     ? <span className="text-zinc-500 text-xs">∞</span>
                     : <>
-                        {stockVal}
+                        {Number(stockVal).toLocaleString('uk-UA', { maximumFractionDigits: 2 })}
                         {zeroStock && <span className="ml-1 text-xs text-red-400">⚠</span>}
                       </>
                   }
+                </div>
+
+                {/* Weight */}
+                <div className="text-xs text-zinc-500 text-center">
+                  {weight ?? <span className="text-zinc-700">—</span>}
                 </div>
 
                 {/* Status */}

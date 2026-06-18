@@ -40,6 +40,12 @@ async function fetchWarehouseVariation(productId: number): Promise<{ price: numb
   }
 }
 
+function extractBrand(name: string): string {
+  // Шукаємо ТМ "Назва" або ТМ «Назва»
+  const match = name.match(/ТМ\s+["""«]([^"""»,]+)["""»]/)
+  return match ? match[1].trim() : 'Галицька Свіжина'
+}
+
 function mapProduct(p: any, variation?: { price: number | null; stock: number | null } | null) {
   const images = (p.images ?? []).map((img: any) => img.src).filter(Boolean)
 
@@ -51,6 +57,12 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
     if (attr.options?.length) attributes[name] = attr.options.join(', ')
   }
   if (p.weight) attributes['Вага'] = `${p.weight} кг`
+
+  // Перша категорія = головна
+  const category_name = p.categories?.[0]?.name ?? null
+
+  // Бренд з назви або дефолт
+  const brand = extractBrand(p.name)
 
   const price = (variation?.price) ?? (parseFloat(p.regular_price || p.price || '0') || 0)
 
@@ -79,7 +91,9 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
     status: 'active' as const,
     images,
     attributes,
-    vendor: 'Галицька Свіжина',
+    vendor: brand,
+    brand,
+    category_name,
   }
 }
 
