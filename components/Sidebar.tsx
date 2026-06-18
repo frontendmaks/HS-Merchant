@@ -7,6 +7,7 @@ const nav = [
   { href: '/products',     label: 'Товари',        icon: '◈' },
   { href: '/feeds',        label: 'Фіди',          icon: '⊞' },
   { href: '/marketplaces', label: 'Маркетплейси',  icon: '◎' },
+  { href: '/orders',       label: 'Замовлення',    icon: '◷' },
 ]
 
 export default function Sidebar() {
