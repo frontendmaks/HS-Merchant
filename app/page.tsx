@@ -2,7 +2,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 
 async function getStats() {
   const supabase = createServiceClient()
-  const [products, feeds, marketplaces] = await Promise.all([
+  const [products, feeds, marketplaces, changelog] = await Promise.all([
     supabase.from('products').select('id, name, status, stock, price, description, images, sku, updated_at'),
     supabase.from('feeds').select(`
       id, status, slug, updated_at,
@@ -10,6 +10,7 @@ async function getStats() {
       feed_products(count)
     `, { count: 'exact' }),
     supabase.from('marketplaces').select('id, name, slug', { count: 'exact' }),
+    supabase.from('product_changelog').select('*').order('created_at', { ascending: false }).limit(8),
   ])
 
   const allProducts = products.data ?? []
@@ -37,11 +38,6 @@ async function getStats() {
   // Нульовий сток
   const zeroStock = allProducts.filter(p => p.status === 'active' && p.stock === 0)
 
-  // Останні зміни
-  const recentlyUpdated = [...allProducts]
-    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-    .slice(0, 5)
-
   return {
     totalProducts: allProducts.length,
     activeProducts: allProducts.filter(p => p.status === 'active').length,
@@ -51,7 +47,7 @@ async function getStats() {
     feeds: feeds.data ?? [],
     problematic,
     zeroStock,
-    recentlyUpdated,
+    changelog: changelog.data ?? [],
   }
 }
 
@@ -235,7 +231,7 @@ export default async function Dashboard() {
         </div>
       </div>
 
-      {/* Recently updated products */}
+      {/* Changelog */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl">
         <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -245,19 +241,66 @@ export default async function Dashboard() {
           <a href="/products" className="text-xs text-zinc-500 hover:text-red-400">Всі товари →</a>
         </div>
         <div className="divide-y divide-zinc-800">
-          {stats.recentlyUpdated.map(p => (
-            <div key={p.id} className="px-6 py-3 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${p.status === 'active' ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
-                <div className="text-sm text-zinc-300 truncate">{p.name}</div>
-                {p.sku && <div className="text-xs text-zinc-600 font-mono shrink-0">{p.sku}</div>}
-              </div>
-              <div className="flex items-center gap-4 shrink-0">
-                <div className="text-sm text-white font-medium">{p.price} ₴</div>
-                <div className="text-xs text-zinc-500">{timeAgo(p.updated_at)}</div>
-              </div>
+          {stats.changelog.length === 0 && (
+            <div className="px-6 py-8 text-center text-zinc-600 text-sm">
+              Змін ще немає — вони з'являться після редагування товарів
             </div>
-          ))}
+          )}
+          {stats.changelog.map((entry: any) => {
+            const isCreated = entry.change_type === 'created'
+            const isDeleted = entry.change_type === 'deleted'
+            const isUpdated = entry.change_type === 'updated'
+            const fields: Record<string, { old: string; new: string }> = entry.changed_fields ?? {}
+
+            const fieldLabels: Record<string, string> = {
+              name: 'Назва', price: 'Ціна', stock: 'Сток',
+              status: 'Статус', description: 'Опис', images: 'Фото', sku: 'Артикул',
+            }
+
+            return (
+              <div key={entry.id} className="px-6 py-3.5 flex items-start gap-4">
+                {/* Icon */}
+                <div className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0 ${
+                  isCreated ? 'bg-emerald-950 text-emerald-400' :
+                  isDeleted ? 'bg-red-950 text-red-400' :
+                  'bg-blue-950 text-blue-400'
+                }`}>
+                  {isCreated ? '+' : isDeleted ? '×' : '↻'}
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm text-white font-medium truncate">{entry.product_name}</span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${
+                      isCreated ? 'bg-emerald-950 text-emerald-400' :
+                      isDeleted ? 'bg-red-950 text-red-400' :
+                      'bg-blue-950 text-blue-400'
+                    }`}>
+                      {isCreated ? 'додано' : isDeleted ? 'видалено' : 'змінено'}
+                    </span>
+                  </div>
+
+                  {/* Changed fields */}
+                  {isUpdated && Object.keys(fields).length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-2">
+                      {Object.entries(fields).map(([key, val]) => (
+                        <div key={key} className="text-xs text-zinc-500 bg-zinc-800 rounded px-2 py-1">
+                          <span className="text-zinc-400">{fieldLabels[key] ?? key}:</span>{' '}
+                          <span className="line-through text-zinc-600">{val.old ?? '—'}</span>
+                          {' → '}
+                          <span className="text-zinc-300">{val.new ?? '—'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Time */}
+                <div className="text-xs text-zinc-600 shrink-0 mt-0.5">{timeAgo(entry.created_at)}</div>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
