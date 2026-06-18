@@ -41,8 +41,8 @@ async function fetchWarehouseVariation(productId: number): Promise<{ price: numb
 }
 
 function extractBrand(name: string): string {
-  // Шукаємо ТМ "Назва" або ТМ «Назва»
-  const match = name.match(/ТМ\s+["""«]([^"""»,]+)["""»]/)
+  // Підтримуємо кирилицю ТМ і латиницю TM, різні типи лапок
+  const match = name.match(/[ТT][МM]\s+["'"«„"]([^"'"»",]+)/)
   return match ? match[1].trim() : 'Галицька Свіжина'
 }
 
