@@ -1,15 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+
+async function getTriggeredBy(): Promise<string | null> {
+  try {
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
+    )
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return null
+    const service = createServiceClient()
+    const { data } = await service.from('profiles').select('full_name,email').eq('id', user.id).single()
+    return data?.full_name || data?.email || user.email || null
+  } catch { return null }
+}
 
 export async function POST(req: NextRequest) {
   const start = Date.now()
   const base = process.env.NEXT_PUBLIC_SITE_URL || `https://${req.headers.get('host')}`
   const supabase = createServiceClient()
-  let triggeredBy: string | null = null
-  try {
-    const body = await req.json().catch(() => ({}))
-    triggeredBy = body.triggered_by ?? null
-  } catch {}
+  const triggeredBy = await getTriggeredBy()
 
   let maudauSynced = 0
   let rozetkasynced = 0

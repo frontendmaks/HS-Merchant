@@ -1,5 +1,23 @@
 import { createServiceClient } from '@/lib/supabase/service'
+import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
+
+async function getTriggeredBy(): Promise<string | null> {
+  try {
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
+    )
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return null
+    const service = createServiceClient()
+    const { data } = await service.from('profiles').select('full_name,email').eq('id', user.id).single()
+    return data?.full_name || data?.email || user.email || null
+  } catch { return null }
+}
 
 const WC_URL = process.env.WC_URL!
 const CK = process.env.WC_CONSUMER_KEY!
@@ -110,13 +128,7 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
 export async function POST(request: Request) {
   const startedAt = Date.now()
   const isCron = request.headers.get('x-cron') === '1'
-  let triggeredBy: string | null = null
-  if (!isCron) {
-    try {
-      const body = await request.json().catch(() => ({}))
-      triggeredBy = body.triggered_by ?? null
-    } catch {}
-  }
+  const triggeredBy = isCron ? null : await getTriggeredBy()
 
   try {
     const supabase = createServiceClient()
