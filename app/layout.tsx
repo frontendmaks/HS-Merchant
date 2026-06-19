@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import Sidebar from '@/components/Sidebar'
+import MainWrapper from '@/components/MainWrapper'
 
 const geist = Geist({ subsets: ['latin'], variable: '--font-geist' })
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-mono' })
@@ -21,9 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${geist.variable} ${geistMono.variable} antialiased bg-zinc-950`}>
         <div className="flex min-h-screen">
           <Sidebar />
-          <main className="flex-1 ml-60 p-4 min-w-0 overflow-x-hidden">
-            {children}
-          </main>
+          <MainWrapper>{children}</MainWrapper>
         </div>
       </body>
     </html>

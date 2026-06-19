@@ -52,6 +52,8 @@ export default function Sidebar() {
 
   const visibleNav = nav.filter(item => !item.adminOnly || profile?.role === 'admin')
 
+  if (path === '/login') return null
+
   return (
     <aside className="fixed top-0 left-0 h-screen w-60 bg-zinc-900 border-r border-zinc-800 flex flex-col">
       {/* Logo */}
