@@ -6,7 +6,6 @@ const nav = [
   { href: '/',             label: 'Дашборд',       icon: '▦' },
   { href: '/products',     label: 'Товари',         icon: '◈' },
   { href: '/feeds',        label: 'Фіди',           icon: '⊞' },
-  { href: '/marketplaces', label: 'Маркетплейси',   icon: '◎' },
   { href: '/syncs',        label: 'Синхронізації',  icon: '↻' },
   { href: '/orders',       label: 'Замовлення',     icon: '◷' },
 ]

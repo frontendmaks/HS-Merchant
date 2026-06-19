@@ -217,11 +217,12 @@ export default function OrderRow(props: OrderRowProps) {
         <input
           type="text"
           value={ttnDraft}
-          disabled={ttnLoading}
+          disabled={ttnLoading || isTerminal}
           onChange={e => setTtnDraft(e.target.value)}
           onBlur={handleTtnBlur}
-          className="bg-zinc-800 text-white border border-zinc-700 rounded px-1 py-0.5 text-xs font-mono w-full disabled:opacity-50"
+          className="bg-zinc-800 text-white border border-zinc-700 rounded px-1 py-0.5 text-xs font-mono w-full disabled:opacity-50 read-only:cursor-default"
           placeholder="ТТН"
+          readOnly={isTerminal}
         />
         {ttnLoading && <div className="text-zinc-500 text-xs mt-0.5">Збереження...</div>}
         {ttnError && <div className="text-red-400 text-xs mt-0.5">{ttnError}</div>}
