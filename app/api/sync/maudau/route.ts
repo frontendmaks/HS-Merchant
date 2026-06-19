@@ -16,26 +16,16 @@ const STATUS_MAP: Record<string, string> = {
 }
 
 async function getJwt(): Promise<string> {
-  // spec: POST /login (not /v1/merchant_public_api/login)
-  const res = await fetch(`${BASE}/login`, {
+  const res = await fetch(`${BASE}/v1/merchant_public_api/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: LOGIN, password: PASSWORD }),
   })
-  if (!res.ok) {
-    // fallback: try the /v1/merchant_public_api/login path
-    const res2 = await fetch(`${BASE}/v1/merchant_public_api/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: LOGIN, password: PASSWORD }),
-    })
-    if (!res2.ok) throw new Error(`MauDau login failed: ${res2.status}`)
-    const d2 = await res2.json()
-    return (d2.data?.jwt ?? d2.jwt) as string
-  }
+  if (!res.ok) throw new Error(`MauDau login failed: ${res.status}`)
   const data = await res.json()
-  // spec: response is {data: {jwt: "..."}}
-  return (data.data?.jwt ?? data.jwt) as string
+  const jwt = data.data?.jwt ?? data.jwt
+  if (!jwt) throw new Error('MauDau login: no JWT in response')
+  return jwt as string
 }
 
 // safely extract a string from a value that might be an object

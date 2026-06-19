@@ -23,7 +23,10 @@ export async function GET() {
     const reasons: { id: number; name: string }[] =
       data?.data ?? data?.reasons ?? (Array.isArray(data) ? data : [])
 
-    return NextResponse.json({ reasons })
+    return NextResponse.json(
+      { reasons },
+      { headers: { 'Cache-Control': 's-maxage=3600, stale-while-revalidate=86400' } },
+    )
   } catch (e) {
     return NextResponse.json(
       { reasons: [], error: e instanceof Error ? e.message : String(e) },
