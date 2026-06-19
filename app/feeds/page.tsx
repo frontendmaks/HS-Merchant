@@ -44,7 +44,7 @@ export default async function FeedsPage() {
   const feeds = await getFeeds()
 
   return (
-    <div className="max-w-5xl">
+    <div className="w-full">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-white">XML Фіди</h1>
