@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { getMaudauJwt } from '@/lib/maudau'
 
 const BASE = process.env.MAUDAU_BASE!
-const LOGIN = process.env.MAUDAU_LOGIN!
-const PASSWORD = process.env.MAUDAU_PASSWORD!
 
 const STATUS_MAP: Record<string, string> = {
   new_order: 'Нове',
@@ -15,18 +14,6 @@ const STATUS_MAP: Record<string, string> = {
   canceled: 'Скасовано',
 }
 
-async function getJwt(): Promise<string> {
-  const res = await fetch(`${BASE}/v1/merchant_public_api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: LOGIN, password: PASSWORD }),
-  })
-  if (!res.ok) throw new Error(`MauDau login failed: ${res.status}`)
-  const data = await res.json()
-  const jwt = data.data?.jwt ?? data.jwt
-  if (!jwt) throw new Error('MauDau login: no JWT in response')
-  return jwt as string
-}
 
 // safely extract a string from a value that might be an object
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -127,7 +114,7 @@ async function fetchAllPages(jwt: string, queryParam: string): Promise<Map<strin
 export async function POST() {
   try {
     const supabase = createServiceClient()
-    const jwt = await getJwt()
+    const jwt = await getMaudauJwt()
 
     const now = new Date()
     // created_from = start of current year (covers all months, not just current)

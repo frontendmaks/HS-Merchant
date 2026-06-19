@@ -1,15 +1,5 @@
 import { NextResponse } from 'next/server'
-
-async function getMaudauJwt(): Promise<string> {
-  const res = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: process.env.MAUDAU_LOGIN, password: process.env.MAUDAU_PASSWORD }),
-  })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await res.json()
-  return data.data?.jwt ?? data.jwt
-}
+import { getMaudauJwt } from '@/lib/maudau'
 
 export async function GET() {
   try {

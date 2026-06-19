@@ -1,28 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-
-async function getMaudauJwt(): Promise<string> {
-  const res = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: process.env.MAUDAU_LOGIN, password: process.env.MAUDAU_PASSWORD }),
-  })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await res.json()
-  return data.data?.jwt ?? data.jwt
-}
-
-async function patchOrPutMaudau(numericId: string, body: object, jwt: string): Promise<void> {
-  const url = `${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` }
-  const payload = JSON.stringify(body)
-
-  const patch = await fetch(url, { method: 'PATCH', headers, body: payload })
-  if (!patch.ok) {
-    const put = await fetch(url, { method: 'PUT', headers, body: payload })
-    if (!put.ok) throw new Error(`MauDau TTN update failed: ${put.status}`)
-  }
-}
+import { getMaudauJwt, patchMaudauOrder } from '@/lib/maudau'
 
 interface RozetkaStatusEntry {
   child_id: number
@@ -84,10 +62,10 @@ export async function PATCH(
       const numericId = external_id.replace(/^MD-/, '')
       const jwt = await getMaudauJwt()
 
-      try { await patchOrPutMaudau(numericId, { status: 'accepted' }, jwt) } catch { /* continue */ }
-      try { await patchOrPutMaudau(numericId, { status: 'approved' }, jwt) } catch { /* continue */ }
+      try { await patchMaudauOrder(numericId, { status: 'accepted' }, jwt) } catch { /* continue */ }
+      try { await patchMaudauOrder(numericId, { status: 'approved' }, jwt) } catch { /* continue */ }
       // Main step — throw on failure
-      await patchOrPutMaudau(numericId, { ttn, status: 'delivering' }, jwt)
+      await patchMaudauOrder(numericId, { ttn, status: 'delivering' }, jwt)
     } else if (platform === 'rozetka') {
       // Spec: chain 1→26→2, then set TTN + advance to 3
       const numericId = external_id.replace(/^RZ-/, '')

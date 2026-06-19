@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { getMaudauJwt, patchMaudauOrder } from '@/lib/maudau'
 
 const MAUDAU_STATUS_MAP: Record<string, string> = {
   'Нове': 'new_order',
@@ -9,29 +10,6 @@ const MAUDAU_STATUS_MAP: Record<string, string> = {
   'Прибуло': 'arrived',
   'Доставлено': 'completed',
   'Скасовано': 'canceled',
-}
-
-async function getMaudauJwt(): Promise<string> {
-  const res = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: process.env.MAUDAU_LOGIN, password: process.env.MAUDAU_PASSWORD }),
-  })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await res.json()
-  return data.data?.jwt ?? data.jwt
-}
-
-async function patchOrPutMaudau(numericId: string, body: object, jwt: string): Promise<void> {
-  const url = `${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` }
-  const payload = JSON.stringify(body)
-
-  const patch = await fetch(url, { method: 'PATCH', headers, body: payload })
-  if (!patch.ok) {
-    const put = await fetch(url, { method: 'PUT', headers, body: payload })
-    if (!put.ok) throw new Error(`MauDau update failed: ${put.status}`)
-  }
 }
 
 export async function PATCH(
@@ -69,13 +47,13 @@ export async function PATCH(
       if (apiStatus === 'delivering') {
         // Mandatory intermediate step per spec — ignore errors and continue
         try {
-          await patchOrPutMaudau(numericId, { status: 'approved' }, jwt)
+          await patchMaudauOrder(numericId, { status: 'approved' }, jwt)
         } catch {
           // intentionally swallowed
         }
       }
 
-      await patchOrPutMaudau(numericId, { status: apiStatus }, jwt)
+      await patchMaudauOrder(numericId, { status: apiStatus }, jwt)
     } else if (platform === 'rozetka') {
       const numericId = external_id.replace(/^RZ-/, '')
 

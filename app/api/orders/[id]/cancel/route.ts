@@ -1,20 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { getMaudauJwt } from '@/lib/maudau'
 
 const ROZETKA_CANCEL_IDS = new Set([11, 12, 13, 15, 16, 17, 18, 19, 24, 25, 28, 29, 30, 31, 40, 42, 44, 45, 50])
 // IDs considered "in-progress" or "completed" — not valid cancels
 const ROZETKA_ACTIVE_IDS = new Set([1, 2, 3, 4, 5, 6, 7, 20, 26, 52, 54, 55])
-
-async function getMaudauJwt(): Promise<string> {
-  const res = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: process.env.MAUDAU_LOGIN, password: process.env.MAUDAU_PASSWORD }),
-  })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = await res.json()
-  return data.data?.jwt ?? data.jwt
-}
 
 export async function PATCH(
   req: NextRequest,
@@ -60,15 +50,8 @@ export async function PATCH(
       const body: Record<string, unknown> = { status: 'canceled' }
       if (match) body.cancellation_reason_id = match.id
 
-      const url = `${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`
-      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` }
-      const payload = JSON.stringify(body)
-
-      const patch = await fetch(url, { method: 'PATCH', headers, body: payload })
-      if (!patch.ok) {
-        const put = await fetch(url, { method: 'PUT', headers, body: payload })
-        if (!put.ok) throw new Error(`MauDau cancel failed: ${put.status}`)
-      }
+      const { patchMaudauOrder } = await import('@/lib/maudau')
+      await patchMaudauOrder(numericId, body, jwt)
     } else if (platform === 'rozetka') {
       const numericId = external_id.replace(/^RZ-/, '')
 
