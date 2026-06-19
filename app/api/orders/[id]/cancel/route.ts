@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 
 const ROZETKA_CANCEL_IDS = new Set([11, 12, 13, 15, 16, 17, 18, 19, 24, 25, 28, 29, 30, 31, 40, 42, 44, 45, 50])
+// IDs considered "in-progress" or "completed" — not valid cancels
+const ROZETKA_ACTIVE_IDS = new Set([1, 2, 3, 4, 5, 6, 7, 20, 26, 52, 54, 55])
 
 async function getMaudauJwt(): Promise<string> {
   const res = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/login`, {
@@ -9,13 +11,21 @@ async function getMaudauJwt(): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: process.env.MAUDAU_LOGIN, password: process.env.MAUDAU_PASSWORD }),
   })
-  const data = await res.json()
-  return data.data.jwt
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await res.json()
+  return data.data?.jwt ?? data.jwt
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const { id } = await params
-  const { reason, platform, external_id } = await req.json()
+  const { reason, platform, external_id } = (await req.json()) as {
+    reason: string
+    platform: string
+    external_id: string
+  }
 
   const supabase = createServiceClient()
   const { error: dbError } = await supabase
@@ -29,45 +39,69 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (platform === 'maudau') {
       const numericId = external_id.replace(/^MD-/, '')
       const jwt = await getMaudauJwt()
+
+      // Fetch cancellation reasons and find best match
       const reasonsRes = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/cancellation_reasons`, {
         headers: { Authorization: `Bearer ${jwt}` },
       })
-      const reasonsData = await reasonsRes.json()
-      const reasons: { id: number; name: string }[] = reasonsData?.data || reasonsData || []
-      const match = reasons.find(r => r.name === reason)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const reasonsData: any = await reasonsRes.json()
+      const reasons: { id: number; name: string }[] = reasonsData?.data ?? reasonsData ?? []
+
+      let match = reasons.find(r => r.name === reason)
+      if (!match) {
+        match = reasons.find(
+          r =>
+            r.name.toLowerCase().includes(reason.toLowerCase()) ||
+            reason.toLowerCase().includes(r.name.toLowerCase()),
+        )
+      }
+
       const body: Record<string, unknown> = { status: 'canceled' }
       if (match) body.cancellation_reason_id = match.id
-      const res = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const put = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-          body: JSON.stringify(body),
-        })
+
+      const url = `${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` }
+      const payload = JSON.stringify(body)
+
+      const patch = await fetch(url, { method: 'PATCH', headers, body: payload })
+      if (!patch.ok) {
+        const put = await fetch(url, { method: 'PUT', headers, body: payload })
         if (!put.ok) throw new Error(`MauDau cancel failed: ${put.status}`)
       }
     } else if (platform === 'rozetka') {
       const numericId = external_id.replace(/^RZ-/, '')
+
       const detailRes = await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
         headers: { Authorization: `Bearer ${process.env.ROZETKA_TOKEN}` },
       })
-      const detail = await detailRes.json()
-      const statusAvailable: { child_id: number; title: string }[] = detail?.data?.status_available || []
-      const cancelOption = statusAvailable.find(s => ROZETKA_CANCEL_IDS.has(s.child_id))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const detail: any = await detailRes.json()
+      const statusAvailable: { child_id: number; title: string }[] =
+        detail?.data?.status_available ?? detail?.content?.status_available ?? []
+
+      // Prefer known cancel IDs; fall back to anything that isn't an active/completed status
+      let cancelOption = statusAvailable.find(s => ROZETKA_CANCEL_IDS.has(s.child_id))
+      if (!cancelOption) {
+        cancelOption = statusAvailable.find(s => !ROZETKA_ACTIVE_IDS.has(s.child_id))
+      }
       if (!cancelOption) throw new Error('No cancel status available for this Rozetka order')
+
       const putRes = await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.ROZETKA_TOKEN}` },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.ROZETKA_TOKEN}`,
+        },
         body: JSON.stringify({ status: cancelOption.child_id }),
       })
       if (!putRes.ok) throw new Error(`Rozetka cancel failed: ${putRes.status}`)
     }
   } catch (e) {
-    return NextResponse.json({ success: false, error: String(e) }, { status: 500 })
+    return NextResponse.json(
+      { success: false, error: e instanceof Error ? e.message : String(e) },
+      { status: 500 },
+    )
   }
 
   return NextResponse.json({ success: true })

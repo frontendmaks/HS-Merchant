@@ -6,8 +6,9 @@ async function getMaudauJwt(): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: process.env.MAUDAU_LOGIN, password: process.env.MAUDAU_PASSWORD }),
   })
-  const data = await res.json()
-  return data.data.jwt
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await res.json()
+  return data.data?.jwt ?? data.jwt
 }
 
 export async function GET() {
@@ -16,9 +17,16 @@ export async function GET() {
     const res = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/cancellation_reasons`, {
       headers: { Authorization: `Bearer ${jwt}` },
     })
-    const data = await res.json()
-    return NextResponse.json(data)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = await res.json()
+
+    const reasons: { id: number; name: string }[] =
+      data?.data ?? data?.reasons ?? (Array.isArray(data) ? data : [])
+
+    return NextResponse.json({ reasons })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return NextResponse.json(
+      { reasons: [], error: e instanceof Error ? e.message : String(e) },
+    )
   }
 }

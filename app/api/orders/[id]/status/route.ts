@@ -17,29 +17,33 @@ async function getMaudauJwt(): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: process.env.MAUDAU_LOGIN, password: process.env.MAUDAU_PASSWORD }),
   })
-  const data = await res.json()
-  return data.data.jwt
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await res.json()
+  return data.data?.jwt ?? data.jwt
 }
 
-async function patchMaudauOrder(numericId: string, body: object, jwt: string) {
-  const res = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) {
-    const put = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-      body: JSON.stringify(body),
-    })
+async function patchOrPutMaudau(numericId: string, body: object, jwt: string): Promise<void> {
+  const url = `${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` }
+  const payload = JSON.stringify(body)
+
+  const patch = await fetch(url, { method: 'PATCH', headers, body: payload })
+  if (!patch.ok) {
+    const put = await fetch(url, { method: 'PUT', headers, body: payload })
     if (!put.ok) throw new Error(`MauDau update failed: ${put.status}`)
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const { id } = await params
-  const { status, platform, external_id } = await req.json()
+  const { status, platform, external_id } = (await req.json()) as {
+    status: string
+    platform: string
+    external_id: string
+  }
 
   const supabase = createServiceClient()
   const { error: dbError } = await supabase
@@ -53,41 +57,63 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (platform === 'maudau') {
       const apiStatus = MAUDAU_STATUS_MAP[status]
       if (!apiStatus) throw new Error(`Unknown MauDau status: ${status}`)
+
+      // Cancellation must go through the cancel route (needs a reason)
+      if (apiStatus === 'canceled') {
+        return NextResponse.json({ success: true })
+      }
+
       const numericId = external_id.replace(/^MD-/, '')
       const jwt = await getMaudauJwt()
+
       if (apiStatus === 'delivering') {
-        await patchMaudauOrder(numericId, { status: 'approved' }, jwt)
+        // Mandatory intermediate step per spec — ignore errors and continue
+        try {
+          await patchOrPutMaudau(numericId, { status: 'approved' }, jwt)
+        } catch {
+          // intentionally swallowed
+        }
       }
-      await patchMaudauOrder(numericId, { status: apiStatus }, jwt)
+
+      await patchOrPutMaudau(numericId, { status: apiStatus }, jwt)
     } else if (platform === 'rozetka') {
       const numericId = external_id.replace(/^RZ-/, '')
+
       const detailRes = await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
         headers: { Authorization: `Bearer ${process.env.ROZETKA_TOKEN}` },
       })
-      const detail = await detailRes.json()
-      const statusAvailable: { child_id: number; title: string }[] = detail?.data?.status_available || []
-      const targetMap: Record<string, string[]> = {
-        'Нове': ['Нове'],
-        'Опрацьовується': ['Опрацьовується'],
-        'Комплектується': ['Комплектується'],
-        'Передано в доставку': ['Передано в доставку'],
-        'Доставляється': ['Доставляється'],
-        'Чекає в пункті': ['Чекає в пункті'],
-        'Доставлено': ['Доставлено'],
-        'Скасовано': ['Скасовано'],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const detail: any = await detailRes.json()
+
+      const statusAvailable: { child_id: number; title: string }[] =
+        detail?.data?.status_available ?? detail?.content?.status_available ?? []
+
+      const match = statusAvailable.find(s =>
+        s.title?.toLowerCase().includes(status.toLowerCase()),
+      )
+
+      if (!match) {
+        return NextResponse.json(
+          { success: false, error: 'Статус недоступний для цього замовлення' },
+          { status: 500 },
+        )
       }
-      const titles = targetMap[status] || [status]
-      const match = statusAvailable.find(s => titles.some(t => s.title?.includes(t)))
-      if (!match) throw new Error(`Status "${status}" not available for this Rozetka order`)
+
       const putRes = await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.ROZETKA_TOKEN}` },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.ROZETKA_TOKEN}`,
+        },
         body: JSON.stringify({ status: match.child_id }),
       })
       if (!putRes.ok) throw new Error(`Rozetka update failed: ${putRes.status}`)
     }
   } catch (e) {
-    return NextResponse.json({ success: false, error: String(e) }, { status: 500 })
+    return NextResponse.json(
+      { success: false, error: e instanceof Error ? e.message : String(e) },
+      { status: 500 },
+    )
   }
 
   return NextResponse.json({ success: true })
