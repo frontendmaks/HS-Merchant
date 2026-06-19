@@ -39,14 +39,14 @@ export default function Sidebar() {
   )
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) { setLoaded(true); return }
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) { setLoaded(true); return }
       const { data } = await supabase
         .from('profiles')
         .select('full_name,email,role')
-        .eq('id', user.id)
+        .eq('id', session.user.id)
         .single()
-      setProfile(data ?? { full_name: null, email: user.email || '', role: 'viewer' })
+      setProfile(data ?? { full_name: null, email: session.user.email || '', role: 'viewer' })
       setLoaded(true)
     })
   }, [])
