@@ -16,14 +16,25 @@ const STATUS_MAP: Record<string, string> = {
 }
 
 async function getJwt(): Promise<string> {
-  const res = await fetch(`${BASE}/v1/merchant_public_api/login`, {
+  // spec: POST /login (not /v1/merchant_public_api/login)
+  const res = await fetch(`${BASE}/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: LOGIN, password: PASSWORD }),
   })
-  if (!res.ok) throw new Error(`MauDau login failed: ${res.status}`)
+  if (!res.ok) {
+    // fallback: try the /v1/merchant_public_api/login path
+    const res2 = await fetch(`${BASE}/v1/merchant_public_api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: LOGIN, password: PASSWORD }),
+    })
+    if (!res2.ok) throw new Error(`MauDau login failed: ${res2.status}`)
+    const d2 = await res2.json()
+    return (d2.data?.jwt ?? d2.jwt) as string
+  }
   const data = await res.json()
-  // API can return either {jwt: "..."} or {data: {jwt: "..."}}
+  // spec: response is {data: {jwt: "..."}}
   return (data.data?.jwt ?? data.jwt) as string
 }
 
@@ -85,15 +96,23 @@ async function fetchAllPages(jwt: string, queryParam: string): Promise<Map<strin
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${jwt}` },
     })
-    if (!res.ok) break
-    const data = await res.json()
+    if (!res.ok) {
+      console.error('MauDau orders fetch failed', res.status, url)
+      break
+    }
+    const raw = await res.json()
+    // API wraps response: {data: {orders: [...]}} or {orders: [...]} or bare array
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const orders: any[] = data.orders || data || []
+    const orders: any[] = raw.data?.orders ?? raw.orders ?? (Array.isArray(raw) ? raw : [])
+    console.log(`MauDau page ${page} [${queryParam}]: ${orders.length} orders`)
     if (!orders.length) break
     for (const o of orders) {
       map.set(String(o.id), orderToRow(o))
     }
-    if (orders.length < 50) break
+    // check pagination via meta or stop when fewer than 50
+    const totalPages: number = raw.data?.meta?.last_page ?? raw.meta?.last_page ?? 0
+    if (totalPages > 0 && page >= totalPages) break
+    if (!totalPages && orders.length < 50) break
     page++
   }
   return map
