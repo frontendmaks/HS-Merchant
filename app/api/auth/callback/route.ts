@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
+      // next=/set-password means this came from an invite flow
       return NextResponse.redirect(`${origin}${next}`)
     }
   }
