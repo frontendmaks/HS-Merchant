@@ -86,7 +86,9 @@ export default async function OrdersPage({
     .gte('order_date', from)
     .lte('order_date', to)
 
-  const orders = allOrders || []
+  const allOrders2 = allOrders || []
+  // Stats cards respect the platform filter
+  const orders = platform ? allOrders2.filter(o => o.platform === platform) : allOrders2
   const total = orders.length
   const delivered = orders.filter(o => o.status === 'Доставлено')
   const canceled = orders.filter(o => o.status === 'Скасовано')
@@ -96,9 +98,9 @@ export default async function OrdersPage({
   const commissionSum = delivered.reduce((s, o) => s + Number(o.commission || 0), 0)
   const netRevenue = revenue - commissionSum
 
-  const platforms = ['maudau', 'rozetka']
+  const platforms = platform ? [platform] : ['maudau', 'rozetka']
   const breakdown = platforms.map(pl => {
-    const pOrders = orders.filter(o => o.platform === pl)
+    const pOrders = allOrders2.filter(o => o.platform === pl)
     const pDelivered = pOrders.filter(o => o.status === 'Доставлено')
     const pCanceled = pOrders.filter(o => o.status === 'Скасовано')
     const pRevenue = pDelivered.reduce((s, o) => s + Number(o.total || 0), 0)
