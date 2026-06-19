@@ -23,7 +23,8 @@ async function getJwt(): Promise<string> {
   })
   if (!res.ok) throw new Error(`MauDau login failed: ${res.status}`)
   const data = await res.json()
-  return data.jwt as string
+  // API can return either {jwt: "..."} or {data: {jwt: "..."}}
+  return (data.data?.jwt ?? data.jwt) as string
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,9 +106,11 @@ export async function POST() {
 
     const now = new Date()
     // created_from = start of current year (covers all months, not just current)
-    const createdFrom = new Date(now.getFullYear(), 0, 1).toISOString()
+    // MauDau expects YYYY-MM-DD date string, not a full ISO timestamp
+    const createdFrom = `${now.getFullYear()}-01-01`
     // updated_from = 2 hours ago (catches recently changed statuses on older orders)
-    const updatedFrom = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString()
+    const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000)
+    const updatedFrom = `${twoHoursAgo.getFullYear()}-${String(twoHoursAgo.getMonth() + 1).padStart(2, '0')}-${String(twoHoursAgo.getDate()).padStart(2, '0')}`
 
     // Dual fetch: by creation date (current month) + by update date (last 2h)
     const [createdMap, updatedMap] = await Promise.all([
