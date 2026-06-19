@@ -38,14 +38,23 @@ async function getJwt(): Promise<string> {
   return (data.data?.jwt ?? data.jwt) as string
 }
 
+// safely extract a string from a value that might be an object
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function str(val: any): string {
+  if (!val) return ''
+  if (typeof val === 'string') return val
+  return val.description || val.name || val.title || val.address_text || ''
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildAddress(delivery_address: any): string {
   if (!delivery_address) return ''
-  const city = delivery_address.city?.name || ''
-  const warehouse = delivery_address.warehouse?.address
+  const city = str(delivery_address.city?.name ?? delivery_address.city)
+  const warehouseRaw = delivery_address.warehouse?.address ?? delivery_address.warehouse
+  const warehouse = str(warehouseRaw)
   if (warehouse) return [city, warehouse].filter(Boolean).join(', ')
-  const street = delivery_address.street || ''
-  const building = delivery_address.building || ''
+  const street = str(delivery_address.street)
+  const building = str(delivery_address.building)
   return [city, street, building].filter(Boolean).join(', ')
 }
 

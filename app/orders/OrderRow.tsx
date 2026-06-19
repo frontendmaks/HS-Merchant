@@ -180,9 +180,13 @@ export default function OrderRow(props: OrderRowProps) {
       <td className="px-3 py-2 text-zinc-400 text-xs min-w-[160px] max-w-[220px] break-words">
         {props.address || '—'}
       </td>
-      <td className="px-3 py-2 text-zinc-400 text-xs min-w-[180px] max-w-[260px]">
+      <td className="px-3 py-2 text-zinc-400 text-xs min-w-[280px] max-w-[380px]">
         {props.items
-          ? props.items.split('\n').map((line, i) => <div key={i}>{line}</div>)
+          ? props.items.split('\n').filter(Boolean).map((line, i) => (
+              <div key={i} className="py-0.5 border-b border-zinc-800/40 last:border-0 leading-snug">
+                {line}
+              </div>
+            ))
           : '—'}
       </td>
       <td className="px-3 py-2 whitespace-nowrap text-right text-zinc-300 text-xs">
