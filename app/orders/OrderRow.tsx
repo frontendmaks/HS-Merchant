@@ -55,9 +55,11 @@ interface OrderRowProps {
   status: string | null
   ttn: string | null
   cancel_reason: string | null
+  readOnly?: boolean
 }
 
-export default function OrderRow(props: OrderRowProps) {
+export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) {
+  const readOnly = props.readOnly ?? false
   const [status, setStatus] = useState(props.status || '')
   const [ttn, setTtn] = useState(props.ttn || '')
   const [ttnDraft, setTtnDraft] = useState(props.ttn || '')
@@ -198,39 +200,53 @@ export default function OrderRow(props: OrderRowProps) {
 
       {/* Status */}
       <td className="px-3 py-2 min-w-[140px]">
-        <select
-          value={status}
-          disabled={statusLoading || isTerminal}
-          onChange={e => handleStatusChange(e.target.value)}
-          className={selectCls}
-        >
-          {statuses.map(s => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-        {statusLoading && <div className="text-zinc-500 text-xs mt-0.5">Оновлення...</div>}
-        {statusError && <div className="text-red-400 text-xs mt-0.5">{statusError}</div>}
+        {readOnly ? (
+          <span className="text-zinc-300 text-xs">{status}</span>
+        ) : (
+          <>
+            <select
+              value={status}
+              disabled={statusLoading || isTerminal}
+              onChange={e => handleStatusChange(e.target.value)}
+              className={selectCls}
+            >
+              {statuses.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            {statusLoading && <div className="text-zinc-500 text-xs mt-0.5">Оновлення...</div>}
+            {statusError && <div className="text-red-400 text-xs mt-0.5">{statusError}</div>}
+          </>
+        )}
       </td>
 
       {/* TTN */}
       <td className="px-3 py-2 min-w-[120px]">
-        <input
-          type="text"
-          value={ttnDraft}
-          disabled={ttnLoading || isTerminal}
-          onChange={e => setTtnDraft(e.target.value)}
-          onBlur={handleTtnBlur}
-          className="bg-zinc-800 text-white border border-zinc-700 rounded px-1 py-0.5 text-xs font-mono w-full disabled:opacity-50 read-only:cursor-default"
-          placeholder="ТТН"
-          readOnly={isTerminal}
-        />
-        {ttnLoading && <div className="text-zinc-500 text-xs mt-0.5">Збереження...</div>}
-        {ttnError && <div className="text-red-400 text-xs mt-0.5">{ttnError}</div>}
+        {readOnly ? (
+          <span className="text-zinc-400 text-xs font-mono">{ttn || '—'}</span>
+        ) : (
+          <>
+            <input
+              type="text"
+              value={ttnDraft}
+              disabled={ttnLoading || isTerminal}
+              onChange={e => setTtnDraft(e.target.value)}
+              onBlur={handleTtnBlur}
+              className="bg-zinc-800 text-white border border-zinc-700 rounded px-1 py-0.5 text-xs font-mono w-full disabled:opacity-50 read-only:cursor-default"
+              placeholder="ТТН"
+              readOnly={isTerminal}
+            />
+            {ttnLoading && <div className="text-zinc-500 text-xs mt-0.5">Збереження...</div>}
+            {ttnError && <div className="text-red-400 text-xs mt-0.5">{ttnError}</div>}
+          </>
+        )}
       </td>
 
       {/* Cancel reason */}
       <td className="px-3 py-2 min-w-[160px]">
-        {status !== 'Доставлено' && (
+        {readOnly ? (
+          <span className="text-zinc-400 text-xs">{cancelReason || '—'}</span>
+        ) : status !== 'Доставлено' && (
           <>
             <select
               value={cancelReason}

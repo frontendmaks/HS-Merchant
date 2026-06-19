@@ -19,12 +19,17 @@ const ROLE_LABELS: Record<string, { label: string; color: string }> = {
   viewer:      { label: 'Глядач',        color: 'bg-zinc-700 text-zinc-300' },
 }
 
-export default function UsersManager({ users: initial, currentUserId }: {
+export default function UsersManager({ users: initial, currentUserId, currentRole }: {
   users: Profile[]
   currentUserId: string
+  currentRole: string
 }) {
   const router = useRouter()
   const [users, setUsers] = useState(initial)
+  const isSuperAdmin = currentRole === 'super_admin'
+  // Admin can only manage users with role < admin (operator, viewer)
+  const canManage = (targetRole: string) =>
+    isSuperAdmin || (currentRole === 'admin' && !['super_admin', 'admin'].includes(targetRole))
 
   // Invite form
   const [showInvite, setShowInvite] = useState(false)
@@ -152,8 +157,8 @@ export default function UsersManager({ users: initial, currentUserId }: {
                   onChange={e => setInviteRole(e.target.value as typeof inviteRole)}
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500"
                 >
-                  <option value="super_admin">Супер адміністратор</option>
-                  <option value="admin">Адміністратор</option>
+                  {isSuperAdmin && <option value="super_admin">Супер адміністратор</option>}
+                  {isSuperAdmin && <option value="admin">Адміністратор</option>}
                   <option value="operator">Оператор</option>
                   <option value="viewer">Глядач</option>
                 </select>
@@ -233,7 +238,7 @@ export default function UsersManager({ users: initial, currentUserId }: {
                   </td>
                   <td className="px-4 py-3 text-zinc-400 text-sm">{user.email}</td>
                   <td className="px-4 py-3">
-                    {isMe ? (
+                    {isMe || !canManage(user.role) ? (
                       <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${role.color}`}>
                         {role.label}
                       </span>
@@ -243,8 +248,8 @@ export default function UsersManager({ users: initial, currentUserId }: {
                         onChange={e => handleRoleChange(user.id, e.target.value)}
                         className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-red-500"
                       >
-                        <option value="super_admin">Супер адміністратор</option>
-                        <option value="admin">Адміністратор</option>
+                        {isSuperAdmin && <option value="super_admin">Супер адміністратор</option>}
+                        {isSuperAdmin && <option value="admin">Адміністратор</option>}
                         <option value="operator">Оператор</option>
                         <option value="viewer">Глядач</option>
                       </select>
@@ -262,7 +267,7 @@ export default function UsersManager({ users: initial, currentUserId }: {
                     {new Date(user.created_at).toLocaleDateString('uk-UA')}
                   </td>
                   <td className="px-4 py-3">
-                    {!isMe && (
+                    {!isMe && canManage(user.role) && (
                       <div className="flex items-center gap-2 justify-end">
                         <button
                           onClick={() => handleToggleActive(user.id, !user.is_active)}

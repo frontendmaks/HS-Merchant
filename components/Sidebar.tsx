@@ -4,15 +4,14 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { useEffect, useState } from 'react'
 
-const ADMIN_ROLES = ['super_admin', 'admin']
-
+// Which roles can see each nav item
 const nav = [
-  { href: '/',         label: 'Дашборд',       icon: '▦', minRole: null },
-  { href: '/products', label: 'Товари',         icon: '◈', minRole: null },
-  { href: '/feeds',    label: 'Фіди',           icon: '⊞', minRole: null },
-  { href: '/syncs',    label: 'Синхронізації',  icon: '↻', minRole: null },
-  { href: '/orders',   label: 'Замовлення',     icon: '◷', minRole: null },
-  { href: '/users',    label: 'Користувачі',    icon: '◉', minRole: 'admin' },
+  { href: '/',         label: 'Дашборд',       icon: '▦', roles: ['super_admin','admin','viewer'] },
+  { href: '/products', label: 'Товари',         icon: '◈', roles: ['super_admin','admin','viewer'] },
+  { href: '/feeds',    label: 'Фіди',           icon: '⊞', roles: ['super_admin','admin','viewer'] },
+  { href: '/syncs',    label: 'Синхронізації',  icon: '↻', roles: ['super_admin','admin'] },
+  { href: '/orders',   label: 'Замовлення',     icon: '◷', roles: ['super_admin','admin','operator','viewer'] },
+  { href: '/users',    label: 'Користувачі',    icon: '◉', roles: ['super_admin','admin'] },
 ]
 
 const ROLE_LABELS: Record<string, string> = {
@@ -61,11 +60,9 @@ export default function Sidebar() {
   if (path === '/login') return null
 
   const role = profile?.role ?? ''
-  const isAdminLevel = ADMIN_ROLES.includes(role)
-
-  const visibleNav = nav.filter(item =>
-    item.minRole === null || (item.minRole === 'admin' && isAdminLevel)
-  )
+  const visibleNav = loaded
+    ? nav.filter(item => !role || item.roles.includes(role))
+    : []
 
   return (
     <aside className="fixed top-0 left-0 h-screen w-60 bg-zinc-900 border-r border-zinc-800 flex flex-col">

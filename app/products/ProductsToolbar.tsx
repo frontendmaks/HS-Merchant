@@ -2,7 +2,7 @@
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useState, useTransition } from 'react'
 
-export default function ProductsToolbar({ total }: { total: number }) {
+export default function ProductsToolbar({ total, readOnly }: { total: number; readOnly?: boolean }) {
   const router = useRouter()
   const params = useSearchParams()
   const [syncing, setSyncing] = useState(false)
@@ -56,14 +56,16 @@ export default function ProductsToolbar({ total }: { total: number }) {
         )}
       </div>
       <div className="text-xs text-zinc-500">{total} товарів</div>
-      <button
-        onClick={handleSync}
-        disabled={syncing}
-        className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm text-zinc-300 transition-colors disabled:opacity-50"
-      >
-        <span className={syncing ? 'animate-spin inline-block' : ''}>🔄</span>
-        {syncing ? 'Синхронізація...' : 'Синк з WC'}
-      </button>
+      {!readOnly && (
+        <button
+          onClick={handleSync}
+          disabled={syncing}
+          className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm text-zinc-300 transition-colors disabled:opacity-50"
+        >
+          <span className={syncing ? 'animate-spin inline-block' : ''}>🔄</span>
+          {syncing ? 'Синхронізація...' : 'Синк з WC'}
+        </button>
+      )}
     </div>
   )
 }

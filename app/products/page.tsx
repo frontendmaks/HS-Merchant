@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/service'
+import { getCurrentRole } from '@/lib/getRole'
 import { Suspense } from 'react'
 import ProductsToolbar from './ProductsToolbar'
 import SortableHeader from './SortableHeader'
@@ -41,6 +42,8 @@ export default async function ProductsPage({
 
   const { products, total } = await getProducts(q, page, sort, dir)
   const totalPages = Math.ceil(total / PER_PAGE)
+  const role = await getCurrentRole()
+  const readOnly = role === 'viewer'
 
   const buildPageUrl = (p: number) => {
     const sp = new URLSearchParams({ ...(q && { q }), sort, dir, page: String(p) })
@@ -56,7 +59,7 @@ export default async function ProductsPage({
 
       <div className="mb-4">
         <Suspense>
-          <ProductsToolbar total={total} />
+          <ProductsToolbar total={total} readOnly={readOnly} />
         </Suspense>
       </div>
 

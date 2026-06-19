@@ -44,5 +44,5 @@ export default async function UsersPage() {
     .select('*')
     .order('created_at', { ascending: true })
 
-  return <UsersManager users={users || []} currentUserId={user.id} />
+  return <UsersManager users={users || []} currentUserId={user.id} currentRole={profile.role} />
 }
