@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createBrowserClient } from '@supabase/ssr'
 import { useRouter } from 'next/navigation'
 
@@ -11,6 +11,13 @@ export default function SetPasswordPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [ready, setReady] = useState(false)
+  const [debugMsg, setDebugMsg] = useState('')
+
+  // Capture hash synchronously before Supabase client can potentially clear it
+  const capturedHash = useRef<string>('')
+  if (typeof window !== 'undefined' && !capturedHash.current) {
+    capturedHash.current = window.location.hash
+  }
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,42 +25,49 @@ export default function SetPasswordPage() {
   )
 
   useEffect(() => {
-    const hash = window.location.hash
-    if (hash) {
-      // Manually parse hash fragment from invite link: #access_token=...&refresh_token=...
-      const params = new URLSearchParams(hash.substring(1))
-      const accessToken = params.get('access_token')
-      const refreshToken = params.get('refresh_token')
-      if (accessToken && refreshToken) {
-        supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
-          .then(({ data: { session } }) => {
-            if (session) setReady(true)
-            else setError('Недійсне або прострочене запрошення')
+    async function init() {
+      const hash = capturedHash.current || window.location.hash
+      setDebugMsg(`Hash: ${hash.substring(0, 30) || 'empty'}`)
+
+      if (hash) {
+        const params = new URLSearchParams(hash.substring(1))
+        const accessToken = params.get('access_token')
+        const refreshToken = params.get('refresh_token')
+
+        if (accessToken && refreshToken) {
+          const { data, error: sessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
           })
+          if (data.session) {
+            setReady(true)
+            return
+          }
+          setError(sessionError?.message || 'Не вдалось встановити сесію')
+          setDebugMsg(`setSession error: ${sessionError?.message}`)
+          return
+        }
+      }
+
+      // Fallback: check existing session
+      const { data } = await supabase.auth.getSession()
+      if (data.session) {
+        setReady(true)
         return
       }
+
+      setError('Посилання недійсне або прострочене. Зверніться до адміністратора.')
     }
-    // No hash — check if already has session (e.g. refreshed page)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) setReady(true)
-      else setError('Недійсне або прострочене запрошення')
-    })
+
+    init()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-
-    if (password.length < 8) {
-      setError('Пароль повинен містити мінімум 8 символів')
-      return
-    }
-    if (password !== confirm) {
-      setError('Паролі не співпадають')
-      return
-    }
-
+    if (password.length < 8) { setError('Мінімум 8 символів'); return }
+    if (password !== confirm) { setError('Паролі не співпадають'); return }
     setLoading(true)
     try {
       const { error } = await supabase.auth.updateUser({ password })
@@ -70,14 +84,20 @@ export default function SetPasswordPage() {
   if (!ready) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        {error ? (
-          <div className="text-center">
-            <div className="text-red-400 text-sm mb-2">{error}</div>
-            <a href="/login" className="text-zinc-500 text-xs hover:text-white">← Повернутись до входу</a>
-          </div>
-        ) : (
-          <div className="text-zinc-500 text-sm">Перевірка запрошення...</div>
-        )}
+        <div className="text-center space-y-3">
+          {error ? (
+            <>
+              <div className="text-red-400 text-sm">{error}</div>
+              <div className="text-zinc-600 text-xs">{debugMsg}</div>
+              <a href="/login" className="text-zinc-500 text-xs hover:text-white block">← Повернутись до входу</a>
+            </>
+          ) : (
+            <>
+              <div className="text-zinc-500 text-sm">Перевірка запрошення...</div>
+              <div className="text-zinc-700 text-xs">{debugMsg}</div>
+            </>
+          )}
+        </div>
       </div>
     )
   }
