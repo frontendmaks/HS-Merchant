@@ -135,7 +135,10 @@ export default async function SyncsPage() {
                 <div>
                   {log.trigger === 'cron'
                     ? <span className="text-xs px-2 py-0.5 rounded-full bg-blue-950 text-blue-400">⏱ Авто</span>
-                    : <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">🖱 Вручну</span>}
+                    : <div>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">🖱 Вручну</span>
+                        {log.triggered_by && <div className="text-xs text-zinc-500 mt-0.5 truncate max-w-[90px]" title={log.triggered_by}>{log.triggered_by}</div>}
+                      </div>}
                 </div>
                 <div>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${log.status === 'success' ? 'bg-emerald-950 text-emerald-400' : 'bg-red-950 text-red-400'}`}>
@@ -244,7 +247,10 @@ export default async function SyncsPage() {
                 <div>
                   {log.trigger === 'cron'
                     ? <span className="text-xs px-2 py-0.5 rounded-full bg-purple-950 text-purple-400">⏱ Авто</span>
-                    : <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">🖱 Вручну</span>}
+                    : <div>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">🖱 Вручну</span>
+                        {log.triggered_by && <div className="text-xs text-zinc-500 mt-0.5 truncate max-w-[90px]" title={log.triggered_by}>{log.triggered_by}</div>}
+                      </div>}
                 </div>
                 <div>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${log.status === 'success' ? 'bg-emerald-950 text-emerald-400' : 'bg-red-950 text-red-400'}`}>

@@ -5,6 +5,11 @@ export async function POST(req: NextRequest) {
   const start = Date.now()
   const base = process.env.NEXT_PUBLIC_SITE_URL || `https://${req.headers.get('host')}`
   const supabase = createServiceClient()
+  let triggeredBy: string | null = null
+  try {
+    const body = await req.json().catch(() => ({}))
+    triggeredBy = body.triggered_by ?? null
+  } catch {}
 
   let maudauSynced = 0
   let rozetkasynced = 0
@@ -39,6 +44,7 @@ export async function POST(req: NextRequest) {
 
   await supabase.from('order_sync_logs').insert({
     trigger: 'manual',
+    triggered_by: triggeredBy,
     status: errorMsg ? 'error' : 'success',
     maudau_synced: maudauSynced,
     rozetka_synced: rozetkasynced,

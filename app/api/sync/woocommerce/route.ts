@@ -110,6 +110,13 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
 export async function POST(request: Request) {
   const startedAt = Date.now()
   const isCron = request.headers.get('x-cron') === '1'
+  let triggeredBy: string | null = null
+  if (!isCron) {
+    try {
+      const body = await request.json().catch(() => ({}))
+      triggeredBy = body.triggered_by ?? null
+    } catch {}
+  }
 
   try {
     const supabase = createServiceClient()
@@ -200,6 +207,7 @@ export async function POST(request: Request) {
       duration_ms: Date.now() - startedAt,
       status: 'success',
       trigger: isCron ? 'cron' : 'manual',
+      triggered_by: isCron ? null : triggeredBy,
     })
 
     return NextResponse.json(result)
@@ -214,6 +222,7 @@ export async function POST(request: Request) {
         status: 'error',
         error: err.message,
         trigger: isCron ? 'cron' : 'manual',
+      triggered_by: isCron ? null : triggeredBy,
       })
     } catch {}
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
