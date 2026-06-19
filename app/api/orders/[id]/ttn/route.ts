@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { getMaudauJwt, patchMaudauOrder } from '@/lib/maudau'
+import { getMaudauJwt, patchMaudauStatus, patchMaudauTtn } from '@/lib/maudau'
 
 interface RozetkaStatusEntry {
   child_id: number
@@ -62,10 +62,10 @@ export async function PATCH(
       const numericId = external_id.replace(/^MD-/, '')
       const jwt = await getMaudauJwt()
 
-      try { await patchMaudauOrder(numericId, { status: 'accepted' }, jwt) } catch { /* continue */ }
-      try { await patchMaudauOrder(numericId, { status: 'approved' }, jwt) } catch { /* continue */ }
-      // Main step — throw on failure
-      await patchMaudauOrder(numericId, { ttn, status: 'delivering' }, jwt)
+      try { await patchMaudauStatus(numericId, 'accepted', undefined, jwt) } catch { /* continue */ }
+      try { await patchMaudauStatus(numericId, 'approved', undefined, jwt) } catch { /* continue */ }
+      // Main step — sets TTN and advances to 'delivering'
+      await patchMaudauTtn(numericId, ttn, jwt)
     } else if (platform === 'rozetka') {
       // Spec: chain 1→26→2, then set TTN + advance to 3
       const numericId = external_id.replace(/^RZ-/, '')

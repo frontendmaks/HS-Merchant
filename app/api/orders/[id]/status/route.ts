@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { getMaudauJwt, patchMaudauOrder } from '@/lib/maudau'
+import { getMaudauJwt, patchMaudauStatus } from '@/lib/maudau'
 
 const MAUDAU_STATUS_MAP: Record<string, string> = {
   'Нове': 'new_order',
@@ -44,16 +44,12 @@ export async function PATCH(
       const numericId = external_id.replace(/^MD-/, '')
       const jwt = await getMaudauJwt()
 
+      // MauDau requires approved before delivering
       if (apiStatus === 'delivering') {
-        // Mandatory intermediate step per spec — ignore errors and continue
-        try {
-          await patchMaudauOrder(numericId, { status: 'approved' }, jwt)
-        } catch {
-          // intentionally swallowed
-        }
+        try { await patchMaudauStatus(numericId, 'approved', undefined, jwt) } catch { /* continue */ }
       }
 
-      await patchMaudauOrder(numericId, { status: apiStatus }, jwt)
+      await patchMaudauStatus(numericId, apiStatus, undefined, jwt)
     } else if (platform === 'rozetka') {
       const numericId = external_id.replace(/^RZ-/, '')
 
@@ -85,7 +81,10 @@ export async function PATCH(
         },
         body: JSON.stringify({ status: match.child_id }),
       })
-      if (!putRes.ok) throw new Error(`Rozetka update failed: ${putRes.status}`)
+      if (!putRes.ok) {
+        const errBody = await putRes.text().catch(() => '')
+        throw new Error(`Rozetka update failed: ${putRes.status} ${errBody.slice(0, 200)}`)
+      }
     }
   } catch (e) {
     return NextResponse.json(

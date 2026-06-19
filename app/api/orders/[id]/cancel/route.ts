@@ -47,11 +47,8 @@ export async function PATCH(
         )
       }
 
-      const body: Record<string, unknown> = { status: 'canceled' }
-      if (match) body.cancellation_reason_id = match.id
-
-      const { patchMaudauOrder } = await import('@/lib/maudau')
-      await patchMaudauOrder(numericId, body, jwt)
+      const { patchMaudauStatus } = await import('@/lib/maudau')
+      await patchMaudauStatus(numericId, 'canceled', match?.id, jwt)
     } else if (platform === 'rozetka') {
       const numericId = external_id.replace(/^RZ-/, '')
 

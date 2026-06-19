@@ -4,6 +4,11 @@
  * JWT caching: module-level singleton so warm Vercel function instances
  * reuse the same token instead of hitting /login on every request.
  * Token lifetime is conservatively set to 23h (MauDau issues 24h tokens).
+ *
+ * Endpoints (from spec / Code.gs):
+ *   Status change : PATCH /v1/merchant_public_api/orders/{id}/status  { status }
+ *   TTN update    : PATCH /v1/merchant_public_api/orders/{id}          { delivery_tracking_number, status: 'delivering' }
+ *   Cancel        : PATCH /v1/merchant_public_api/orders/{id}/status  { status: 'canceled', cancellation_reason_id? }
  */
 
 const MAUDAU_JWT_TTL_MS = 23 * 60 * 60 * 1000 // 23 hours
@@ -43,22 +48,53 @@ export async function getMaudauJwt(): Promise<string> {
   return jwt
 }
 
-/** PATCH (with PUT fallback) a MauDau order. Throws on failure. */
-export async function patchMaudauOrder(
+/**
+ * Update MauDau order STATUS.
+ * Endpoint: PATCH /v1/merchant_public_api/orders/{id}/status
+ */
+export async function patchMaudauStatus(
   numericId: string,
-  body: Record<string, unknown>,
-  jwt: string,
+  status: string,
+  cancellationReasonId?: number,
+  jwt?: string,
 ): Promise<void> {
-  const url = `${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` }
-  const payload = JSON.stringify(body)
+  const token = jwt ?? (await getMaudauJwt())
+  const url = `${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}/status`
+  const body: Record<string, unknown> = { status }
+  if (cancellationReasonId != null) body.cancellation_reason_id = cancellationReasonId
 
-  const patch = await fetch(url, { method: 'PATCH', headers, body: payload })
-  if (!patch.ok) {
-    const put = await fetch(url, { method: 'PUT', headers, body: payload })
-    if (!put.ok) {
-      const errBody = await put.text().catch(() => '')
-      throw new Error(`MauDau update failed: ${put.status} ${errBody.slice(0, 200)}`)
-    }
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(`MauDau status update failed: ${res.status} ${errBody.slice(0, 300)}`)
+  }
+}
+
+/**
+ * Update MauDau order TTN (tracking number).
+ * Endpoint: PATCH /v1/merchant_public_api/orders/{id}  { delivery_tracking_number, status }
+ */
+export async function patchMaudauTtn(
+  numericId: string,
+  ttn: string,
+  jwt?: string,
+): Promise<void> {
+  const token = jwt ?? (await getMaudauJwt())
+  const url = `${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`
+
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ delivery_tracking_number: ttn, status: 'delivering' }),
+  })
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '')
+    throw new Error(`MauDau TTN update failed: ${res.status} ${errBody.slice(0, 300)}`)
   }
 }
