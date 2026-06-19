@@ -105,7 +105,7 @@ export default async function Dashboard() {
                 </span>
               )}
             </div>
-            <a href="/products" className="text-xs text-zinc-500 hover:text-red-400">Всі →</a>
+            <a href="/products/problems" className="text-xs text-zinc-500 hover:text-red-400">Всі →</a>
           </div>
           <div className="divide-y divide-zinc-800">
             {stats.problematic.length === 0 ? (
@@ -145,7 +145,7 @@ export default async function Dashboard() {
                 </span>
               )}
             </div>
-            <a href="/products" className="text-xs text-zinc-500 hover:text-red-400">Всі →</a>
+            <a href="/products/zero-stock" className="text-xs text-zinc-500 hover:text-red-400">Всі →</a>
           </div>
           <div className="divide-y divide-zinc-800">
             {stats.zeroStock.length === 0 ? (
