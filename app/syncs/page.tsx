@@ -44,6 +44,33 @@ export default async function SyncsPage() {
         <SyncTrigger />
       </div>
 
+      {/* Cron schedule info */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 flex items-center justify-between gap-6">
+        <div className="flex items-center gap-4">
+          <div className="w-9 h-9 rounded-lg bg-blue-950 flex items-center justify-center text-blue-400 text-lg shrink-0">⏱</div>
+          <div>
+            <div className="text-sm font-medium text-white">Автоматичний розклад</div>
+            <div className="text-xs text-zinc-500 mt-0.5">
+              Vercel Cron запускає синк кожні 6 годин: <span className="font-mono text-zinc-400">0 */6 * * *</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-6 text-center shrink-0">
+          <div>
+            <div className="text-xs text-zinc-500">Розклад</div>
+            <div className="text-sm text-blue-400 font-medium mt-0.5">Кожні 6 год</div>
+          </div>
+          <div>
+            <div className="text-xs text-zinc-500">Захист від дублів</div>
+            <div className="text-sm text-emerald-400 font-medium mt-0.5">2 хв cooldown</div>
+          </div>
+          <div>
+            <div className="text-xs text-zinc-500">Ендпоінт</div>
+            <div className="text-xs font-mono text-zinc-400 mt-0.5">/api/cron/sync</div>
+          </div>
+        </div>
+      </div>
+
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">

@@ -13,7 +13,9 @@ export default function SyncTrigger() {
     try {
       const res = await fetch('/api/sync/woocommerce', { method: 'POST' })
       const data = await res.json()
-      if (data.success) {
+      if (data.skipped) {
+        alert(`⏳ ${data.reason}`)
+      } else if (data.success) {
         setLast({ synced: data.synced, deactivated: data.deactivated, duration_ms: 0 })
         router.refresh()
       }

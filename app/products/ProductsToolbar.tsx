@@ -25,7 +25,9 @@ export default function ProductsToolbar({ total }: { total: number }) {
     try {
       const res = await fetch('/api/sync/woocommerce', { method: 'POST' })
       const data = await res.json()
-      if (data.success) {
+      if (data.skipped) {
+        alert(`⏳ ${data.reason}`)
+      } else if (data.success) {
         router.refresh()
         const parts = [`✅ Синхронізовано: ${data.synced} товарів`]
         if (data.deactivated > 0) parts.push(`⚠️ Деактивовано: ${data.deactivated} (видалені з WC)`)

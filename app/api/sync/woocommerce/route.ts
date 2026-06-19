@@ -107,10 +107,34 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   const startedAt = Date.now()
+  const isCron = request.headers.get('x-cron') === '1'
+
   try {
     const supabase = createServiceClient()
+
+    // Захист від дублювання — якщо синкали менше 2 хв тому, пропускаємо (крім cron)
+    if (!isCron) {
+      const { data: recent } = await supabase
+        .from('sync_logs')
+        .select('created_at')
+        .eq('status', 'success')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (recent) {
+        const secAgo = (Date.now() - new Date(recent.created_at).getTime()) / 1000
+        if (secAgo < 120) {
+          return Response.json({
+            success: false,
+            skipped: true,
+            reason: `Синк вже виконувався ${Math.round(secAgo)}с тому. Зачекайте 2 хвилини.`,
+          }, { status: 429 })
+        }
+      }
+    }
 
     // 1. Тягнемо всі продукти
     const { data: firstPage, total } = await fetchWCPage(1)
