@@ -18,15 +18,26 @@ export default function SetPasswordPage() {
   )
 
   useEffect(() => {
-    // onAuthStateChange fires immediately with current session state,
-    // and also picks up the hash fragment (#access_token=...) from invite link
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        setReady(true)
-        subscription.unsubscribe()
+    const hash = window.location.hash
+    if (hash) {
+      // Manually parse hash fragment from invite link: #access_token=...&refresh_token=...
+      const params = new URLSearchParams(hash.substring(1))
+      const accessToken = params.get('access_token')
+      const refreshToken = params.get('refresh_token')
+      if (accessToken && refreshToken) {
+        supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+          .then(({ data: { session } }) => {
+            if (session) setReady(true)
+            else setError('Недійсне або прострочене запрошення')
+          })
+        return
       }
+    }
+    // No hash — check if already has session (e.g. refreshed page)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) setReady(true)
+      else setError('Недійсне або прострочене запрошення')
     })
-    return () => subscription.unsubscribe()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -59,7 +70,14 @@ export default function SetPasswordPage() {
   if (!ready) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <div className="text-zinc-500 text-sm">Перевірка запрошення...</div>
+        {error ? (
+          <div className="text-center">
+            <div className="text-red-400 text-sm mb-2">{error}</div>
+            <a href="/login" className="text-zinc-500 text-xs hover:text-white">← Повернутись до входу</a>
+          </div>
+        ) : (
+          <div className="text-zinc-500 text-sm">Перевірка запрошення...</div>
+        )}
       </div>
     )
   }
