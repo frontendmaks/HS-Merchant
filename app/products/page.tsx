@@ -35,6 +35,11 @@ export default async function ProductsPage({
 }: {
   searchParams: Promise<{ q?: string; page?: string; sort?: string; dir?: string }>
 }) {
+  const { getCurrentRole } = await import('@/lib/getRole')
+  const { redirect } = await import('next/navigation')
+  const role = await getCurrentRole()
+  if (role === 'operator') redirect('/orders')
+
   const { q = '', page: pageStr = '1', sort: sortRaw = 'name', dir: dirRaw = 'asc' } = await searchParams
   const page = Math.max(1, parseInt(pageStr) || 1)
   const sort = (ALLOWED_SORT.includes(sortRaw as SortCol) ? sortRaw : 'name') as SortCol

@@ -41,6 +41,11 @@ const triggerLabel: Record<string, string> = {
 }
 
 export default async function FeedsPage() {
+  const { getCurrentRole } = await import('@/lib/getRole')
+  const { redirect } = await import('next/navigation')
+  const role = await getCurrentRole()
+  if (role === 'operator') redirect('/orders')
+
   const feeds = await getFeeds()
 
   return (

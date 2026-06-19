@@ -72,6 +72,11 @@ function timeAgo(dateStr: string | null): string {
 }
 
 export default async function Dashboard() {
+  const { getCurrentRole } = await import('@/lib/getRole')
+  const { redirect } = await import('next/navigation')
+  const role = await getCurrentRole()
+  if (role === 'operator') redirect('/orders')
+
   const stats = await getStats()
 
   const cards = [
