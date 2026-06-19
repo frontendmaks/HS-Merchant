@@ -27,7 +27,9 @@ export default function ProductsToolbar({ total }: { total: number }) {
       const data = await res.json()
       if (data.success) {
         router.refresh()
-        alert(`✅ Синхронізовано ${data.synced} товарів`)
+        const parts = [`✅ Синхронізовано: ${data.synced} товарів`]
+        if (data.deactivated > 0) parts.push(`⚠️ Деактивовано: ${data.deactivated} (видалені з WC)`)
+        alert(parts.join('\n'))
       }
     } catch {
       alert('❌ Помилка синхронізації')

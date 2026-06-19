@@ -108,6 +108,7 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
 }
 
 export async function POST() {
+  const startedAt = Date.now()
   try {
     const supabase = createServiceClient()
 
@@ -155,17 +156,40 @@ export async function POST() {
       .select('id')
 
     const withVariation = [...variationMap.values()].filter(Boolean).length
-    return NextResponse.json({
+    const deactivatedCount = deactivated?.length ?? 0
+    const result = {
       success: true,
       synced: mapped.length,
-      deactivated: deactivated?.length ?? 0,
+      deactivated: deactivatedCount,
       total,
       warehouse: WAREHOUSE,
       with_warehouse_stock: withVariation,
       without_variation: variableProducts.length - withVariation,
+    }
+
+    await supabase.from('sync_logs').insert({
+      synced: mapped.length,
+      deactivated: deactivatedCount,
+      total_wc: total,
+      with_warehouse_stock: withVariation,
+      without_variation: variableProducts.length - withVariation,
+      duration_ms: Date.now() - startedAt,
+      status: 'success',
     })
+
+    return NextResponse.json(result)
   } catch (err: any) {
     console.error('WC sync error:', err)
+    const supabase = createServiceClient()
+    try {
+      await supabase.from('sync_logs').insert({
+        synced: 0, deactivated: 0, total_wc: 0,
+        with_warehouse_stock: 0, without_variation: 0,
+        duration_ms: Date.now() - startedAt,
+        status: 'error',
+        error: err.message,
+      })
+    } catch {}
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
   }
 }

@@ -3,11 +3,12 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const nav = [
-  { href: '/',             label: 'Дашборд',      icon: '▦' },
-  { href: '/products',     label: 'Товари',        icon: '◈' },
-  { href: '/feeds',        label: 'Фіди',          icon: '⊞' },
-  { href: '/marketplaces', label: 'Маркетплейси',  icon: '◎' },
-  { href: '/orders',       label: 'Замовлення',    icon: '◷' },
+  { href: '/',             label: 'Дашборд',       icon: '▦' },
+  { href: '/products',     label: 'Товари',         icon: '◈' },
+  { href: '/feeds',        label: 'Фіди',           icon: '⊞' },
+  { href: '/marketplaces', label: 'Маркетплейси',   icon: '◎' },
+  { href: '/syncs',        label: 'Синхронізації',  icon: '↻' },
+  { href: '/orders',       label: 'Замовлення',     icon: '◷' },
 ]
 
 export default function Sidebar() {

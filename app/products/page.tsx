@@ -19,6 +19,7 @@ async function getProducts(q: string, page: number, sort: SortCol, dir: 'asc' | 
   let query = supabase
     .from('products')
     .select('id, name, sku, price, price_old, stock, status, images, external_id, category_name, brand, attributes', { count: 'exact' })
+    .eq('status', 'active')
     .order(sort, { ascending: dir === 'asc', nullsFirst: false })
     .range(from, to)
 
