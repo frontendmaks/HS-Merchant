@@ -83,12 +83,14 @@ function orderToRow(order: any) {
 
   const commissionSum = isCanceled
     ? 0
-    // commission_sum is nested in purchase.item; calculate from cost_with_discount * commission_percent
+    // Rozetka charges commission on the ORIGINAL (non-discounted) item price,
+    // not the sale price. Formula: item.price * quantity * commission_percent / 100
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     : (order.purchases || []).reduce((s: number, p: any) => {
         const pct = Number(p.item?.commission_percent ?? 0) / 100
-        const cost = Number(p.cost_with_discount ?? p.cost ?? 0)
-        return s + cost * pct
+        const unitPrice = Number(p.item?.price ?? p.price ?? 0)
+        const qty = Number(p.quantity ?? 1)
+        return s + unitPrice * qty * pct
       }, 0)
 
   return {
