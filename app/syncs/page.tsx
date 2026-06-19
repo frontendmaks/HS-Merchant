@@ -98,8 +98,9 @@ export default async function SyncsPage() {
       {/* Log table */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
         <div className="grid gap-4 px-6 py-3 border-b border-zinc-800 bg-zinc-800/50"
-          style={{ gridTemplateColumns: '160px 80px 90px 90px 90px 90px 80px 1fr' }}>
+          style={{ gridTemplateColumns: '160px 100px 80px 90px 90px 90px 90px 80px 1fr' }}>
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Час</div>
+          <div className="text-xs text-zinc-500 uppercase tracking-wide">Тригер</div>
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Статус</div>
           <div className="text-xs text-zinc-500 uppercase tracking-wide text-right">Синкнуто</div>
           <div className="text-xs text-zinc-500 uppercase tracking-wide text-right">Деактив.</div>
@@ -118,11 +119,18 @@ export default async function SyncsPage() {
           {entries.map(log => (
             <div key={log.id}
               className="grid gap-4 px-6 py-3.5 items-center hover:bg-zinc-800/20 transition-colors"
-              style={{ gridTemplateColumns: '160px 80px 90px 90px 90px 90px 80px 1fr' }}>
+              style={{ gridTemplateColumns: '160px 100px 80px 90px 90px 90px 90px 80px 1fr' }}>
 
               <div>
                 <div className="text-xs text-zinc-300">{formatDate(log.created_at)}</div>
                 <div className="text-xs text-zinc-600 mt-0.5">{timeAgo(log.created_at)}</div>
+              </div>
+
+              <div>
+                {log.trigger === 'cron'
+                  ? <span className="text-xs px-2 py-0.5 rounded-full bg-blue-950 text-blue-400">⏱ Авто</span>
+                  : <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">🖱 Вручну</span>
+                }
               </div>
 
               <div>

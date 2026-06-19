@@ -199,6 +199,7 @@ export async function POST(request: Request) {
       without_variation: variableProducts.length - withVariation,
       duration_ms: Date.now() - startedAt,
       status: 'success',
+      trigger: isCron ? 'cron' : 'manual',
     })
 
     return NextResponse.json(result)
@@ -212,6 +213,7 @@ export async function POST(request: Request) {
         duration_ms: Date.now() - startedAt,
         status: 'error',
         error: err.message,
+        trigger: isCron ? 'cron' : 'manual',
       })
     } catch {}
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
