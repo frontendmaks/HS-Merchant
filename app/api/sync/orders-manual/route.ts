@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 
-export async function GET(req: NextRequest) {
-  const secret = req.headers.get('x-cron-secret') || req.headers.get('authorization')?.replace('Bearer ', '')
-  if (secret !== process.env.CRON_SECRET) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
+export async function POST(req: NextRequest) {
   const start = Date.now()
   const base = process.env.NEXT_PUBLIC_SITE_URL || `https://${req.headers.get('host')}`
   const supabase = createServiceClient()
@@ -43,7 +38,7 @@ export async function GET(req: NextRequest) {
   const duration = Date.now() - start
 
   await supabase.from('order_sync_logs').insert({
-    trigger: 'cron',
+    trigger: 'manual',
     status: errorMsg ? 'error' : 'success',
     maudau_synced: maudauSynced,
     rozetka_synced: rozetkasynced,
