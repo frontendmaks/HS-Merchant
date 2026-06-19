@@ -25,30 +25,42 @@ export async function POST(req: NextRequest) {
   const supabase = createServiceClient()
   const triggeredBy = await getTriggeredBy()
 
+  // Optional: sync only one platform ('maudau' | 'rozetka') or both if not specified
+  let platform: string | null = null
+  try { const b = await req.json(); platform = b.platform ?? null } catch {}
+
   let maudauSynced = 0
   let rozetkasynced = 0
   let errorMsg: string | null = null
 
   try {
-    const [maudau, rozetka] = await Promise.allSettled([
-      fetch(`${base}/api/sync/maudau`, { method: 'POST' }).then(r => r.json()),
-      fetch(`${base}/api/sync/rozetka`, { method: 'POST' }).then(r => r.json()),
-    ])
-
-    if (maudau.status === 'fulfilled' && maudau.value.success) {
-      maudauSynced = maudau.value.synced ?? 0
-    } else if (maudau.status === 'rejected') {
-      errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'MauDau: ' + String((maudau as PromiseRejectedResult).reason)
-    } else if (maudau.status === 'fulfilled' && !maudau.value.success) {
-      errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'MauDau: ' + (maudau.value.error || 'unknown error')
+    const syncMaudau = async () => {
+      const r = await fetch(`${base}/api/sync/maudau`, { method: 'POST' })
+      return r.json() as Promise<{ success: boolean; synced?: number; error?: string }>
+    }
+    const syncRozetka = async () => {
+      const r = await fetch(`${base}/api/sync/rozetka`, { method: 'POST' })
+      return r.json() as Promise<{ success: boolean; synced?: number; error?: string }>
     }
 
-    if (rozetka.status === 'fulfilled' && rozetka.value.success) {
-      rozetkasynced = rozetka.value.synced ?? 0
-    } else if (rozetka.status === 'rejected') {
-      errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'Rozetka: ' + String((rozetka as PromiseRejectedResult).reason)
-    } else if (rozetka.status === 'fulfilled' && !rozetka.value.success) {
-      errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'Rozetka: ' + (rozetka.value.error || 'unknown error')
+    if (!platform || platform === 'maudau') {
+      try {
+        const d = await syncMaudau()
+        if (d.success) maudauSynced = d.synced ?? 0
+        else errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'MauDau: ' + (d.error || 'error')
+      } catch (e) {
+        errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'MauDau: ' + String(e)
+      }
+    }
+
+    if (!platform || platform === 'rozetka') {
+      try {
+        const d = await syncRozetka()
+        if (d.success) rozetkasynced = d.synced ?? 0
+        else errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'Rozetka: ' + (d.error || 'error')
+      } catch (e) {
+        errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'Rozetka: ' + String(e)
+      }
     }
   } catch (err) {
     errorMsg = String(err)

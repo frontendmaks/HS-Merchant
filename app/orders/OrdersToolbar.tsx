@@ -29,11 +29,15 @@ export default function OrdersToolbar() {
     setSyncingMaudau(true)
     setMaudauResult(null)
     try {
-      const res = await fetch('/api/sync/maudau', { method: 'POST' })
+      const res = await fetch('/api/sync/orders-manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: 'maudau' }),
+      })
       const data = await res.json()
-      setMaudauResult(data.success ? `Синхронізовано: ${data.synced}` : `Помилка: ${data.error}`)
+      setMaudauResult(data.success ? `✓ ${data.maudau_synced} замовлень` : `Помилка: ${data.error}`)
       router.refresh()
-    } catch (e) {
+    } catch {
       setMaudauResult('Помилка мережі')
     } finally {
       setSyncingMaudau(false)
@@ -44,11 +48,15 @@ export default function OrdersToolbar() {
     setSyncingRozetka(true)
     setRozetkaResult(null)
     try {
-      const res = await fetch('/api/sync/rozetka', { method: 'POST' })
+      const res = await fetch('/api/sync/orders-manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: 'rozetka' }),
+      })
       const data = await res.json()
-      setRozetkaResult(data.success ? `Синхронізовано: ${data.synced}` : `Помилка: ${data.error}`)
+      setRozetkaResult(data.success ? `✓ ${data.rozetka_synced} замовлень` : `Помилка: ${data.error}`)
       router.refresh()
-    } catch (e) {
+    } catch {
       setRozetkaResult('Помилка мережі')
     } finally {
       setSyncingRozetka(false)
