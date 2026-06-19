@@ -91,7 +91,8 @@ function orderToRow(order: any) {
 async function fetchAllPages(jwt: string, queryParam: string): Promise<Map<string, ReturnType<typeof orderToRow>>> {
   const map = new Map<string, ReturnType<typeof orderToRow>>()
   let page = 1
-  while (true) {
+  const MAX_PAGES = 100 // safety limit
+  while (page <= MAX_PAGES) {
     const url = `${BASE}/v1/merchant_public_api/orders?page=${page}&per_page=50&${queryParam}`
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${jwt}` },
@@ -101,18 +102,16 @@ async function fetchAllPages(jwt: string, queryParam: string): Promise<Map<strin
       break
     }
     const raw = await res.json()
-    // API wraps response: {data: {orders: [...]}} or {orders: [...]} or bare array
+    // API ignores per_page and returns ~15 per page as a bare array
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const orders: any[] = raw.data?.orders ?? raw.orders ?? (Array.isArray(raw) ? raw : [])
+    const orders: any[] = Array.isArray(raw) ? raw : (raw.data?.orders ?? raw.orders ?? [])
     console.log(`MauDau page ${page} [${queryParam}]: ${orders.length} orders`)
+    // Stop only when the page is empty — NOT when fewer than per_page,
+    // because MauDau caps at ~15 per page regardless of per_page param
     if (!orders.length) break
     for (const o of orders) {
       map.set(String(o.id), orderToRow(o))
     }
-    // check pagination via meta or stop when fewer than 50
-    const totalPages: number = raw.data?.meta?.last_page ?? raw.meta?.last_page ?? 0
-    if (totalPages > 0 && page >= totalPages) break
-    if (!totalPages && orders.length < 50) break
     page++
   }
   return map
