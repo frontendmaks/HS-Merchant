@@ -1,26 +1,32 @@
 export const dynamic = 'force-dynamic'
 
 import { Suspense } from 'react'
+import Link from 'next/link'
 import { createServiceClient } from '@/lib/supabase/service'
 import OrdersToolbar from './OrdersToolbar'
+import OrderRow from './OrderRow'
 
-const PAGE_SIZE = 50
+const UA_MONTHS = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень']
 
-function statusBadge(status: string | null) {
-  const s = status || ''
-  let cls = 'bg-zinc-700 text-zinc-300'
-  if (s === 'Доставлено') cls = 'bg-emerald-900 text-emerald-300'
-  else if (s === 'Скасовано') cls = 'bg-red-900 text-red-300'
-  else if (s === 'Нове') cls = 'bg-amber-900 text-amber-300'
-  else if (s === 'Прийнято' || s === 'Узгоджено') cls = 'bg-blue-900 text-blue-300'
-  else if (s === 'На доставці' || s === 'Доставляється' || s === 'Передано в доставку' || s === 'Чекає в пункті') cls = 'bg-cyan-900 text-cyan-300'
-  else if (s === 'Опрацьовується' || s === 'Комплектується') cls = 'bg-yellow-900 text-yellow-300'
-  else if (s === 'Прибуло') cls = 'bg-orange-900 text-orange-300'
-  return (
-    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
-      {s || '—'}
-    </span>
-  )
+function getMonthTabs(currentMonth: string) {
+  const tabs: { value: string; label: string }[] = []
+  const [curYear, curMonthNum] = currentMonth.split('-').map(Number)
+  for (let y = 2026; y <= curYear; y++) {
+    const maxM = y === curYear ? curMonthNum : 12
+    for (let m = 1; m <= maxM; m++) {
+      const value = `${y}-${String(m).padStart(2, '0')}`
+      tabs.push({ value, label: `${UA_MONTHS[m - 1]} ${y}` })
+    }
+  }
+  return tabs
+}
+
+function monthDateRange(month: string): { from: string; to: string } {
+  const [y, m] = month.split('-').map(Number)
+  const from = `${month}-01`
+  const lastDay = new Date(y, m, 0).getDate()
+  const to = `${month}-${String(lastDay).padStart(2, '0')}`
+  return { from, to }
 }
 
 function platformBadge(platform: string | null) {
@@ -50,7 +56,7 @@ interface SearchParams {
   platform?: string
   status?: string
   search?: string
-  page?: string
+  month?: string
 }
 
 export default async function OrdersPage({
@@ -62,14 +68,19 @@ export default async function OrdersPage({
   const platform = sp.platform || ''
   const statusFilter = sp.status || ''
   const search = sp.search || ''
-  const page = Math.max(1, parseInt(sp.page || '1', 10))
+  const currentMonth = new Date().toISOString().slice(0, 7)
+  const selectedMonth = sp.month || currentMonth
+
+  const { from, to } = monthDateRange(selectedMonth)
+  const tabs = getMonthTabs(currentMonth)
 
   const supabase = createServiceClient()
 
-  // Analytics — all orders
   const { data: allOrders } = await supabase
     .from('orders')
     .select('platform,status,total,commission')
+    .gte('order_date', from)
+    .lte('order_date', to)
 
   const orders = allOrders || []
   const total = orders.length
@@ -81,7 +92,6 @@ export default async function OrdersPage({
   const commissionSum = delivered.reduce((s, o) => s + Number(o.commission || 0), 0)
   const netRevenue = revenue - commissionSum
 
-  // Platform breakdown
   const platforms = ['maudau', 'rozetka']
   const breakdown = platforms.map(pl => {
     const pOrders = orders.filter(o => o.platform === pl)
@@ -100,13 +110,13 @@ export default async function OrdersPage({
     }
   })
 
-  // Table query with filters
   let query = supabase
     .from('orders')
-    .select('*', { count: 'exact' })
+    .select('*')
+    .gte('order_date', from)
+    .lte('order_date', to)
     .order('order_date', { ascending: false })
     .order('created_at', { ascending: false })
-    .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1)
 
   if (platform) query = query.eq('platform', platform)
   if (statusFilter === 'other') {
@@ -118,12 +128,19 @@ export default async function OrdersPage({
     query = query.or(`customer_name.ilike.%${search}%,external_id.ilike.%${search}%`)
   }
 
-  const { data: tableOrders, count } = await query
-  const totalPages = Math.ceil((count || 0) / PAGE_SIZE)
+  const { data: tableOrders } = await query
+
+  function buildTabHref(month: string) {
+    const params = new URLSearchParams()
+    params.set('month', month)
+    if (platform) params.set('platform', platform)
+    if (statusFilter) params.set('status', statusFilter)
+    if (search) params.set('search', search)
+    return `?${params.toString()}`
+  }
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white p-6 space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Замовлення</h1>
@@ -131,10 +148,28 @@ export default async function OrdersPage({
         </div>
       </div>
 
-      {/* Toolbar (client) */}
       <Suspense fallback={null}>
         <OrdersToolbar />
       </Suspense>
+
+      {/* Month tabs */}
+      <div className="overflow-x-auto">
+        <div className="flex gap-1 min-w-max">
+          {tabs.map(tab => (
+            <Link
+              key={tab.value}
+              href={buildTabHref(tab.value)}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors whitespace-nowrap ${
+                tab.value === selectedMonth
+                  ? 'bg-red-600 text-white'
+                  : 'bg-zinc-800/50 text-zinc-400 hover:text-white hover:bg-zinc-800'
+              }`}
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </div>
+      </div>
 
       {/* Analytics cards */}
       <div className="grid grid-cols-4 gap-4">
@@ -216,16 +251,11 @@ export default async function OrdersPage({
 
       {/* Orders table */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-zinc-800">
           <h2 className="text-sm font-semibold text-zinc-300">
             Замовлення
-            {count !== null && <span className="ml-2 text-zinc-500">({count})</span>}
+            {tableOrders && <span className="ml-2 text-zinc-500">({tableOrders.length})</span>}
           </h2>
-          {totalPages > 1 && (
-            <div className="text-xs text-zinc-500">
-              Сторінка {page} з {totalPages}
-            </div>
-          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -237,7 +267,7 @@ export default async function OrdersPage({
                 <th className="text-left px-3 py-2 whitespace-nowrap">ПІБ</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Телефон</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Адреса</th>
-                <th className="text-left px-3 py-2 max-w-xs">Товари</th>
+                <th className="text-left px-3 py-2">Товари</th>
                 <th className="text-right px-3 py-2 whitespace-nowrap">Сума</th>
                 <th className="text-right px-3 py-2 whitespace-nowrap">Комісія</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Статус</th>
@@ -254,58 +284,27 @@ export default async function OrdersPage({
                 </tr>
               ) : (
                 tableOrders.map(order => (
-                  <tr key={order.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors">
-                    <td className="px-3 py-2 whitespace-nowrap text-zinc-400 text-xs">{order.order_date || '—'}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-zinc-300 font-mono text-xs">{order.external_id}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{platformBadge(order.platform)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-zinc-300 text-xs">{order.customer_name || '—'}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-zinc-400 text-xs">{order.customer_phone || '—'}</td>
-                    <td className="px-3 py-2 text-zinc-400 text-xs max-w-[180px]">
-                      <div className="truncate" title={order.address || ''}>{order.address || '—'}</div>
-                    </td>
-                    <td className="px-3 py-2 max-w-xs">
-                      <div className="text-zinc-400 text-xs truncate max-w-[200px]" title={order.items || ''}>
-                        {order.items ? order.items.split('\n')[0] : '—'}
-                        {order.items && order.items.includes('\n') && (
-                          <span className="text-zinc-600"> +ще</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right text-zinc-300 text-xs">
-                      {order.total != null ? `₴${fmt(Number(order.total))}` : '—'}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap text-right text-amber-400 text-xs">
-                      {order.commission != null ? `₴${fmt(Number(order.commission))}` : '—'}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{statusBadge(order.status)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-zinc-400 text-xs font-mono">{order.ttn || '—'}</td>
-                    <td className="px-3 py-2 text-zinc-500 text-xs max-w-[120px] truncate">{order.cancel_reason || '—'}</td>
-                  </tr>
+                  <OrderRow
+                    key={order.id}
+                    id={order.id}
+                    external_id={order.external_id}
+                    platform={order.platform}
+                    order_date={order.order_date}
+                    customer_name={order.customer_name}
+                    customer_phone={order.customer_phone}
+                    address={order.address}
+                    items={order.items}
+                    total={order.total}
+                    commission={order.commission}
+                    status={order.status}
+                    ttn={order.ttn}
+                    cancel_reason={order.cancel_reason}
+                  />
                 ))
               )}
             </tbody>
           </table>
         </div>
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-zinc-800 flex items-center justify-center gap-2">
-            {Array.from({ length: Math.min(totalPages, 10) }, (_, i) => i + 1).map(p => (
-              <a
-                key={p}
-                href={`?${new URLSearchParams({ ...Object.fromEntries(Object.entries(sp).filter(([k]) => k !== 'page')), ...(p > 1 ? { page: String(p) } : {}) }).toString()}`}
-                className={`px-3 py-1 rounded text-sm transition-colors ${
-                  p === page
-                    ? 'bg-red-600 text-white'
-                    : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
-                }`}
-              >
-                {p}
-              </a>
-            ))}
-            {totalPages > 10 && <span className="text-zinc-600 text-sm">...</span>}
-          </div>
-        )}
       </div>
     </div>
   )
