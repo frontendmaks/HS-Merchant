@@ -39,10 +39,19 @@ export default async function UsersPage() {
     )
   }
 
-  const { data: users } = await service
+  const { data: profiles } = await service
     .from('profiles')
     .select('*')
     .order('created_at', { ascending: true })
 
-  return <UsersManager users={users || []} currentUserId={user.id} currentRole={profile.role} />
+  // Get auth.users to detect pending invites (last_sign_in_at IS NULL = never logged in)
+  const { data: authData } = await service.auth.admin.listUsers()
+  const authMap = new Map((authData?.users ?? []).map(u => [u.id, u]))
+
+  const users = (profiles ?? []).map(p => ({
+    ...p,
+    invite_pending: !authMap.get(p.id)?.last_sign_in_at,
+  }))
+
+  return <UsersManager users={users} currentUserId={user.id} currentRole={profile.role} />
 }

@@ -36,9 +36,14 @@ export async function middleware(request: NextRequest) {
     return supabaseResponse
   }
 
-  // Login page: redirect to home if already logged in
+  // Login / set-password: redirect to home if already logged in (except set-password needs auth)
   if (pathname === '/login') {
     if (user) return NextResponse.redirect(new URL('/', request.url))
+    return supabaseResponse
+  }
+
+  // Set password page — allowed for authenticated users (just accepted invite)
+  if (pathname === '/set-password') {
     return supabaseResponse
   }
 

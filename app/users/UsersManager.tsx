@@ -10,6 +10,7 @@ interface Profile {
   role: 'super_admin' | 'admin' | 'operator' | 'viewer'
   is_active: boolean
   created_at: string
+  invite_pending?: boolean
 }
 
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
@@ -256,12 +257,19 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded ${
-                      user.is_active ? 'bg-emerald-950/60 text-emerald-400' : 'bg-zinc-800 text-zinc-500'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${user.is_active ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
-                      {user.is_active ? 'Активний' : 'Деактивований'}
-                    </span>
+                    {user.invite_pending ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded bg-amber-950/60 text-amber-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                        Запрошений
+                      </span>
+                    ) : (
+                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded ${
+                        user.is_active ? 'bg-emerald-950/60 text-emerald-400' : 'bg-zinc-800 text-zinc-500'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${user.is_active ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+                        {user.is_active ? 'Активний' : 'Деактивований'}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-zinc-500 text-xs">
                     {new Date(user.created_at).toLocaleDateString('uk-UA')}
