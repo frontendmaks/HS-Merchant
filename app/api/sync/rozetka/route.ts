@@ -139,8 +139,8 @@ export async function POST() {
     const supabase = createServiceClient()
 
     const now = new Date()
-    // created_from = start of current month
-    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    // created_from = start of current year (covers all months, not just current)
+    const monthStart = `${now.getFullYear()}-01-01`
     // updated_from = 2 hours ago (fresher statuses)
     const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000)
     const updatedFrom = `${twoHoursAgo.getFullYear()}-${String(twoHoursAgo.getMonth() + 1).padStart(2, '0')}-${String(twoHoursAgo.getDate()).padStart(2, '0')}`

@@ -104,8 +104,8 @@ export async function POST() {
     const jwt = await getJwt()
 
     const now = new Date()
-    // created_from = start of current month (catches all new orders)
-    const createdFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    // created_from = start of current year (covers all months, not just current)
+    const createdFrom = new Date(now.getFullYear(), 0, 1).toISOString()
     // updated_from = 2 hours ago (catches recently changed statuses on older orders)
     const updatedFrom = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString()
 
