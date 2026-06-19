@@ -20,6 +20,7 @@ const STATUS_MAP: Record<number, string> = {
   17: 'Скасовано',
   18: 'Скасовано',
   19: 'Скасовано',
+  20: 'Комплектується',
   24: 'Скасовано',
   25: 'Скасовано',
   26: 'Опрацьовується',
@@ -35,7 +36,6 @@ const STATUS_MAP: Record<number, string> = {
   52: 'Нове',
   54: 'Нове',
   55: 'Очікує оплату',
-  20: 'Комплектується',
   61: 'Доставляється',
 }
 
@@ -63,81 +63,106 @@ function buildItems(purchases: any[]): string {
     .join('\n')
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function orderToRow(order: any) {
+  const statusNum = Number(order.status)
+  const isCanceled = CANCELED_STATUSES.has(statusNum)
+
+  let customerName = ''
+  if (order.recipient_title?.full_name) {
+    customerName = order.recipient_title.full_name
+  } else {
+    customerName = [
+      order.recipient_title?.last_name,
+      order.recipient_title?.first_name,
+      order.recipient_title?.second_name,
+    ]
+      .filter(Boolean)
+      .join(' ')
+  }
+
+  const commissionSum = isCanceled
+    ? 0
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    : (order.purchases || []).reduce((s: number, p: any) => s + (Number(p.commission_sum) || 0), 0)
+
+  return {
+    external_id: 'RZ-' + order.id,
+    platform: 'rozetka',
+    order_date: order.created ? order.created.split(' ')[0] : null,
+    customer_name: customerName || null,
+    customer_phone: order.delivery?.recipient_phone || order.user_phone || null,
+    address: buildAddress(order.delivery),
+    items: buildItems(order.purchases || []),
+    total: Number(order.cost_with_discount || order.cost || 0),
+    commission: commissionSum,
+    status: STATUS_MAP[statusNum] || String(order.status),
+    status_raw: String(order.status),
+    ttn: order.ttn || null,
+    cancel_reason: null,
+    raw: order,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+async function fetchPages(dateParam: string): Promise<Map<string, ReturnType<typeof orderToRow>>> {
+  const map = new Map<string, ReturnType<typeof orderToRow>>()
+  let page = 1
+  let pageCount = 1
+
+  while (page <= pageCount) {
+    const url = `${BASE}/orders/search?page=${page}&pageSize=50&sort=-id&types=1&expand=purchases,delivery&${dateParam}`
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    })
+    if (!res.ok) break
+    const data = await res.json()
+    if (!data.success) break
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orders: any[] = data.content?.orders || []
+    pageCount = data.content?._meta?.pageCount || 1
+
+    for (const o of orders) {
+      map.set(String(o.id), orderToRow(o))
+    }
+
+    if (!orders.length) break
+    page++
+  }
+
+  return map
+}
+
 export async function POST() {
   try {
     const supabase = createServiceClient()
 
     const now = new Date()
-    const createdFrom = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    // created_from = start of current month
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    // updated_from = 2 hours ago (fresher statuses)
+    const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000)
+    const updatedFrom = `${twoHoursAgo.getFullYear()}-${String(twoHoursAgo.getMonth() + 1).padStart(2, '0')}-${String(twoHoursAgo.getDate()).padStart(2, '0')}`
 
-    let page = 1
-    let pageCount = 1
-    let totalSynced = 0
+    // Dual fetch
+    const [createdMap, updatedMap] = await Promise.all([
+      fetchPages(`created_from=${monthStart}`),
+      fetchPages(`updated_from=${updatedFrom}`),
+    ])
 
-    while (page <= pageCount) {
-      const url = `${BASE}/orders/search?page=${page}&pageSize=50&sort=-id&types=1&expand=purchases,delivery&created_from=${createdFrom}`
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${TOKEN}` },
-      })
-      if (!res.ok) throw new Error(`Rozetka orders fetch failed: ${res.status}`)
-      const data = await res.json()
+    // Merge: updatedMap wins
+    const merged = new Map([...createdMap, ...updatedMap])
+    const rows = Array.from(merged.values())
 
-      if (!data.success) throw new Error('Rozetka API returned success=false')
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const orders: any[] = data.content?.orders || []
-      pageCount = data.content?._meta?.pageCount || 1
-
-      if (!orders.length) break
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rows = orders.map((order: any) => {
-        const statusNum = Number(order.status)
-        const isCanceled = CANCELED_STATUSES.has(statusNum)
-
-        let customerName = ''
-        if (order.recipient_title?.full_name) {
-          customerName = order.recipient_title.full_name
-        } else {
-          customerName = [order.recipient_title?.last_name, order.recipient_title?.first_name, order.recipient_title?.second_name]
-            .filter(Boolean).join(' ')
-        }
-
-        const commissionSum = isCanceled
-          ? 0
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          : (order.purchases || []).reduce((s: number, p: any) => s + (Number(p.commission_sum) || 0), 0)
-
-        return {
-          external_id: 'RZ-' + order.id,
-          platform: 'rozetka',
-          order_date: order.created ? order.created.split(' ')[0] : null,
-          customer_name: customerName || null,
-          customer_phone: order.delivery?.recipient_phone || order.user_phone || null,
-          address: buildAddress(order.delivery),
-          items: buildItems(order.purchases || []),
-          total: Number(order.cost_with_discount || order.cost || 0),
-          commission: commissionSum,
-          status: STATUS_MAP[statusNum] || String(order.status),
-          status_raw: String(order.status),
-          ttn: order.ttn || null,
-          cancel_reason: null,
-          raw: order,
-          updated_at: new Date().toISOString(),
-        }
-      })
-
+    if (rows.length > 0) {
       const { error } = await supabase
         .from('orders')
         .upsert(rows, { onConflict: 'external_id,platform' })
-
       if (error) throw error
-      totalSynced += rows.length
-
-      page++
     }
 
-    return NextResponse.json({ success: true, synced: totalSynced })
+    return NextResponse.json({ success: true, synced: rows.length })
   } catch (err) {
     console.error('Rozetka sync error:', err)
     return NextResponse.json(

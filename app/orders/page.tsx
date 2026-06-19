@@ -15,6 +15,7 @@ function statusBadge(status: string | null) {
   else if (s === 'Прийнято' || s === 'Узгоджено') cls = 'bg-blue-900 text-blue-300'
   else if (s === 'На доставці' || s === 'Доставляється' || s === 'Передано в доставку' || s === 'Чекає в пункті') cls = 'bg-cyan-900 text-cyan-300'
   else if (s === 'Опрацьовується' || s === 'Комплектується') cls = 'bg-yellow-900 text-yellow-300'
+  else if (s === 'Прибуло') cls = 'bg-orange-900 text-orange-300'
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
       {s || '—'}
@@ -235,18 +236,19 @@ export default async function OrdersPage({
                 <th className="text-left px-3 py-2 whitespace-nowrap">Платформа</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">ПІБ</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Телефон</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">Адреса</th>
                 <th className="text-left px-3 py-2 max-w-xs">Товари</th>
                 <th className="text-right px-3 py-2 whitespace-nowrap">Сума</th>
                 <th className="text-right px-3 py-2 whitespace-nowrap">Комісія</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Статус</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">ТТН</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">Причина</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">Причина скасування</th>
               </tr>
             </thead>
             <tbody>
               {!tableOrders?.length ? (
                 <tr>
-                  <td colSpan={11} className="text-center py-12 text-zinc-500">
+                  <td colSpan={12} className="text-center py-12 text-zinc-500">
                     Немає замовлень
                   </td>
                 </tr>
@@ -258,6 +260,9 @@ export default async function OrdersPage({
                     <td className="px-3 py-2 whitespace-nowrap">{platformBadge(order.platform)}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-zinc-300 text-xs">{order.customer_name || '—'}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-zinc-400 text-xs">{order.customer_phone || '—'}</td>
+                    <td className="px-3 py-2 text-zinc-400 text-xs max-w-[180px]">
+                      <div className="truncate" title={order.address || ''}>{order.address || '—'}</div>
+                    </td>
                     <td className="px-3 py-2 max-w-xs">
                       <div className="text-zinc-400 text-xs truncate max-w-[200px]" title={order.items || ''}>
                         {order.items ? order.items.split('\n')[0] : '—'}

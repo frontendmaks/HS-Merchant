@@ -52,61 +52,81 @@ function buildItems(parcels: any[]): string {
   return lines.join('\n')
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function orderToRow(order: any) {
+  return {
+    external_id: 'MD-' + order.id,
+    platform: 'maudau',
+    order_date: order.created_at ? order.created_at.split('T')[0] : null,
+    customer_name: order.recipient
+      ? `${order.recipient.last_name || ''} ${order.recipient.first_name || ''}`.trim()
+      : null,
+    customer_phone: order.recipient?.phone || null,
+    address: buildAddress(order.delivery_address),
+    items: buildItems(order.parcels || []),
+    total: (order.total_price || 0) / 100,
+    commission: (order.merchant_commission_amount || 0) / 100,
+    status: STATUS_MAP[order.status] || order.status || null,
+    status_raw: order.status || null,
+    ttn: order.parcels?.[0]?.delivery_tracking_number || null,
+    cancel_reason: order.cancel_reason || null,
+    raw: order,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+// Fetch all pages for a given query string
+async function fetchAllPages(jwt: string, queryParam: string): Promise<Map<string, ReturnType<typeof orderToRow>>> {
+  const map = new Map<string, ReturnType<typeof orderToRow>>()
+  let page = 1
+  while (true) {
+    const url = `${BASE}/v1/merchant_public_api/orders?page=${page}&per_page=50&${queryParam}`
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${jwt}` },
+    })
+    if (!res.ok) break
+    const data = await res.json()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orders: any[] = data.orders || data || []
+    if (!orders.length) break
+    for (const o of orders) {
+      map.set(String(o.id), orderToRow(o))
+    }
+    if (orders.length < 50) break
+    page++
+  }
+  return map
+}
+
 export async function POST() {
   try {
     const supabase = createServiceClient()
     const jwt = await getJwt()
 
     const now = new Date()
+    // created_from = start of current month (catches all new orders)
     const createdFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    // updated_from = 2 hours ago (catches recently changed statuses on older orders)
+    const updatedFrom = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString()
 
-    let page = 1
-    let totalSynced = 0
+    // Dual fetch: by creation date (current month) + by update date (last 2h)
+    const [createdMap, updatedMap] = await Promise.all([
+      fetchAllPages(jwt, `created_from=${encodeURIComponent(createdFrom)}`),
+      fetchAllPages(jwt, `updated_from=${encodeURIComponent(updatedFrom)}`),
+    ])
 
-    while (true) {
-      const url = `${BASE}/v1/merchant_public_api/orders?page=${page}&per_page=50&created_from=${encodeURIComponent(createdFrom)}`
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${jwt}` },
-      })
-      if (!res.ok) throw new Error(`MauDau orders fetch failed: ${res.status}`)
-      const data = await res.json()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const orders: any[] = data.orders || data || []
-      if (!orders.length) break
+    // Merge: updatedMap wins (fresher data)
+    const merged = new Map([...createdMap, ...updatedMap])
+    const rows = Array.from(merged.values())
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rows = orders.map((order: any) => ({
-        external_id: 'MD-' + order.id,
-        platform: 'maudau',
-        order_date: order.created_at ? order.created_at.split('T')[0] : null,
-        customer_name: order.recipient
-          ? `${order.recipient.last_name || ''} ${order.recipient.first_name || ''}`.trim()
-          : null,
-        customer_phone: order.recipient?.phone || null,
-        address: buildAddress(order.delivery_address),
-        items: buildItems(order.parcels || []),
-        total: (order.total_price || 0) / 100,
-        commission: (order.merchant_commission_amount || 0) / 100,
-        status: STATUS_MAP[order.status] || order.status || null,
-        status_raw: order.status || null,
-        ttn: order.parcels?.[0]?.delivery_tracking_number || null,
-        cancel_reason: order.cancel_reason || null,
-        raw: order,
-        updated_at: new Date().toISOString(),
-      }))
-
+    if (rows.length > 0) {
       const { error } = await supabase
         .from('orders')
         .upsert(rows, { onConflict: 'external_id,platform' })
-
       if (error) throw error
-      totalSynced += rows.length
-
-      if (orders.length < 50) break
-      page++
     }
 
-    return NextResponse.json({ success: true, synced: totalSynced })
+    return NextResponse.json({ success: true, synced: rows.length })
   } catch (err) {
     console.error('MauDau sync error:', err)
     return NextResponse.json(
