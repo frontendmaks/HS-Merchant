@@ -27,7 +27,7 @@ async function getCallerProfile() {
 // GET /api/users — list all users (admin only)
 export async function GET() {
   const caller = await getCallerProfile()
-  if (!caller || caller.role !== 'admin') {
+  if (!caller || !['super_admin', 'admin'].includes(caller.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -40,7 +40,7 @@ export async function GET() {
 // POST /api/users — invite new user (admin only)
 export async function POST(request: NextRequest) {
   const caller = await getCallerProfile()
-  if (!caller || caller.role !== 'admin') {
+  if (!caller || !['super_admin', 'admin'].includes(caller.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
 // PATCH /api/users — update role or status (admin only)
 export async function PATCH(request: NextRequest) {
   const caller = await getCallerProfile()
-  if (!caller || caller.role !== 'admin') {
+  if (!caller || !['super_admin', 'admin'].includes(caller.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -96,8 +96,12 @@ export async function PATCH(request: NextRequest) {
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
   // Prevent demoting yourself
-  if (id === caller.id && role && role !== 'admin') {
+  if (id === caller.id && role) {
     return NextResponse.json({ error: 'Не можна змінити власну роль' }, { status: 400 })
+  }
+  // Only super_admin can assign super_admin role
+  if (role === 'super_admin' && caller.role !== 'super_admin') {
+    return NextResponse.json({ error: 'Тільки Супер адміністратор може призначати цю роль' }, { status: 403 })
   }
 
   const service = createServiceClient()
@@ -115,7 +119,7 @@ export async function PATCH(request: NextRequest) {
 // DELETE /api/users — remove user (admin only)
 export async function DELETE(request: NextRequest) {
   const caller = await getCallerProfile()
-  if (!caller || caller.role !== 'admin') {
+  if (!caller || !['super_admin', 'admin'].includes(caller.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

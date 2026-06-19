@@ -27,7 +27,7 @@ export default async function UsersPage() {
   const service = createServiceClient()
   const { data: profile } = await service.from('profiles').select('*').eq('id', user.id).single()
 
-  if (!profile || profile.role !== 'admin') {
+  if (!profile || !['super_admin', 'admin'].includes(profile.role)) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">

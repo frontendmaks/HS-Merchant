@@ -4,14 +4,23 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { useEffect, useState } from 'react'
 
+const ADMIN_ROLES = ['super_admin', 'admin']
+
 const nav = [
-  { href: '/',        label: 'Дашборд',          icon: '▦' },
-  { href: '/products',label: 'Товари',            icon: '◈' },
-  { href: '/feeds',   label: 'Фіди',              icon: '⊞' },
-  { href: '/syncs',   label: 'Синхронізації',     icon: '↻' },
-  { href: '/orders',  label: 'Замовлення',        icon: '◷' },
-  { href: '/users',   label: 'Користувачі',       icon: '◉', adminOnly: true },
+  { href: '/',         label: 'Дашборд',       icon: '▦', minRole: null },
+  { href: '/products', label: 'Товари',         icon: '◈', minRole: null },
+  { href: '/feeds',    label: 'Фіди',           icon: '⊞', minRole: null },
+  { href: '/syncs',    label: 'Синхронізації',  icon: '↻', minRole: null },
+  { href: '/orders',   label: 'Замовлення',     icon: '◷', minRole: null },
+  { href: '/users',    label: 'Користувачі',    icon: '◉', minRole: 'admin' },
 ]
+
+const ROLE_LABELS: Record<string, string> = {
+  super_admin: 'Супер адміністратор',
+  admin:       'Адміністратор',
+  operator:    'Оператор',
+  viewer:      'Глядач',
+}
 
 interface Profile {
   full_name: string | null
@@ -23,6 +32,7 @@ export default function Sidebar() {
   const path = usePathname()
   const router = useRouter()
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [loaded, setLoaded] = useState(false)
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -31,10 +41,14 @@ export default function Sidebar() {
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) return
-      const { data } = await supabase.from('profiles').select('full_name,email,role').eq('id', user.id).single()
-      if (data) setProfile(data)
-      else setProfile({ full_name: null, email: user.email || '', role: 'viewer' })
+      if (!user) { setLoaded(true); return }
+      const { data } = await supabase
+        .from('profiles')
+        .select('full_name,email,role')
+        .eq('id', user.id)
+        .single()
+      setProfile(data ?? { full_name: null, email: user.email || '', role: 'viewer' })
+      setLoaded(true)
     })
   }, [])
 
@@ -44,15 +58,14 @@ export default function Sidebar() {
     router.refresh()
   }
 
-  const ROLE_LABELS: Record<string, string> = {
-    admin: 'Адмін',
-    operator: 'Оператор',
-    viewer: 'Переглядач',
-  }
-
-  const visibleNav = nav.filter(item => !item.adminOnly || profile?.role === 'admin')
-
   if (path === '/login') return null
+
+  const role = profile?.role ?? ''
+  const isAdminLevel = ADMIN_ROLES.includes(role)
+
+  const visibleNav = nav.filter(item =>
+    item.minRole === null || (item.minRole === 'admin' && isAdminLevel)
+  )
 
   return (
     <aside className="fixed top-0 left-0 h-screen w-60 bg-zinc-900 border-r border-zinc-800 flex flex-col">
@@ -90,7 +103,7 @@ export default function Sidebar() {
 
       {/* User info + sign out */}
       <div className="px-3 py-4 border-t border-zinc-800 space-y-2">
-        {profile && (
+        {loaded && profile && (
           <div className="px-3 py-2.5 rounded-lg bg-zinc-800/50">
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-full bg-zinc-700 flex items-center justify-center text-zinc-300 text-xs font-semibold shrink-0">
@@ -100,7 +113,9 @@ export default function Sidebar() {
                 <div className="text-white text-xs font-medium truncate">
                   {profile.full_name || profile.email}
                 </div>
-                <div className="text-zinc-500 text-xs">{ROLE_LABELS[profile.role] || profile.role}</div>
+                <div className="text-zinc-500 text-xs truncate">
+                  {ROLE_LABELS[profile.role] || profile.role}
+                </div>
               </div>
             </div>
           </div>

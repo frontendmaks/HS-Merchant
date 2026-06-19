@@ -7,15 +7,16 @@ interface Profile {
   id: string
   email: string
   full_name: string | null
-  role: 'admin' | 'operator' | 'viewer'
+  role: 'super_admin' | 'admin' | 'operator' | 'viewer'
   is_active: boolean
   created_at: string
 }
 
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
-  admin:    { label: 'Адмін',      color: 'bg-red-900/60 text-red-300' },
-  operator: { label: 'Оператор',   color: 'bg-blue-900/60 text-blue-300' },
-  viewer:   { label: 'Переглядач', color: 'bg-zinc-700 text-zinc-300' },
+  super_admin: { label: 'Супер адмін',  color: 'bg-yellow-900/60 text-yellow-300' },
+  admin:       { label: 'Адміністратор', color: 'bg-red-900/60 text-red-300' },
+  operator:    { label: 'Оператор',      color: 'bg-blue-900/60 text-blue-300' },
+  viewer:      { label: 'Глядач',        color: 'bg-zinc-700 text-zinc-300' },
 }
 
 export default function UsersManager({ users: initial, currentUserId }: {
@@ -29,7 +30,7 @@ export default function UsersManager({ users: initial, currentUserId }: {
   const [showInvite, setShowInvite] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteName, setInviteName] = useState('')
-  const [inviteRole, setInviteRole] = useState<'admin' | 'operator' | 'viewer'>('operator')
+  const [inviteRole, setInviteRole] = useState<'super_admin' | 'admin' | 'operator' | 'viewer'>('operator')
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteError, setInviteError] = useState('')
   const [inviteSuccess, setInviteSuccess] = useState('')
@@ -151,9 +152,10 @@ export default function UsersManager({ users: initial, currentUserId }: {
                   onChange={e => setInviteRole(e.target.value as typeof inviteRole)}
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500"
                 >
-                  <option value="admin">Адмін</option>
+                  <option value="super_admin">Супер адміністратор</option>
+                  <option value="admin">Адміністратор</option>
                   <option value="operator">Оператор</option>
-                  <option value="viewer">Переглядач</option>
+                  <option value="viewer">Глядач</option>
                 </select>
               </div>
             </div>
@@ -183,14 +185,15 @@ export default function UsersManager({ users: initial, currentUserId }: {
       )}
 
       {/* Role legend */}
-      <div className="flex gap-4">
+      <div className="flex flex-wrap gap-3">
         {Object.entries(ROLE_LABELS).map(([k, v]) => (
           <div key={k} className="flex items-center gap-2">
             <span className={`px-2 py-0.5 rounded text-xs font-medium ${v.color}`}>{v.label}</span>
             <span className="text-zinc-500 text-xs">
-              {k === 'admin' ? '— повний доступ, управління командою' :
-               k === 'operator' ? '— робота із замовленнями та синками' :
-               '— тільки перегляд'}
+              {k === 'super_admin' ? '— необмежений доступ, підтримка системи' :
+               k === 'admin'       ? '— управління командою та налаштування' :
+               k === 'operator'    ? '— робота із замовленнями та синками' :
+                                     '— тільки перегляд'}
             </span>
           </div>
         ))}
@@ -240,9 +243,10 @@ export default function UsersManager({ users: initial, currentUserId }: {
                         onChange={e => handleRoleChange(user.id, e.target.value)}
                         className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-red-500"
                       >
-                        <option value="admin">Адмін</option>
+                        <option value="super_admin">Супер адміністратор</option>
+                        <option value="admin">Адміністратор</option>
                         <option value="operator">Оператор</option>
-                        <option value="viewer">Переглядач</option>
+                        <option value="viewer">Глядач</option>
                       </select>
                     )}
                   </td>
