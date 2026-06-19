@@ -39,7 +39,7 @@ export default function Sidebar() {
   )
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!session) { setLoaded(true); return }
       const { data } = await supabase
         .from('profiles')
@@ -49,6 +49,8 @@ export default function Sidebar() {
       setProfile(data ?? { full_name: null, email: session.user.email || '', role: 'viewer' })
       setLoaded(true)
     })
+    return () => subscription.unsubscribe()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function handleSignOut() {
