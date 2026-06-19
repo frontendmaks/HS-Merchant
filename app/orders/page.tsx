@@ -125,7 +125,7 @@ export default async function OrdersPage({
     query = query.eq('status', statusFilter)
   }
   if (search) {
-    query = query.or(`customer_name.ilike.%${search}%,external_id.ilike.%${search}%`)
+    query = query.or(`customer_name.ilike.%${search}%,external_id.ilike.%${search}%,customer_phone.ilike.%${search}%`)
   }
 
   const { data: tableOrders } = await query
@@ -140,7 +140,7 @@ export default async function OrdersPage({
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white p-6 space-y-6">
+    <div className="min-h-screen bg-zinc-950 text-white space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Замовлення</h1>
@@ -172,40 +172,40 @@ export default async function OrdersPage({
       </div>
 
       {/* Analytics cards */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="bg-zinc-900 rounded-xl p-4 border border-zinc-800">
+      <div className="grid grid-cols-4 gap-3">
+        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
           <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Всього замовлень</div>
           <div className="text-3xl font-bold text-white">{total}</div>
         </div>
-        <div className="bg-zinc-900 rounded-xl p-4 border border-zinc-800">
+        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
           <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Доставлено</div>
           <div className="text-3xl font-bold text-emerald-400">{delivered.length}</div>
           <div className="text-zinc-500 text-sm mt-0.5">{pct(delivered.length, total)}</div>
         </div>
-        <div className="bg-zinc-900 rounded-xl p-4 border border-zinc-800">
+        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
           <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Скасовано</div>
           <div className="text-3xl font-bold text-red-400">{canceled.length}</div>
           <div className="text-zinc-500 text-sm mt-0.5">{pct(canceled.length, total)}</div>
         </div>
-        <div className="bg-zinc-900 rounded-xl p-4 border border-zinc-800">
+        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
           <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">В процесі</div>
           <div className="text-3xl font-bold text-cyan-400">{inProgress.length}</div>
         </div>
       </div>
 
       {/* Revenue cards */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-zinc-900 rounded-xl p-4 border border-zinc-800">
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
           <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Загальний дохід</div>
           <div className="text-2xl font-bold text-white">₴{fmt(revenue)}</div>
           <div className="text-zinc-500 text-xs mt-0.5">По доставлених замовленнях</div>
         </div>
-        <div className="bg-zinc-900 rounded-xl p-4 border border-zinc-800">
+        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
           <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Комісія</div>
           <div className="text-2xl font-bold text-amber-400">₴{fmt(commissionSum)}</div>
           <div className="text-zinc-500 text-xs mt-0.5">По доставлених замовленнях</div>
         </div>
-        <div className="bg-zinc-900 rounded-xl p-4 border border-zinc-800">
+        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
           <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Чистий дохід</div>
           <div className="text-2xl font-bold text-emerald-400">₴{fmt(netRevenue)}</div>
           <div className="text-zinc-500 text-xs mt-0.5">Дохід мінус комісія</div>

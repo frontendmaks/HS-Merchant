@@ -21,7 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${geist.variable} ${geistMono.variable} antialiased bg-zinc-950`}>
         <div className="flex min-h-screen">
           <Sidebar />
-          <main className="flex-1 ml-60 p-8">
+          <main className="flex-1 ml-60 p-4 min-w-0 overflow-x-hidden">
             {children}
           </main>
         </div>

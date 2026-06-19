@@ -43,7 +43,15 @@ async function getJwt(): Promise<string> {
 function str(val: any): string {
   if (!val) return ''
   if (typeof val === 'string') return val
-  return val.description || val.name || val.title || val.address_text || ''
+  if (typeof val === 'number') return String(val)
+  // Try known string keys first, then any string value in the object
+  const known = val.description || val.name || val.title || val.address_text || val.address || val.text || val.value
+  if (known && typeof known === 'string') return known
+  // Fallback: find first string value
+  for (const v of Object.values(val)) {
+    if (typeof v === 'string' && v) return v
+  }
+  return ''
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
