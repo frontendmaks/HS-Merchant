@@ -59,9 +59,9 @@ export default function Sidebar() {
 
   if (path === '/login' || path === '/set-password') return null
 
-  const role = profile?.role ?? ''
-  const visibleNav = loaded
-    ? nav.filter(item => !role || item.roles.includes(role))
+  const role = profile?.role
+  const visibleNav = loaded && role
+    ? nav.filter(item => item.roles.includes(role))
     : []
 
   return (

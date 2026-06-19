@@ -72,8 +72,9 @@ export default function SetPasswordPage() {
     try {
       const { error } = await supabase.auth.updateUser({ password })
       if (error) throw error
-      router.push('/')
-      router.refresh()
+      // Sign out so the user logs in fresh with their new credentials
+      await supabase.auth.signOut()
+      router.push('/login?invited=1')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Помилка збереження пароля')
     } finally {

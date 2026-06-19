@@ -2,10 +2,12 @@
 
 import { useState } from 'react'
 import { createBrowserClient } from '@supabase/ssr'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const isNewUser = searchParams.get('invited') === '1'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -41,6 +43,12 @@ export default function LoginPage() {
           <h1 className="text-white text-xl font-semibold">HS Merchant</h1>
           <p className="text-zinc-500 text-sm mt-1">Вхід в адмін-панель</p>
         </div>
+
+        {isNewUser && (
+          <div className="bg-emerald-950/50 border border-emerald-800 rounded-xl px-4 py-3 text-emerald-400 text-sm text-center mb-4">
+            ✓ Пароль встановлено! Тепер увійдіть зі своїми даними.
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
           <div>
