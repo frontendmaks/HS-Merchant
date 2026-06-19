@@ -18,21 +18,15 @@ export default function SetPasswordPage() {
   )
 
   useEffect(() => {
-    // Wait for Supabase to process the hash fragment (#access_token=...) from invite link
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // onAuthStateChange fires immediately with current session state,
+    // and also picks up the hash fragment (#access_token=...) from invite link
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session) {
         setReady(true)
-      } else {
-        // Listen for auth state change (hash processing is async)
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-          if (session) {
-            setReady(true)
-            subscription.unsubscribe()
-          }
-        })
-        return () => subscription.unsubscribe()
+        subscription.unsubscribe()
       }
     })
+    return () => subscription.unsubscribe()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

@@ -57,7 +57,7 @@ export default function Sidebar() {
     router.refresh()
   }
 
-  if (path === '/login') return null
+  if (path === '/login' || path === '/set-password') return null
 
   const role = profile?.role ?? ''
   const visibleNav = loaded
