@@ -83,8 +83,13 @@ function orderToRow(order: any) {
 
   const commissionSum = isCanceled
     ? 0
+    // commission_sum is nested in purchase.item; calculate from cost_with_discount * commission_percent
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    : (order.purchases || []).reduce((s: number, p: any) => s + (Number(p.commission_sum) || 0), 0)
+    : (order.purchases || []).reduce((s: number, p: any) => {
+        const pct = Number(p.item?.commission_percent ?? 0) / 100
+        const cost = Number(p.cost_with_discount ?? p.cost ?? 0)
+        return s + cost * pct
+      }, 0)
 
   return {
     external_id: 'RZ-' + order.id,
