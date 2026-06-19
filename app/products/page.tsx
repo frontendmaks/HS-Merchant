@@ -37,8 +37,8 @@ export default async function ProductsPage({
 }) {
   const { getCurrentRole } = await import('@/lib/getRole')
   const { redirect } = await import('next/navigation')
-  const role = await getCurrentRole()
-  if (role === 'operator') redirect('/orders')
+  const userRole = await getCurrentRole()
+  if (userRole === 'operator') redirect('/orders')
 
   const { q = '', page: pageStr = '1', sort: sortRaw = 'name', dir: dirRaw = 'asc' } = await searchParams
   const page = Math.max(1, parseInt(pageStr) || 1)
@@ -47,8 +47,7 @@ export default async function ProductsPage({
 
   const { products, total } = await getProducts(q, page, sort, dir)
   const totalPages = Math.ceil(total / PER_PAGE)
-  const role = await getCurrentRole()
-  const readOnly = role === 'viewer'
+  const readOnly = userRole === 'viewer'
 
   const buildPageUrl = (p: number) => {
     const sp = new URLSearchParams({ ...(q && { q }), sort, dir, page: String(p) })
