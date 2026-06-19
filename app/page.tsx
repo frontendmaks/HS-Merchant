@@ -4,15 +4,15 @@ export const dynamic = 'force-dynamic'
 
 async function getStats() {
   const supabase = createServiceClient()
-  const [products, feeds, marketplaces, changelog] = await Promise.all([
-    supabase.from('products').select('id, name, status, stock, price, description, images, sku, updated_at'),
+  const [products, feeds, marketplaces, changelog, feedActiveCounts] = await Promise.all([
+    supabase.from('products').select('id, name, status, stock, price, description, images, sku, updated_at').eq('status', 'active'),
     supabase.from('feeds').select(`
-      id, status, slug, updated_at,
-      marketplace:marketplaces(id, name, slug),
-      feed_products(count)
+      id, status, slug, name, updated_at,
+      marketplace:marketplaces(id, name, slug)
     `, { count: 'exact' }),
     supabase.from('marketplaces').select('id, name, slug', { count: 'exact' }),
     supabase.from('product_changelog').select('*').order('created_at', { ascending: false }).limit(8),
+    supabase.from('feed_products').select('feed_id').eq('is_active', true),
   ])
 
   const allProducts = products.data ?? []
@@ -38,15 +38,23 @@ async function getStats() {
   })
 
   // Нульовий сток
-  const zeroStock = allProducts.filter(p => p.status === 'active' && p.stock === 0)
+  const zeroStock = allProducts.filter(p => p.stock === 0)
+
+  // Підрахунок активних товарів по фідах
+  const feedCountMap = new Map<string, number>()
+  for (const row of feedActiveCounts.data ?? []) {
+    feedCountMap.set(row.feed_id, (feedCountMap.get(row.feed_id) ?? 0) + 1)
+  }
+
+  const marketplaceNames = (marketplaces.data ?? []).map(m => m.name).join(', ')
 
   return {
     totalProducts: allProducts.length,
-    activeProducts: allProducts.filter(p => p.status === 'active').length,
     totalFeeds: feeds.count ?? 0,
     activeFeeds: feeds.data?.filter(f => f.status === 'active').length ?? 0,
     totalMarketplaces: marketplaces.count ?? 0,
-    feeds: feeds.data ?? [],
+    marketplaceNames,
+    feeds: (feeds.data ?? []).map(f => ({ ...f, activeProductCount: feedCountMap.get(f.id) ?? 0 })),
     problematic,
     zeroStock,
     changelog: changelog.data ?? [],
@@ -67,9 +75,9 @@ export default async function Dashboard() {
   const stats = await getStats()
 
   const cards = [
-    { label: 'Товарів в каталозі', value: stats.totalProducts,    sub: `${stats.activeProducts} активних`,  color: 'border-red-600'     },
-    { label: 'XML фідів',          value: stats.totalFeeds,        sub: `${stats.activeFeeds} активних`,     color: 'border-blue-500'    },
-    { label: 'Маркетплейси',       value: stats.totalMarketplaces, sub: 'Rozetka, Prom, MauDau',             color: 'border-emerald-500' },
+    { label: 'Товарів в каталозі', value: stats.totalProducts,    sub: `активних у базі`,           color: 'border-red-600'     },
+    { label: 'XML фідів',          value: stats.totalFeeds,        sub: `${stats.activeFeeds} активних`,  color: 'border-blue-500'    },
+    { label: 'Маркетплейси',       value: stats.totalMarketplaces, sub: stats.marketplaceNames || 'немає', color: 'border-emerald-500' },
   ]
 
   return (
@@ -193,7 +201,7 @@ export default async function Dashboard() {
             </div>
           )}
           {stats.feeds.map((feed: any) => {
-            const productCount = feed.feed_products?.[0]?.count ?? 0
+            const productCount = feed.activeProductCount ?? 0
             const marketplace = feed.marketplace
             return (
               <div key={feed.id} className="grid grid-cols-[1fr_160px_80px_100px_140px] gap-4 px-6 py-4 items-center hover:bg-zinc-800/30 transition-colors">

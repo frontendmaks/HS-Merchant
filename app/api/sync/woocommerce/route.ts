@@ -145,10 +145,20 @@ export async function POST() {
 
     if (error) throw error
 
+    // 5. Деактивуємо товари яких більше немає в WC
+    const activeExternalIds = mapped.map(p => p.external_id)
+    const { data: deactivated } = await supabase
+      .from('products')
+      .update({ status: 'inactive' })
+      .eq('status', 'active')
+      .not('external_id', 'in', `(${activeExternalIds.join(',')})`)
+      .select('id')
+
     const withVariation = [...variationMap.values()].filter(Boolean).length
     return NextResponse.json({
       success: true,
       synced: mapped.length,
+      deactivated: deactivated?.length ?? 0,
       total,
       warehouse: WAREHOUSE,
       with_warehouse_stock: withVariation,
