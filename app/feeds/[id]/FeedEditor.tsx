@@ -49,7 +49,7 @@ type Override = {
   description_ru?: string
 }
 
-/** Combo: select from known MauDau cats OR type a custom slug */
+/** Searchable category dropdown for MauDau portal_id mapping */
 function CategoryPortalRow({
   catName, value, maudauCategories, onChange,
 }: {
@@ -58,55 +58,79 @@ function CategoryPortalRow({
   maudauCategories: { slug: string; title: string }[]
   onChange: (v: string) => void
 }) {
-  const [mode, setMode] = useState<'select' | 'manual'>('select')
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
 
-  // If saved value doesn't match any known slug — switch to manual automatically
-  const knownSlugs = maudauCategories.map(c => c.slug)
-  const isKnown = !value || knownSlugs.includes(value)
+  const selectedCat = maudauCategories.find(c => c.slug === value)
+  const displayLabel = selectedCat ? selectedCat.title : value || '— оберіть —'
 
-  const effectiveMode = (!isKnown || mode === 'manual') ? 'manual' : 'select'
+  const filtered = search.trim()
+    ? maudauCategories.filter(c =>
+        c.title.toLowerCase().includes(search.toLowerCase()) ||
+        c.slug.toLowerCase().includes(search.toLowerCase())
+      )
+    : maudauCategories
 
   return (
     <div className="flex items-center gap-2">
       <span className="text-xs text-zinc-300 flex-1 min-w-0 truncate">{catName}</span>
       <span className="text-zinc-600 text-xs shrink-0">→</span>
 
-      {effectiveMode === 'select' ? (
-        <>
-          <select
-            value={value}
-            onChange={e => onChange(e.target.value)}
-            className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white w-44 focus:outline-none focus:border-purple-500"
-          >
-            <option value="">— оберіть —</option>
-            {maudauCategories.map(mc => (
-              <option key={mc.slug} value={mc.slug}>{mc.title}</option>
-            ))}
-          </select>
-          <button
-            onClick={() => setMode('manual')}
-            title="Ввести slug вручну"
-            className="text-zinc-600 hover:text-zinc-400 text-xs shrink-0"
-          >✏️</button>
-        </>
-      ) : (
-        <>
-          <input
-            type="text"
-            placeholder="slug категорії MauDau"
-            value={value}
-            onChange={e => onChange(e.target.value)}
-            className="bg-zinc-800 border border-purple-700 rounded px-2 py-1 text-xs text-white font-mono w-44 focus:outline-none focus:border-purple-500"
-          />
-          {maudauCategories.length > 0 && (
-            <button
-              onClick={() => { setMode('select'); onChange('') }}
-              title="Обрати зі списку"
-              className="text-zinc-600 hover:text-zinc-400 text-xs shrink-0"
-            >📋</button>
-          )}
-        </>
-      )}
+      <div className="relative w-48">
+        <button
+          type="button"
+          onClick={() => { setOpen(o => !o); setSearch('') }}
+          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-left text-white focus:outline-none focus:border-purple-500 flex items-center justify-between gap-1"
+        >
+          <span className="truncate flex-1">{displayLabel}</span>
+          <span className="text-zinc-500 shrink-0">{open ? '▲' : '▼'}</span>
+        </button>
+
+        {open && (
+          <div className="absolute z-50 top-full left-0 mt-1 w-64 bg-zinc-900 border border-zinc-700 rounded shadow-xl">
+            {/* Search input */}
+            <div className="p-1.5 border-b border-zinc-700">
+              <input
+                autoFocus
+                type="text"
+                placeholder="Пошук категорії…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500"
+              />
+            </div>
+
+            {/* Options list */}
+            <ul className="max-h-48 overflow-y-auto">
+              <li>
+                <button
+                  type="button"
+                  className="w-full text-left px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-700"
+                  onClick={() => { onChange(''); setOpen(false) }}
+                >
+                  — оберіть —
+                </button>
+              </li>
+              {filtered.length === 0 && (
+                <li className="px-2 py-2 text-xs text-zinc-500 text-center">Нічого не знайдено</li>
+              )}
+              {filtered.map(mc => (
+                <li key={mc.slug}>
+                  <button
+                    type="button"
+                    onClick={() => { onChange(mc.slug); setOpen(false); setSearch('') }}
+                    className={`w-full text-left px-2 py-1 text-xs hover:bg-zinc-700 ${
+                      mc.slug === value ? 'text-purple-400 bg-zinc-800' : 'text-white'
+                    }`}
+                  >
+                    {mc.title}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
