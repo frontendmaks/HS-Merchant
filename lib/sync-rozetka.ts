@@ -161,9 +161,28 @@ export async function syncRozetka(): Promise<{ synced: number }> {
   const rows = Array.from(merged.values())
 
   if (rows.length > 0) {
+    // Preserve existing cancel_reason — Rozetka API never returns it,
+    // so upsert would overwrite reasons we set ourselves.
+    const externalIds = rows.map(r => r.external_id)
+    const { data: existing } = await supabase
+      .from('orders')
+      .select('external_id, cancel_reason')
+      .in('external_id', externalIds)
+      .eq('platform', 'rozetka')
+      .not('cancel_reason', 'is', null)
+
+    const existingReasons = new Map(
+      (existing ?? []).map(r => [r.external_id as string, r.cancel_reason as string])
+    )
+
+    const rowsToUpsert = rows.map(r => ({
+      ...r,
+      cancel_reason: r.cancel_reason ?? existingReasons.get(r.external_id) ?? null,
+    }))
+
     const { error } = await supabase
       .from('orders')
-      .upsert(rows, { onConflict: 'external_id,platform' })
+      .upsert(rowsToUpsert, { onConflict: 'external_id,platform' })
     if (error) throw error
   }
 
