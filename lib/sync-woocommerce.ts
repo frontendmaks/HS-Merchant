@@ -54,7 +54,7 @@ function extractBrand(name: string): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapProduct(p: any, variation?: { price: number | null; stock: number | null } | null) {
+function mapProduct(p: any, variation?: { price: number | null; stock: number | null } | null, parentCategoryIds: Set<number> = new Set()) {
   const images = (p.images ?? []).map((img: { src: string }) => img.src).filter(Boolean)
 
   const attributes: Record<string, string> = {}
@@ -66,7 +66,7 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   const weight = extractWeight(p.name)
   if (weight) attributes['Вага'] = weight
 
-  const category_name = p.categories?.[0]?.name ?? null
+  const category_name = pickMainCategory(p.categories ?? [], parentCategoryIds)
   const brand = extractBrand(p.name)
   const price = (variation?.price) ?? (parseFloat(p.regular_price || p.price || '0') || 0)
 
@@ -98,6 +98,39 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   }
 }
 
+/** Fetch all WC product categories and return a Set of IDs that are parents of other categories */
+async function fetchParentCategoryIds(): Promise<Set<number>> {
+  const parentIds = new Set<number>()
+  let page = 1
+  while (true) {
+    const res = await wcFetch(`/products/categories?per_page=100&page=${page}`)
+    if (!res.ok) break
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cats: any[] = await res.json()
+    if (!cats.length) break
+    for (const c of cats) {
+      if (c.parent && c.parent !== 0) {
+        parentIds.add(c.parent)
+      }
+    }
+    if (cats.length < 100) break
+    page++
+  }
+  return parentIds
+}
+
+/** Pick the most specific (leaf) category for a product.
+ *  Prefers child categories over parent categories.
+ *  Falls back to first category if all are parents or list is empty. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function pickMainCategory(categories: any[], parentIds: Set<number>): string | null {
+  if (!categories?.length) return null
+  // prefer categories that are NOT a parent of another category (i.e. leaf nodes)
+  const leaves = categories.filter(c => !parentIds.has(c.id))
+  const chosen = leaves.length > 0 ? leaves[0] : categories[0]
+  return chosen?.name ?? null
+}
+
 export async function syncWoocommerce(trigger: 'cron' | 'manual' = 'manual', triggeredBy: string | null = null): Promise<{
   synced: number
   deactivated: number
@@ -109,6 +142,9 @@ export async function syncWoocommerce(trigger: 'cron' | 'manual' = 'manual', tri
   const supabase = createServiceClient()
 
   try {
+    // Fetch category hierarchy to know which categories are parents
+    const parentCategoryIds = await fetchParentCategoryIds()
+
     const { data: firstPage, total } = await fetchWCPage(1)
     const totalPages = Math.ceil(total / 100)
 
@@ -133,7 +169,7 @@ export async function syncWoocommerce(trigger: 'cron' | 'manual' = 'manual', tri
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mapped = allProducts.map((p: any) => {
       const variation = variationMap.has(p.id) ? variationMap.get(p.id) : undefined
-      return mapProduct(p, variation)
+      return mapProduct(p, variation, parentCategoryIds)
     })
 
     const { error } = await supabase
