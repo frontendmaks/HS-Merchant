@@ -126,6 +126,24 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [maudauCatsSource, setMaudauCatsSource] = useState<'db' | 'api' | ''>('')
   const [xlsxUploading, setXlsxUploading] = useState(false)
   const [xlsxMsg, setXlsxMsg] = useState('')
+  const [syncingCats, setSyncingCats] = useState(false)
+  const [syncCatsMsg, setSyncCatsMsg] = useState('')
+
+  const handleSyncAllCategories = async () => {
+    setSyncingCats(true)
+    setSyncCatsMsg('')
+    try {
+      const res = await fetch('/api/maudau/sync-categories', { method: 'POST' })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error)
+      setSyncCatsMsg(`✅ Синхронізовано ${data.count} категорій`)
+      loadMaudauCategories()
+    } catch (err: any) {
+      setSyncCatsMsg('❌ ' + (err.message ?? 'Помилка'))
+    } finally {
+      setSyncingCats(false)
+    }
+  }
 
   const loadMaudauCategories = () => {
     setMaudauCatsLoading(true)
@@ -438,12 +456,25 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               </div>
               <p className="text-xs text-zinc-500 mb-3">
                 Зіставте свої категорії з категоріями MauDau.
-                {maudauCatsSource === 'db'
-                  ? <span className="text-emerald-500"> • {maudauCategories.length} кат. з файлу</span>
-                  : maudauCatsSource === 'api'
-                  ? <span className="text-amber-500"> • {maudauCategories.length} кат. з API (лише наявні)</span>
-                  : null}
+                {maudauCategories.length > 0 && (
+                  <span className={maudauCatsSource === 'db' ? 'text-emerald-500' : 'text-amber-500'}>
+                    {' '}• {maudauCategories.length} категорій
+                  </span>
+                )}
               </p>
+
+              {/* Sync all categories button */}
+              <div className="mb-4 flex items-center gap-3">
+                <button
+                  onClick={handleSyncAllCategories}
+                  disabled={syncingCats}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-purple-700 text-purple-300 hover:bg-purple-900/20 transition-colors disabled:opacity-50 whitespace-nowrap"
+                >
+                  {syncingCats ? '⏳ Синхронізація...' : '🔄 Завантажити всі категорії MauDau'}
+                </button>
+                {syncCatsMsg && <span className="text-xs text-zinc-400">{syncCatsMsg}</span>}
+                {syncingCats && <span className="text-xs text-zinc-500">~1-2 хв, зачекайте...</span>}
+              </div>
 
               {maudauCatsError && (
                 <p className="text-xs text-red-400 mb-3">{maudauCatsError}</p>
