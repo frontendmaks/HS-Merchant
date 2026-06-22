@@ -193,19 +193,26 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   )
 
   const [productSearch, setProductSearch] = useState('')
+  const [categorySearch, setCategorySearch] = useState('')
   // Which product row is expanded (for MauDau extra fields)
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
 
+  // Categories filtered by search
+  const filteredCategories = useMemo(() =>
+    categories.filter(c => !categorySearch || c.toLowerCase().includes(categorySearch.toLowerCase())),
+    [categories, categorySearch]
+  )
+
   // Filtered products list based on category filter setting
   const filteredProducts = useMemo(() => allProducts.filter(p => {
-    if (filterType === 'categories' && selectedCategories.length > 0) {
+    if (selectedCategories.length > 0) {
       if (!p.category_name || !selectedCategories.includes(p.category_name)) return false
     }
     if (productSearch) {
       return p.name.toLowerCase().includes(productSearch.toLowerCase())
     }
     return true
-  }), [allProducts, filterType, selectedCategories, productSearch])
+  }), [allProducts, selectedCategories, productSearch])
 
   // Count actually selected (active) products across ALL products
   const selectedCount = useMemo(() =>
@@ -419,52 +426,6 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             </div>
           </div>
 
-          {/* Filter */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-            <h2 className="text-sm font-semibold text-white mb-4">🗂 Фільтр товарів у таблиці</h2>
-            <p className="text-xs text-zinc-600 mb-3">Звужує список товарів праворуч для зручнішого вибору</p>
-            <div className="space-y-3">
-              {[
-                { value: 'all', label: 'Всі товари', desc: 'Показувати весь каталог' },
-                { value: 'categories', label: 'За категоріями', desc: 'Тільки обрані категорії' },
-              ].map(opt => (
-                <label key={opt.value} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                  filterType === opt.value ? 'border-red-600 bg-red-950/30' : 'border-zinc-800 hover:border-zinc-600'
-                }`}>
-                  <input
-                    type="radio"
-                    name="filterType"
-                    value={opt.value}
-                    checked={filterType === opt.value}
-                    onChange={() => setFilterType(opt.value)}
-                    className="mt-0.5 accent-red-500"
-                  />
-                  <div>
-                    <div className="text-sm text-white">{opt.label}</div>
-                    <div className="text-xs text-zinc-500">{opt.desc}</div>
-                  </div>
-                </label>
-              ))}
-
-              {filterType === 'categories' && (
-                <div className="mt-2 flex flex-wrap gap-2 max-h-48 overflow-y-auto">
-                  {categories.map(cat => (
-                    <button
-                      key={cat}
-                      onClick={() => toggleCategory(cat)}
-                      className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                        selectedCategories.includes(cat)
-                          ? 'bg-red-600 border-red-600 text-white'
-                          : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
 
           {/* MauDau: Category portal_id mapping */}
           {isMaudau && (
@@ -512,26 +473,63 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
         {/* === PRODUCTS TABLE === */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col">
-          {/* Header */}
-          <div className="px-5 py-4 border-b border-zinc-800 space-y-3">
+
+          {/* Header: search + counters */}
+          <div className="px-4 pt-4 pb-3 border-b border-zinc-800 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-semibold text-white">
-                  Товари у фіді
-                </h2>
+                <h2 className="text-sm font-semibold text-white">Товари у фіді</h2>
                 <div className="text-xs text-zinc-500 mt-0.5">
                   <span className="text-emerald-400 font-medium">{selectedCount}</span> вибрано
                   <span className="mx-1.5 text-zinc-700">·</span>
-                  {allProducts.length} всього
+                  {filteredProducts.length !== allProducts.length
+                    ? <><span className="text-white">{filteredProducts.length}</span> показано · {allProducts.length} всього</>
+                    : <>{allProducts.length} всього</>}
                 </div>
               </div>
               <input
                 type="text"
-                placeholder="Пошук..."
+                placeholder="🔍 Пошук товару..."
                 value={productSearch}
                 onChange={e => setProductSearch(e.target.value)}
-                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-red-500 w-40"
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-red-500 w-44"
               />
+            </div>
+
+            {/* Category filter */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs text-zinc-500">🗂 Категорія:</span>
+                {selectedCategories.length > 0 && (
+                  <button
+                    onClick={() => setSelectedCategories([])}
+                    className="text-xs text-zinc-500 hover:text-red-400 transition-colors"
+                  >✕ скинути</button>
+                )}
+              </div>
+              <input
+                type="text"
+                placeholder="Пошук категорії..."
+                value={categorySearch}
+                onChange={e => setCategorySearch(e.target.value)}
+                className="w-full mb-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-red-500"
+              />
+              <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                {filteredCategories.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => toggleCategory(cat)}
+                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors whitespace-nowrap ${
+                      selectedCategories.includes(cat)
+                        ? 'bg-red-600 border-red-600 text-white'
+                        : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'
+                    }`}
+                  >{cat}</button>
+                ))}
+                {filteredCategories.length === 0 && (
+                  <span className="text-xs text-zinc-600">Нічого не знайдено</span>
+                )}
+              </div>
             </div>
 
             {/* Bulk actions */}
@@ -539,27 +537,24 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               <button
                 onClick={selectAllVisible}
                 className="text-xs px-3 py-1.5 bg-emerald-900/40 hover:bg-emerald-900/60 border border-emerald-800 text-emerald-400 rounded-lg transition-colors"
-              >
-                ✓ Вибрати всі видимі ({filteredProducts.length})
-              </button>
+              >✓ Вибрати видимі ({filteredProducts.length})</button>
               <button
                 onClick={deselectAllVisible}
                 className="text-xs px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 rounded-lg transition-colors"
-              >
-                ✕ Зняти всі видимі
-              </button>
+              >✕ Зняти видимі</button>
             </div>
           </div>
 
           {/* Column headers */}
-          <div className={`grid gap-2 px-5 py-2 bg-zinc-800/50 border-b border-zinc-800 ${isMaudau ? 'grid-cols-[24px_1fr_80px]' : 'grid-cols-[24px_1fr_90px_90px]'}`}>
+          <div className="grid grid-cols-[20px_36px_1fr_70px_56px] gap-2 px-4 py-2 bg-zinc-800/50 border-b border-zinc-800">
             <div className="text-xs text-zinc-600">✓</div>
+            <div />
             <div className="text-xs text-zinc-600 uppercase tracking-wide">Товар</div>
             <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Ціна</div>
-            {!isMaudau && <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Залишок</div>}
+            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Залишок</div>
           </div>
 
-          <div className="overflow-y-auto flex-1 max-h-[560px] divide-y divide-zinc-800">
+          <div className="overflow-y-auto flex-1 max-h-[560px] divide-y divide-zinc-800/60">
             {filteredProducts.length === 0 && (
               <div className="py-12 text-center text-zinc-600 text-sm">Немає товарів</div>
             )}
@@ -567,10 +562,15 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               const ov = overrides[p.id] ?? {}
               const isActive = ov.is_active === true
               const isExpanded = expandedProduct === p.id
+              const thumb = p.images?.[0]
+              const stock = ov.custom_stock !== '' && ov.custom_stock != null
+                ? Number(ov.custom_stock)
+                : p.stock
 
               return (
-                <div key={p.id} className={`transition-colors ${isActive ? 'hover:bg-zinc-800/30' : 'opacity-40 hover:bg-zinc-800/20'}`}>
-                  <div className={`grid gap-2 px-5 py-2.5 items-center ${isMaudau ? 'grid-cols-[24px_1fr_80px]' : 'grid-cols-[24px_1fr_90px_90px]'}`}>
+                <div key={p.id} className={`transition-colors ${isActive ? 'hover:bg-zinc-800/30' : 'opacity-35 hover:opacity-60'}`}>
+                  <div className="grid grid-cols-[20px_36px_1fr_70px_56px] gap-2 px-4 py-2 items-center">
+                    {/* Checkbox */}
                     <input
                       type="checkbox"
                       checked={isActive}
@@ -578,46 +578,50 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                       className="accent-red-500 cursor-pointer"
                     />
 
+                    {/* Thumbnail */}
+                    <div className="w-8 h-8 rounded overflow-hidden bg-zinc-800 shrink-0 flex items-center justify-center">
+                      {thumb
+                        ? <img src={thumb} alt="" className="w-full h-full object-cover" />
+                        : <span className="text-zinc-700 text-[10px]">—</span>}
+                    </div>
+
+                    {/* Name + category */}
                     <div className="min-w-0">
                       <button
                         onClick={() => isMaudau && setExpandedProduct(isExpanded ? null : p.id)}
                         className={`text-left w-full ${isMaudau ? 'cursor-pointer' : 'cursor-default'}`}
                       >
-                        <div className="text-xs text-zinc-300 truncate">
+                        <div className="text-xs text-white font-medium leading-snug line-clamp-2">
                           {isMaudau && <span className="text-zinc-600 mr-1">{isExpanded ? '▾' : '▸'}</span>}
                           {p.name}
                         </div>
-                        <div className="text-xs text-zinc-600">{p.category_name}</div>
+                        <div className="text-[11px] text-zinc-500 mt-0.5 truncate">{p.category_name}</div>
                       </button>
                     </div>
 
+                    {/* Price */}
                     <div>
                       <input
                         type="number"
                         placeholder={String(p.price ?? '')}
                         value={ov.custom_price ?? ''}
                         onChange={e => setOverride(p.id, 'custom_price', e.target.value)}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white text-right focus:outline-none focus:border-amber-500 placeholder:text-zinc-600"
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-xs text-white text-right focus:outline-none focus:border-amber-500 placeholder:text-zinc-500"
                       />
                     </div>
 
-                    {!isMaudau && (
-                      <div>
-                        <input
-                          type="number"
-                          placeholder={p.stock != null ? String(p.stock) : '∞'}
-                          value={ov.custom_stock ?? ''}
-                          onChange={e => setOverride(p.id, 'custom_stock', e.target.value)}
-                          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white text-right focus:outline-none focus:border-blue-500 placeholder:text-zinc-600"
-                        />
-                      </div>
-                    )}
+                    {/* Stock */}
+                    <div className="text-right">
+                      {stock == null
+                        ? <span className="text-xs text-zinc-600">∞</span>
+                        : <span className={`text-xs font-medium ${stock > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{stock}</span>}
+                    </div>
                   </div>
 
                   {/* MauDau expanded: name_ru + description_ru */}
                   {isMaudau && isExpanded && (
-                    <div className="px-5 pb-3 space-y-2 bg-purple-950/10 border-t border-zinc-800/60">
-                      <p className="text-[11px] text-zinc-600 pt-2">Назва та опис російською (необов'язково — якщо не вказано, буде використано українські)</p>
+                    <div className="px-4 pb-3 space-y-2 bg-purple-950/10 border-t border-zinc-800/60">
+                      <p className="text-[11px] text-zinc-600 pt-2">Назва та опис рос. мовою (необов'язково — за замовчуванням укр.)</p>
                       <div>
                         <label className="text-[11px] text-zinc-500 block mb-0.5">name_ru</label>
                         <input
@@ -632,7 +636,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                         <label className="text-[11px] text-zinc-500 block mb-0.5">description_ru</label>
                         <textarea
                           rows={2}
-                          placeholder="Опис рос. мовою (за замовчуванням — укр.)"
+                          placeholder="Опис рос. мовою..."
                           value={ov.description_ru ?? ''}
                           onChange={e => setOverride(p.id, 'description_ru', e.target.value)}
                           className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600 resize-none"
@@ -646,7 +650,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           </div>
 
           {filteredProducts.length > 500 && (
-            <div className="px-5 py-2 border-t border-zinc-800 text-xs text-zinc-600 text-center">
+            <div className="px-4 py-2 border-t border-zinc-800 text-xs text-zinc-600 text-center">
               Показано 500 з {filteredProducts.length}. Уточніть пошук або категорію.
             </div>
           )}
