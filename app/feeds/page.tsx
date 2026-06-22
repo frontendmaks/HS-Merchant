@@ -8,7 +8,7 @@ async function getFeeds() {
   const [{ data: feeds }, { data: activeCounts }] = await Promise.all([
     supabase
       .from('feeds')
-      .select('id, name, slug, status, last_generated_at, updated_at, settings, marketplace:marketplaces(id, name, slug)')
+      .select('id, name, slug, status, last_generated_at, last_accessed_at, updated_at, settings, marketplace:marketplaces(id, name, slug)')
       .order('created_at', { ascending: false }),
     supabase
       .from('feed_products')
@@ -25,13 +25,20 @@ async function getFeeds() {
 }
 
 function timeAgo(d: string | null) {
-  if (!d) return 'ніколи'
+  if (!d) return null
   const diff = Date.now() - new Date(d).getTime()
   const m = Math.floor(diff / 60000)
   if (m < 60) return `${m}хв тому`
   const h = Math.floor(m / 60)
   if (h < 24) return `${h}год тому`
   return `${Math.floor(h / 24)}д тому`
+}
+
+function formatDate(d: string | null) {
+  if (!d) return null
+  const dt = new Date(d)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(dt.getDate())}.${pad(dt.getMonth() + 1)} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`
 }
 
 const triggerLabel: Record<string, string> = {
@@ -72,7 +79,6 @@ export default async function FeedsPage() {
         {feeds.map((feed: any) => {
           const trigger = feed.settings?.trigger ?? 'manual'
           const productCount = feed.activeProductCount ?? 0
-          const filterType = feed.settings?.filter?.type ?? 'all'
 
           return (
             <Link key={feed.id} href={`/feeds/${feed.id}`}>
@@ -113,15 +119,16 @@ export default async function FeedsPage() {
                       <div className="text-zinc-300 text-xs">{triggerLabel[trigger] ?? trigger}</div>
                       <div className="text-xs text-zinc-600">тригер</div>
                     </div>
-                    <div className="text-center">
-                      <div className="text-zinc-300 text-xs capitalize">
-                        {filterType === 'all' ? 'Всі товари' : filterType === 'categories' ? 'За категоріями' : 'Вибрані'}
-                      </div>
-                      <div className="text-xs text-zinc-600">фільтр</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs text-zinc-400">{timeAgo(feed.last_generated_at)}</div>
-                      <div className="text-xs text-zinc-600">генерація</div>
+                    <div className="text-center min-w-[90px]">
+                      {feed.last_accessed_at ? (
+                        <>
+                          <div className="text-emerald-400 text-xs font-mono">{formatDate(feed.last_accessed_at)}</div>
+                          <div className="text-zinc-600 text-xs">{timeAgo(feed.last_accessed_at)}</div>
+                        </>
+                      ) : (
+                        <div className="text-zinc-600 text-xs">не зверталися</div>
+                      )}
+                      <div className="text-xs text-zinc-500 mt-0.5">останнє звернення</div>
                     </div>
                     <div className="text-zinc-500 text-lg">→</div>
                   </div>

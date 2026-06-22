@@ -31,6 +31,13 @@ export async function GET(
   const isMaudau = feed.marketplace?.slug === 'maudau' || feed.marketplace?.name?.toLowerCase().includes('maudau')
   const xml = isMaudau ? generateMaudauYML(feed) : generateYML(feed)
 
+  // Record access time (fire-and-forget, don't block response)
+  supabase
+    .from('feeds')
+    .update({ last_accessed_at: new Date().toISOString() })
+    .eq('id', feed.id)
+    .then(() => {})
+
   return new NextResponse(xml, {
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
