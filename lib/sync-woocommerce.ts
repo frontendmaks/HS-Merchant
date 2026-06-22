@@ -13,7 +13,7 @@ function wcFetch(path: string) {
 }
 
 async function fetchWCPage(page: number) {
-  const res = await wcFetch(`/products?per_page=100&page=${page}&status=publish`)
+  const res = await wcFetch(`/products?per_page=100&page=${page}&status=publish&_fields=id,name,slug,type,sku,status,price,regular_price,sale_price,manage_stock,stock_quantity,categories,images,attributes,description,short_description,meta_data`)
   const total = Number(res.headers.get('x-wp-total') ?? 0)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: any[] = await res.json()
@@ -54,7 +54,7 @@ function extractBrand(name: string): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapProduct(p: any, variation?: { price: number | null; stock: number | null } | null, parentCategoryIds: Set<number> = new Set()) {
+function mapProduct(p: any, variation?: { price: number | null; stock: number | null } | null, categoryMap: Map<number, string> = new Map()) {
   const images = (p.images ?? []).map((img: { src: string }) => img.src).filter(Boolean)
 
   const attributes: Record<string, string> = {}
@@ -66,7 +66,7 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   const weight = extractWeight(p.name)
   if (weight) attributes['Вага'] = weight
 
-  const category_name = pickMainCategory(p.categories ?? [], parentCategoryIds)
+  const category_name = pickMainCategory(p, categoryMap)
   const brand = extractBrand(p.name)
   const price = (variation?.price) ?? (parseFloat(p.regular_price || p.price || '0') || 0)
 
@@ -98,9 +98,9 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   }
 }
 
-/** Fetch all WC product categories and return a Set of IDs that are parents of other categories */
-async function fetchParentCategoryIds(): Promise<Set<number>> {
-  const parentIds = new Set<number>()
+/** Build a map of category id → name from all WC product categories */
+async function fetchCategoryMap(): Promise<Map<number, string>> {
+  const map = new Map<number, string>()
   let page = 1
   while (true) {
     const res = await wcFetch(`/products/categories?per_page=100&page=${page}`)
@@ -108,27 +108,31 @@ async function fetchParentCategoryIds(): Promise<Set<number>> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cats: any[] = await res.json()
     if (!cats.length) break
-    for (const c of cats) {
-      if (c.parent && c.parent !== 0) {
-        parentIds.add(c.parent)
-      }
-    }
+    for (const c of cats) map.set(c.id, c.name)
     if (cats.length < 100) break
     page++
   }
-  return parentIds
+  return map
 }
 
-/** Pick the most specific (leaf) category for a product.
- *  Prefers child categories over parent categories.
- *  Falls back to first category if all are parents or list is empty. */
+/** Pick the primary (Yoast "Основний") category for a product.
+ *  Falls back to the first assigned category if no primary is set. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function pickMainCategory(categories: any[], parentIds: Set<number>): string | null {
-  if (!categories?.length) return null
-  // prefer categories that are NOT a parent of another category (i.e. leaf nodes)
-  const leaves = categories.filter(c => !parentIds.has(c.id))
-  const chosen = leaves.length > 0 ? leaves[0] : categories[0]
-  return chosen?.name ?? null
+function pickMainCategory(p: any, categoryMap: Map<number, string>): string | null {
+  // Yoast SEO stores the primary category ID in meta_data
+  const primaryMeta = (p.meta_data ?? []).find(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (m: any) => m.key === '_yoast_wpseo_primary_product_cat'
+  )
+  if (primaryMeta?.value) {
+    const primaryId = Number(primaryMeta.value)
+    const name = categoryMap.get(primaryId)
+    if (name) return name
+  }
+
+  // Fallback: first assigned category
+  const first = p.categories?.[0]
+  return first ? (categoryMap.get(first.id) ?? first.name ?? null) : null
 }
 
 export async function syncWoocommerce(trigger: 'cron' | 'manual' = 'manual', triggeredBy: string | null = null): Promise<{
@@ -142,8 +146,8 @@ export async function syncWoocommerce(trigger: 'cron' | 'manual' = 'manual', tri
   const supabase = createServiceClient()
 
   try {
-    // Fetch category hierarchy to know which categories are parents
-    const parentCategoryIds = await fetchParentCategoryIds()
+    // Fetch category id→name map (used to resolve Yoast primary category)
+    const categoryMap = await fetchCategoryMap()
 
     const { data: firstPage, total } = await fetchWCPage(1)
     const totalPages = Math.ceil(total / 100)
@@ -169,7 +173,7 @@ export async function syncWoocommerce(trigger: 'cron' | 'manual' = 'manual', tri
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mapped = allProducts.map((p: any) => {
       const variation = variationMap.has(p.id) ? variationMap.get(p.id) : undefined
-      return mapProduct(p, variation, parentCategoryIds)
+      return mapProduct(p, variation, categoryMap)
     })
 
     const { error } = await supabase
