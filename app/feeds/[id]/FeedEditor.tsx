@@ -49,6 +49,68 @@ type Override = {
   description_ru?: string
 }
 
+/** Combo: select from known MauDau cats OR type a custom slug */
+function CategoryPortalRow({
+  catName, value, maudauCategories, onChange,
+}: {
+  catName: string
+  value: string
+  maudauCategories: { slug: string; title: string }[]
+  onChange: (v: string) => void
+}) {
+  const [mode, setMode] = useState<'select' | 'manual'>('select')
+
+  // If saved value doesn't match any known slug — switch to manual automatically
+  const knownSlugs = maudauCategories.map(c => c.slug)
+  const isKnown = !value || knownSlugs.includes(value)
+
+  const effectiveMode = (!isKnown || mode === 'manual') ? 'manual' : 'select'
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-zinc-300 flex-1 min-w-0 truncate">{catName}</span>
+      <span className="text-zinc-600 text-xs shrink-0">→</span>
+
+      {effectiveMode === 'select' ? (
+        <>
+          <select
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white w-44 focus:outline-none focus:border-purple-500"
+          >
+            <option value="">— оберіть —</option>
+            {maudauCategories.map(mc => (
+              <option key={mc.slug} value={mc.slug}>{mc.title}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => setMode('manual')}
+            title="Ввести slug вручну"
+            className="text-zinc-600 hover:text-zinc-400 text-xs shrink-0"
+          >✏️</button>
+        </>
+      ) : (
+        <>
+          <input
+            type="text"
+            placeholder="slug категорії MauDau"
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            className="bg-zinc-800 border border-purple-700 rounded px-2 py-1 text-xs text-white font-mono w-44 focus:outline-none focus:border-purple-500"
+          />
+          {maudauCategories.length > 0 && (
+            <button
+              onClick={() => { setMode('select'); onChange('') }}
+              title="Обрати зі списку"
+              className="text-zinc-600 hover:text-zinc-400 text-xs shrink-0"
+            >📋</button>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function FeedEditor({ feed, feedProducts, allProducts, categories, marketplaces }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -420,28 +482,6 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                   : null}
               </p>
 
-              {/* Excel upload */}
-              <div className="mb-4 p-3 bg-zinc-800/60 rounded-lg border border-zinc-700">
-                <p className="text-xs text-zinc-400 mb-2">
-                  Для повного списку категорій — завантажте файл характеристик від MauDau (Excel/XLSX):
-                </p>
-                <label className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs cursor-pointer transition-colors ${
-                  xlsxUploading
-                    ? 'border-zinc-700 text-zinc-600 cursor-not-allowed'
-                    : 'border-purple-700 text-purple-300 hover:bg-purple-900/20'
-                }`}>
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls,.csv"
-                    className="hidden"
-                    disabled={xlsxUploading}
-                    onChange={handleXlsxUpload}
-                  />
-                  {xlsxUploading ? '⏳ Імпорт...' : '📂 Завантажити файл характеристик'}
-                </label>
-                {xlsxMsg && <p className="mt-1.5 text-xs text-zinc-400">{xlsxMsg}</p>}
-              </div>
-
               {maudauCatsError && (
                 <p className="text-xs text-red-400 mb-3">{maudauCatsError}</p>
               )}
@@ -450,30 +490,13 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               ) : (
                 <div className="space-y-2">
                   {activeCategories.map(cat => (
-                    <div key={cat} className="flex items-center gap-3">
-                      <span className="text-xs text-zinc-300 flex-1 min-w-0 truncate">{cat}</span>
-                      <span className="text-zinc-600 text-xs shrink-0">→</span>
-                      {maudauCategories.length > 0 ? (
-                        <select
-                          value={categoryPortalIds[cat] ?? ''}
-                          onChange={e => setCategoryPortalIds(prev => ({ ...prev, [cat]: e.target.value }))}
-                          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white w-48 focus:outline-none focus:border-purple-500"
-                        >
-                          <option value="">— оберіть категорію —</option>
-                          {maudauCategories.map(mc => (
-                            <option key={mc.slug} value={mc.slug}>{mc.title}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          type="text"
-                          placeholder="slug категорії"
-                          value={categoryPortalIds[cat] ?? ''}
-                          onChange={e => setCategoryPortalIds(prev => ({ ...prev, [cat]: e.target.value }))}
-                          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white font-mono w-40 focus:outline-none focus:border-purple-500"
-                        />
-                      )}
-                    </div>
+                    <CategoryPortalRow
+                      key={cat}
+                      catName={cat}
+                      value={categoryPortalIds[cat] ?? ''}
+                      maudauCategories={maudauCategories}
+                      onChange={v => setCategoryPortalIds(prev => ({ ...prev, [cat]: v }))}
+                    />
                   ))}
                 </div>
               )}
