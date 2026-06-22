@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { syncMaudau } from '@/lib/sync-maudau'
+import { syncRozetka } from '@/lib/sync-rozetka'
 
 async function getTriggeredBy(): Promise<string | null> {
   try {
@@ -21,7 +23,6 @@ async function getTriggeredBy(): Promise<string | null> {
 
 export async function POST(req: NextRequest) {
   const start = Date.now()
-  const base = process.env.NEXT_PUBLIC_SITE_URL || `https://${req.headers.get('host')}`
   const supabase = createServiceClient()
   const triggeredBy = await getTriggeredBy()
 
@@ -34,20 +35,10 @@ export async function POST(req: NextRequest) {
   let errorMsg: string | null = null
 
   try {
-    const syncMaudau = async () => {
-      const r = await fetch(`${base}/api/sync/maudau`, { method: 'POST' })
-      return r.json() as Promise<{ success: boolean; synced?: number; error?: string }>
-    }
-    const syncRozetka = async () => {
-      const r = await fetch(`${base}/api/sync/rozetka`, { method: 'POST' })
-      return r.json() as Promise<{ success: boolean; synced?: number; error?: string }>
-    }
-
     if (!platform || platform === 'maudau') {
       try {
         const d = await syncMaudau()
-        if (d.success) maudauSynced = d.synced ?? 0
-        else errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'MauDau: ' + (d.error || 'error')
+        maudauSynced = d.synced ?? 0
       } catch (e) {
         errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'MauDau: ' + String(e)
       }
@@ -56,8 +47,7 @@ export async function POST(req: NextRequest) {
     if (!platform || platform === 'rozetka') {
       try {
         const d = await syncRozetka()
-        if (d.success) rozetkasynced = d.synced ?? 0
-        else errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'Rozetka: ' + (d.error || 'error')
+        rozetkasynced = d.synced ?? 0
       } catch (e) {
         errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'Rozetka: ' + String(e)
       }

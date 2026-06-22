@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { syncMaudau } from '@/lib/sync-maudau'
+import { syncRozetka } from '@/lib/sync-rozetka'
 
 export async function GET(req: NextRequest) {
   const secret = req.headers.get('x-cron-secret') || req.headers.get('authorization')?.replace('Bearer ', '')
@@ -8,7 +10,6 @@ export async function GET(req: NextRequest) {
   }
 
   const start = Date.now()
-  const base = process.env.NEXT_PUBLIC_SITE_URL || `https://${req.headers.get('host')}`
   const supabase = createServiceClient()
 
   let maudauSynced = 0
@@ -17,24 +18,20 @@ export async function GET(req: NextRequest) {
 
   try {
     const [maudau, rozetka] = await Promise.allSettled([
-      fetch(`${base}/api/sync/maudau`, { method: 'POST' }).then(r => r.json()),
-      fetch(`${base}/api/sync/rozetka`, { method: 'POST' }).then(r => r.json()),
+      syncMaudau(),
+      syncRozetka(),
     ])
 
-    if (maudau.status === 'fulfilled' && maudau.value.success) {
+    if (maudau.status === 'fulfilled') {
       maudauSynced = maudau.value.synced ?? 0
     } else if (maudau.status === 'rejected') {
       errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'MauDau: ' + String((maudau as PromiseRejectedResult).reason)
-    } else if (maudau.status === 'fulfilled' && !maudau.value.success) {
-      errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'MauDau: ' + (maudau.value.error || 'unknown error')
     }
 
-    if (rozetka.status === 'fulfilled' && rozetka.value.success) {
+    if (rozetka.status === 'fulfilled') {
       rozetkasynced = rozetka.value.synced ?? 0
     } else if (rozetka.status === 'rejected') {
       errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'Rozetka: ' + String((rozetka as PromiseRejectedResult).reason)
-    } else if (rozetka.status === 'fulfilled' && !rozetka.value.success) {
-      errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'Rozetka: ' + (rozetka.value.error || 'unknown error')
     }
   } catch (err) {
     errorMsg = String(err)
