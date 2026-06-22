@@ -40,6 +40,29 @@ const STATUS_MAP: Record<number, string> = {
 
 const CANCELED_STATUSES = new Set([11,12,13,15,16,17,18,19,24,25,28,29,30,31,40,42,44,45,50])
 
+// Rozetka encodes cancel reason in the numeric status ID itself
+const ROZETKA_CANCEL_REASON_MAP: Record<number, string> = {
+  11: 'Не прийшов',
+  12: 'Відмова при отриманні',
+  13: 'Скасовано',
+  15: 'Скасовано',
+  16: 'Немає в наявності',
+  17: 'Не влаштовує оплата',
+  18: 'Не вдалося зв\'язатися',
+  19: 'Повернено',
+  24: 'Скасовано',
+  25: 'Скасовано',
+  28: 'Скасовано',
+  29: 'Скасовано',
+  30: 'Скасовано',
+  31: 'Скасовано',
+  40: 'Клієнт передумав',
+  42: 'Скасовано',
+  44: 'Фейкове замовлення',
+  45: 'Скасовано покупцем',
+  50: 'Клієнт не оплатив',
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildAddress(delivery: any): string {
   if (!delivery) return ''
@@ -105,7 +128,7 @@ function orderToRow(order: any) {
     status: STATUS_MAP[statusNum] || String(order.status),
     status_raw: String(order.status),
     ttn: order.ttn || null,
-    cancel_reason: null,
+    cancel_reason: isCanceled ? (ROZETKA_CANCEL_REASON_MAP[statusNum] ?? 'Скасовано') : null,
     raw: order,
     updated_at: new Date().toISOString(),
   }
@@ -161,8 +184,8 @@ export async function syncRozetka(): Promise<{ synced: number }> {
   const rows = Array.from(merged.values())
 
   if (rows.length > 0) {
-    // Preserve existing cancel_reason — Rozetka API never returns it,
-    // so upsert would overwrite reasons we set ourselves.
+    // For Rozetka: cancel_reason is derived from the numeric status ID (ROZETKA_CANCEL_REASON_MAP).
+    // For non-canceled orders (where r.cancel_reason is null): preserve any manually-set reason.
     const externalIds = rows.map(r => r.external_id)
     const { data: existing } = await supabase
       .from('orders')
