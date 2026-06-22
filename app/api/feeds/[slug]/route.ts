@@ -1,5 +1,9 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import { NextRequest, NextResponse } from 'next/server'
+import { syncWoocommerce } from '@/lib/sync-woocommerce'
+
+// Auto-sync WooCommerce if last sync is older than this many hours
+const AUTO_SYNC_AFTER_HOURS = 2
 
 export async function GET(
   request: NextRequest,
@@ -28,32 +32,82 @@ export async function GET(
     return new NextResponse('Feed not found', { status: 404 })
   }
 
-  const isMaudau = feed.marketplace?.slug === 'maudau' || feed.marketplace?.name?.toLowerCase().includes('maudau')
-  const xml = isMaudau ? generateMaudauYML(feed) : generateYML(feed)
+  // Auto-sync WooCommerce if enabled and data is stale
+  let autoSynced = false
+  const autoSync = feed.settings?.auto_sync !== false // default true
+  if (autoSync) {
+    const { data: lastSync } = await supabase
+      .from('sync_logs')
+      .select('created_at')
+      .eq('status', 'success')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
 
-  // Record access time (fire-and-forget, don't block response)
-  supabase
-    .from('feeds')
-    .update({ last_accessed_at: new Date().toISOString() })
-    .eq('id', feed.id)
-    .then(() => {})
+    const lastSyncAt = lastSync?.created_at ? new Date(lastSync.created_at) : null
+    const staleMs = AUTO_SYNC_AFTER_HOURS * 60 * 60 * 1000
+    const isStale = !lastSyncAt || Date.now() - lastSyncAt.getTime() > staleMs
+
+    if (isStale) {
+      try {
+        await syncWoocommerce('cron', 'feed-auto-sync')
+        autoSynced = true
+        // Reload products after sync
+        const { data: refreshed } = await supabase
+          .from('feeds')
+          .select(`
+            *,
+            marketplace:marketplaces(*),
+            feed_products(*, product:products(*))
+          `)
+          .eq('id', feed.id)
+          .single()
+        if (refreshed) Object.assign(feed, refreshed)
+      } catch (e) {
+        console.error('Auto-sync failed:', e)
+      }
+    }
+  }
+
+  const isMaudau = feed.marketplace?.slug === 'maudau' || feed.marketplace?.name?.toLowerCase().includes('maudau')
+  const { xml, offersCount, errorsCount } = isMaudau
+    ? generateMaudauYML(feed)
+    : generateYML(feed)
+
+  // Log access (fire-and-forget)
+  const now = new Date().toISOString()
+  supabase.from('feed_access_logs').insert({
+    feed_id: feed.id,
+    accessed_at: now,
+    offers_count: offersCount,
+    errors_count: errorsCount,
+    auto_synced: autoSynced,
+  }).then(() => {})
+
+  supabase.from('feeds').update({
+    last_accessed_at: now,
+    access_count: (feed.access_count ?? 0) + 1,
+  }).eq('id', feed.id).then(() => {})
 
   return new NextResponse(xml, {
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': 'no-store',
     },
   })
 }
 
 /** Generic YML format */
-function generateYML(feed: any): string {
+function generateYML(feed: any): { xml: string; offersCount: number; errorsCount: number } {
+  const errors: string[] = []
   const products = feed.feed_products
     .filter((fp: any) => fp.is_active && fp.product)
     .map((fp: any) => {
       const p = fp.product
       const price = fp.custom_price ?? p.price
       const name = fp.custom_name ?? p.name
+      if (!price) errors.push(`No price: ${p.id}`)
+      if (!name) errors.push(`No name: ${p.id}`)
       const images = (p.images as string[])
         .map((url: string) => `<picture>${url}</picture>`)
         .join('\n        ')
@@ -74,9 +128,8 @@ function generateYML(feed: any): string {
       ${attrs}
     </offer>`
     })
-    .join('\n')
 
-  return `<?xml version="1.0" encoding="UTF-8"?>
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE yml_catalog SYSTEM "shops.dtd">
 <yml_catalog date="${new Date().toISOString()}">
   <shop>
@@ -87,21 +140,24 @@ function generateYML(feed: any): string {
       <currency id="UAH" rate="1"/>
     </currencies>
     <offers>
-      ${products}
+      ${products.join('\n')}
     </offers>
   </shop>
 </yml_catalog>`
+
+  return { xml, offersCount: products.length, errorsCount: errors.length }
 }
 
 /** MauDau-specific YML format per MauDau import spec */
-function generateMaudauYML(feed: any): string {
+function generateMaudauYML(feed: any): { xml: string; offersCount: number; errorsCount: number } {
   const activeFps = feed.feed_products.filter((fp: any) => fp.is_active && fp.product)
+  const errors: string[] = []
 
   // Build ordered list of unique categories from active products
   const categoryPortalIds: Record<string, string> = feed.settings?.category_portal_ids ?? {}
   const seenCats = new Set<string>()
   const categoryList: { id: number; name: string; portalId: string | null }[] = []
-  const catIndexMap = new Map<string, number>() // category_name → 1-based index
+  const catIndexMap = new Map<string, number>()
 
   for (const fp of activeFps) {
     const catName = fp.product.category_name ?? 'Без категорії'
@@ -129,9 +185,12 @@ function generateMaudauYML(feed: any): string {
       const descUa = p.description ?? ''
       const descRu = fp.description_ru ?? descUa
       const stock = fp.custom_stock ?? p.stock
-      // Always available="true" so MauDau keeps the product visible;
-      // quantity=0 triggers "тимчасово не постачається" on MauDau side.
       const catId = catIndexMap.get(p.category_name ?? 'Без категорії') ?? 1
+
+      // Validate
+      if (!price || price <= 0) errors.push(`No price: ${p.sku || p.id}`)
+      if (!nameUa) errors.push(`No name: ${p.sku || p.id}`)
+      if (!p.images?.length) errors.push(`No images: ${p.sku || p.id}`)
 
       const images = ((p.images as string[]) ?? [])
         .slice(0, 12)
@@ -142,7 +201,6 @@ function generateMaudauYML(feed: any): string {
         .map(([k, v]) => `      <param name="${escapeXml(k)}">${escapeXml(v)}</param>`)
         .join('\n')
 
-      // Sanitize SKU for offer id — alphanumeric + hyphens only
       const offerId = (p.sku || String(p.external_id || p.id))
         .replace(/[^a-zA-Z0-9\-_]/g, '-')
         .replace(/-+/g, '-')
@@ -169,7 +227,7 @@ ${attrs}
   const now = new Date()
   const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
 
-  return `<?xml version="1.0" encoding="UTF-8"?>
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <yml_catalog date="${dateStr}">
   <shop>
     <name>Галицька Свіжина</name>
@@ -186,6 +244,8 @@ ${offersXml}
     </offers>
   </shop>
 </yml_catalog>`
+
+  return { xml, offersCount: activeFps.length, errorsCount: errors.length }
 }
 
 function escapeXml(str: string): string {

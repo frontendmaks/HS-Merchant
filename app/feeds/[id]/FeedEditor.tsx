@@ -304,6 +304,26 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     setOverrides(prev => ({ ...prev, ...updates }))
   }
 
+  const [deleting, setDeleting] = useState(false)
+
+  const handleDelete = async () => {
+    if (!confirm(`Видалити фід "${feed.name}"? Цю дію не можна скасувати.`)) return
+    setDeleting(true)
+    try {
+      const res = await fetch('/api/feeds/delete', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: feed.id }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error)
+      router.push('/feeds')
+    } catch (err: any) {
+      alert('Помилка видалення: ' + err.message)
+      setDeleting(false)
+    }
+  }
+
   const handleSave = async () => {
     setSaving(true)
     try {
@@ -368,7 +388,16 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             />
           </div>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-center">
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="px-3 py-2 bg-zinc-900 hover:bg-red-950 border border-zinc-700 hover:border-red-700 text-zinc-500 hover:text-red-400 text-sm rounded-lg transition-colors disabled:opacity-50"
+            title="Видалити фід"
+          >
+            {deleting ? '⏳' : '🗑 Видалити'}
+          </button>
+          <div className="w-px h-6 bg-zinc-800" />
           <button
             onClick={handleGenerate}
             disabled={generating}
@@ -747,6 +776,83 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           </div>
         </div>
       )}
+
+      {/* Access stats */}
+      <FeedAccessStats feedId={feed.id} />
+    </div>
+  )
+}
+
+function FeedAccessStats({ feedId }: { feedId: string }) {
+  const [logs, setLogs] = useState<{ accessed_at: string; offers_count: number | null; errors_count: number | null; auto_synced: boolean }[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(`/api/feeds/${feedId}/access-logs`)
+      .then(r => r.json())
+      .then(d => setLogs(d.logs ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [feedId])
+
+  if (loading) return null
+  if (logs.length === 0) return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+      <h2 className="text-sm font-semibold text-white mb-1">📊 Статистика звернень</h2>
+      <p className="text-xs text-zinc-600">Фід ще не відкривався</p>
+    </div>
+  )
+
+  const now = Date.now()
+  const day = 24 * 60 * 60 * 1000
+  const countDay = logs.filter(l => now - new Date(l.accessed_at).getTime() < day).length
+  const countWeek = logs.length
+  const totalErrors = logs.reduce((s, l) => s + (l.errors_count ?? 0), 0)
+
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const fmt = (d: string) => {
+    const dt = new Date(d)
+    return `${pad(dt.getDate())}.${pad(dt.getMonth() + 1)} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`
+  }
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+      <h2 className="text-sm font-semibold text-white mb-4">📊 Статистика звернень</h2>
+
+      {/* Summary */}
+      <div className="grid grid-cols-3 gap-4 mb-5">
+        <div className="bg-zinc-800 rounded-lg p-3 text-center">
+          <div className="text-xl font-bold text-white">{countDay}</div>
+          <div className="text-xs text-zinc-500 mt-0.5">за 24 год</div>
+        </div>
+        <div className="bg-zinc-800 rounded-lg p-3 text-center">
+          <div className="text-xl font-bold text-white">{countWeek}</div>
+          <div className="text-xs text-zinc-500 mt-0.5">за 7 днів</div>
+        </div>
+        <div className="bg-zinc-800 rounded-lg p-3 text-center">
+          <div className={`text-xl font-bold ${totalErrors > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+            {totalErrors > 0 ? totalErrors : '0'}
+          </div>
+          <div className="text-xs text-zinc-500 mt-0.5">помилок</div>
+        </div>
+      </div>
+
+      {/* Recent log */}
+      <div className="text-xs text-zinc-500 mb-2">Останні 10 звернень</div>
+      <div className="space-y-1">
+        {logs.slice(0, 10).map((l, i) => (
+          <div key={i} className="flex items-center gap-3 text-xs py-1 border-b border-zinc-800 last:border-0">
+            <span className="font-mono text-zinc-400 w-28 shrink-0">{fmt(l.accessed_at)}</span>
+            <span className="text-zinc-300">{l.offers_count ?? '?'} товарів</span>
+            {(l.errors_count ?? 0) > 0 && (
+              <span className="text-red-400">⚠ {l.errors_count} помилок</span>
+            )}
+            {l.auto_synced && (
+              <span className="text-emerald-500 ml-auto">🔄 WC синк</span>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
