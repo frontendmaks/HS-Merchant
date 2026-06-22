@@ -171,15 +171,27 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
     setCancelError('')
     setCancelLoading(true)
     try {
-      const res = await fetch(`/api/orders/${props.id}/cancel`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason, platform: props.platform, external_id: props.external_id }),
-      })
-      const data = (await res.json()) as { success: boolean; error?: string }
-      if (!data.success) throw new Error(data.error || 'Помилка скасування')
-      setStatus('Скасовано')
-      setCancelReason(reason)
+      if (status === 'Скасовано') {
+        // Order already canceled — just update DB, don't call marketplace API
+        const res = await fetch(`/api/orders/${props.id}/cancel-reason`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason }),
+        })
+        const data = (await res.json()) as { success: boolean; error?: string }
+        if (!data.success) throw new Error(data.error || 'Помилка збереження причини')
+        setCancelReason(reason)
+      } else {
+        const res = await fetch(`/api/orders/${props.id}/cancel`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason, platform: props.platform, external_id: props.external_id }),
+        })
+        const data = (await res.json()) as { success: boolean; error?: string }
+        if (!data.success) throw new Error(data.error || 'Помилка скасування')
+        setStatus('Скасовано')
+        setCancelReason(reason)
+      }
     } catch (e) {
       setCancelError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -270,7 +282,7 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
           <>
             <select
               value={cancelReason}
-              disabled={cancelLoading || maudauReasonsLoading || status === 'Скасовано'}
+              disabled={cancelLoading || maudauReasonsLoading}
               onChange={e => handleCancelReasonChange(e.target.value)}
               className={selectCls}
             >
@@ -281,7 +293,9 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
                 <option key={r.id} value={r.name}>{r.name}</option>
               ))}
             </select>
-            {cancelLoading && <div className="text-zinc-500 text-xs mt-0.5">Скасування...</div>}
+            {cancelLoading && <div className="text-zinc-500 text-xs mt-0.5">
+              {status === 'Скасовано' ? 'Збереження...' : 'Скасування...'}
+            </div>}
             {cancelError && <div className="text-red-400 text-xs mt-0.5">{cancelError}</div>}
           </>
         )}
