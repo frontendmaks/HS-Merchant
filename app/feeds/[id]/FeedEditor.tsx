@@ -194,6 +194,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
   const [productSearch, setProductSearch] = useState('')
   const [categorySearch, setCategorySearch] = useState('')
+  const [showOnlySelected, setShowOnlySelected] = useState(false)
   // Which product row is expanded (for MauDau extra fields)
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
 
@@ -205,6 +206,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
   // Filtered products list based on category filter setting
   const filteredProducts = useMemo(() => allProducts.filter(p => {
+    if (showOnlySelected && overrides[p.id]?.is_active !== true) return false
     if (selectedCategories.length > 0) {
       if (!p.category_name || !selectedCategories.includes(p.category_name)) return false
     }
@@ -212,7 +214,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
       return p.name.toLowerCase().includes(productSearch.toLowerCase())
     }
     return true
-  }), [allProducts, selectedCategories, productSearch])
+  }), [allProducts, selectedCategories, productSearch, showOnlySelected, overrides])
 
   // Count actually selected (active) products across ALL products
   const selectedCount = useMemo(() =>
@@ -487,13 +489,25 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     : <>{allProducts.length} всього</>}
                 </div>
               </div>
-              <input
-                type="text"
-                placeholder="🔍 Пошук товару..."
-                value={productSearch}
-                onChange={e => setProductSearch(e.target.value)}
-                className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-red-500 w-44"
-              />
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowOnlySelected(v => !v)}
+                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
+                    showOnlySelected
+                      ? 'bg-emerald-600 border-emerald-600 text-white'
+                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'
+                  }`}
+                >
+                  {showOnlySelected ? '✓ Вибрані' : 'Вибрані'}
+                </button>
+                <input
+                  type="text"
+                  placeholder="🔍 Пошук..."
+                  value={productSearch}
+                  onChange={e => setProductSearch(e.target.value)}
+                  className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-red-500 w-36"
+                />
+              </div>
             </div>
 
             {/* Category filter */}
