@@ -121,7 +121,9 @@ function generateMaudauYML(feed: any): string {
       const nameRu = fp.name_ru ?? nameUa
       const descUa = p.description ?? ''
       const descRu = fp.description_ru ?? descUa
-      const available = (p.stock == null || p.stock > 0) ? 'true' : 'false'
+      const stock = fp.custom_stock ?? p.stock
+      // Always available="true" so MauDau keeps the product visible;
+      // quantity=0 triggers "тимчасово не постачається" on MauDau side.
       const catId = catIndexMap.get(p.category_name ?? 'Без категорії') ?? 1
 
       const images = ((p.images as string[]) ?? [])
@@ -139,14 +141,16 @@ function generateMaudauYML(feed: any): string {
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '') || String(p.id).replace(/[^a-zA-Z0-9]/g, '')
 
-      return `    <offer id="${offerId}" available="${available}">
+      const quantityLine = stock != null ? `\n      <quantity>${stock}</quantity>` : ''
+
+      return `    <offer id="${offerId}" available="true">
       <name_ua>${escapeXml(nameUa)}</name_ua>
       <name_ru>${escapeXml(nameRu)}</name_ru>
       <description_ua><![CDATA[${descUa}]]></description_ua>
       <description_ru><![CDATA[${descRu}]]></description_ru>
       <price>${price ?? 0}</price>
       <currencyId>UAH</currencyId>
-      <categoryId>${catId}</categoryId>
+      <categoryId>${catId}</categoryId>${quantityLine}
 ${images}
       <vendor>${escapeXml(p.brand ?? 'Галицька Свіжина')}</vendor>
       <vendorCode>${escapeXml(p.sku ?? '')}</vendorCode>
