@@ -29,6 +29,8 @@ export async function POST(
         custom_price: ov.custom_price !== '' && ov.custom_price != null ? Number(ov.custom_price) : null,
         custom_stock: ov.custom_stock !== '' && ov.custom_stock != null ? Number(ov.custom_stock) : null,
         custom_name: ov.custom_name ?? null,
+        name_ru: ov.name_ru?.trim() || null,
+        description_ru: ov.description_ru?.trim() || null,
       }))
 
       const { error: fpError } = await supabase

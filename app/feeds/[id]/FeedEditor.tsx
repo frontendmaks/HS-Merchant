@@ -19,6 +19,8 @@ type FeedProduct = {
   custom_price: number | null
   custom_stock: number | null
   custom_name: string | null
+  name_ru: string | null
+  description_ru: string | null
 }
 
 type Feed = {
@@ -28,6 +30,7 @@ type Feed = {
   status: string
   settings: any
   marketplace_id: string
+  marketplace?: { id: string; name: string; slug: string } | null
 }
 
 type Props = {
@@ -42,6 +45,8 @@ type Override = {
   custom_price?: string
   custom_stock?: string
   is_active?: boolean
+  name_ru?: string
+  description_ru?: string
 }
 
 export default function FeedEditor({ feed, feedProducts, allProducts, categories, marketplaces }: Props) {
@@ -50,6 +55,8 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
 
+  const isMaudau = feed.marketplace?.slug === 'maudau' || feed.marketplace?.name?.toLowerCase().includes('maudau')
+
   const [feedName, setFeedName] = useState(feed.name)
   const [feedSlug, setFeedSlug] = useState(feed.slug)
   const [status, setStatus] = useState(feed.status)
@@ -57,6 +64,10 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [cronExpr, setCronExpr] = useState(feed.settings?.cron ?? '0 * * * *')
   const [filterType, setFilterType] = useState(feed.settings?.filter?.type ?? 'all')
   const [selectedCategories, setSelectedCategories] = useState<string[]>(feed.settings?.filter?.categories ?? [])
+  // MauDau: portal_id per category name
+  const [categoryPortalIds, setCategoryPortalIds] = useState<Record<string, string>>(
+    feed.settings?.category_portal_ids ?? {}
+  )
 
   // Build overrides map — only from saved feed_products, everything else defaults to inactive
   const fpMap = useMemo(() => new Map(feedProducts.map(fp => [fp.product_id, fp])), [feedProducts])
@@ -66,10 +77,14 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
       custom_price: fp.custom_price != null ? String(fp.custom_price) : '',
       custom_stock: fp.custom_stock != null ? String(fp.custom_stock) : '',
       is_active: fp.is_active,
+      name_ru: fp.name_ru ?? '',
+      description_ru: fp.description_ru ?? '',
     }]))
   )
 
   const [productSearch, setProductSearch] = useState('')
+  // Which product row is expanded (for MauDau extra fields)
+  const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
 
   // Filtered products list based on category filter setting
   const filteredProducts = useMemo(() => allProducts.filter(p => {
@@ -87,6 +102,17 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     allProducts.filter(p => overrides[p.id]?.is_active === true).length,
     [allProducts, overrides]
   )
+
+  // Active categories (derived from selected products) for MauDau portal_id section
+  const activeCategories = useMemo(() => {
+    const cats = new Set<string>()
+    allProducts.forEach(p => {
+      if (overrides[p.id]?.is_active === true && p.category_name) {
+        cats.add(p.category_name)
+      }
+    })
+    return [...cats].sort()
+  }, [allProducts, overrides])
 
   const toggleCategory = (cat: string) => {
     setSelectedCategories(prev =>
@@ -120,7 +146,6 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const handleSave = async () => {
     setSaving(true)
     try {
-      // Only send overrides that have been explicitly set
       const res = await fetch(`/api/feeds/${feed.id}/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -135,6 +160,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               type: filterType,
               categories: filterType === 'categories' ? selectedCategories : [],
             },
+            ...(isMaudau ? { category_portal_ids: categoryPortalIds } : {}),
           },
           overrides,
         }),
@@ -329,6 +355,35 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               )}
             </div>
           </div>
+
+          {/* MauDau: Category portal_id mapping */}
+          {isMaudau && (
+            <div className="bg-zinc-900 border border-purple-900/50 rounded-xl p-5">
+              <h2 className="text-sm font-semibold text-white mb-1">🟣 MauDau — категорії (portal_id)</h2>
+              <p className="text-xs text-zinc-500 mb-4">
+                Вкажіть <span className="font-mono text-zinc-300">portal_id</span> для кожної категорії з файлу характеристик MauDau.
+                Відображаються тільки категорії вибраних товарів.
+              </p>
+              {activeCategories.length === 0 ? (
+                <p className="text-xs text-zinc-600">Спочатку виберіть товари праворуч.</p>
+              ) : (
+                <div className="space-y-2">
+                  {activeCategories.map(cat => (
+                    <div key={cat} className="flex items-center gap-3">
+                      <span className="text-xs text-zinc-300 flex-1 truncate">{cat}</span>
+                      <input
+                        type="text"
+                        placeholder="portal_id"
+                        value={categoryPortalIds[cat] ?? ''}
+                        onChange={e => setCategoryPortalIds(prev => ({ ...prev, [cat]: e.target.value }))}
+                        className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white font-mono w-28 focus:outline-none focus:border-purple-500"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* === PRODUCTS TABLE === */}
@@ -373,11 +428,11 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           </div>
 
           {/* Column headers */}
-          <div className="grid grid-cols-[24px_1fr_90px_90px] gap-2 px-5 py-2 bg-zinc-800/50 border-b border-zinc-800">
+          <div className={`grid gap-2 px-5 py-2 bg-zinc-800/50 border-b border-zinc-800 ${isMaudau ? 'grid-cols-[24px_1fr_80px]' : 'grid-cols-[24px_1fr_90px_90px]'}`}>
             <div className="text-xs text-zinc-600">✓</div>
             <div className="text-xs text-zinc-600 uppercase tracking-wide">Товар</div>
             <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Ціна</div>
-            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Залишок</div>
+            {!isMaudau && <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Залишок</div>}
           </div>
 
           <div className="overflow-y-auto flex-1 max-h-[560px] divide-y divide-zinc-800">
@@ -386,44 +441,81 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             )}
             {filteredProducts.slice(0, 500).map(p => {
               const ov = overrides[p.id] ?? {}
-              // Default: unchecked unless explicitly set to true in feed_products
               const isActive = ov.is_active === true
+              const isExpanded = expandedProduct === p.id
 
               return (
-                <div key={p.id} className={`grid grid-cols-[24px_1fr_90px_90px] gap-2 px-5 py-2.5 items-center transition-colors ${
-                  isActive ? 'hover:bg-zinc-800/40' : 'opacity-40 hover:bg-zinc-800/20'
-                }`}>
-                  <input
-                    type="checkbox"
-                    checked={isActive}
-                    onChange={e => setOverride(p.id, 'is_active', e.target.checked)}
-                    className="accent-red-500 cursor-pointer"
-                  />
-
-                  <div className="min-w-0">
-                    <div className="text-xs text-zinc-300 truncate">{p.name}</div>
-                    <div className="text-xs text-zinc-600">{p.category_name}</div>
-                  </div>
-
-                  <div>
+                <div key={p.id} className={`transition-colors ${isActive ? 'hover:bg-zinc-800/30' : 'opacity-40 hover:bg-zinc-800/20'}`}>
+                  <div className={`grid gap-2 px-5 py-2.5 items-center ${isMaudau ? 'grid-cols-[24px_1fr_80px]' : 'grid-cols-[24px_1fr_90px_90px]'}`}>
                     <input
-                      type="number"
-                      placeholder={String(p.price ?? '')}
-                      value={ov.custom_price ?? ''}
-                      onChange={e => setOverride(p.id, 'custom_price', e.target.value)}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white text-right focus:outline-none focus:border-amber-500 placeholder:text-zinc-600"
+                      type="checkbox"
+                      checked={isActive}
+                      onChange={e => setOverride(p.id, 'is_active', e.target.checked)}
+                      className="accent-red-500 cursor-pointer"
                     />
+
+                    <div className="min-w-0">
+                      <button
+                        onClick={() => isMaudau && setExpandedProduct(isExpanded ? null : p.id)}
+                        className={`text-left w-full ${isMaudau ? 'cursor-pointer' : 'cursor-default'}`}
+                      >
+                        <div className="text-xs text-zinc-300 truncate">
+                          {isMaudau && <span className="text-zinc-600 mr-1">{isExpanded ? '▾' : '▸'}</span>}
+                          {p.name}
+                        </div>
+                        <div className="text-xs text-zinc-600">{p.category_name}</div>
+                      </button>
+                    </div>
+
+                    <div>
+                      <input
+                        type="number"
+                        placeholder={String(p.price ?? '')}
+                        value={ov.custom_price ?? ''}
+                        onChange={e => setOverride(p.id, 'custom_price', e.target.value)}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white text-right focus:outline-none focus:border-amber-500 placeholder:text-zinc-600"
+                      />
+                    </div>
+
+                    {!isMaudau && (
+                      <div>
+                        <input
+                          type="number"
+                          placeholder={p.stock != null ? String(p.stock) : '∞'}
+                          value={ov.custom_stock ?? ''}
+                          onChange={e => setOverride(p.id, 'custom_stock', e.target.value)}
+                          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white text-right focus:outline-none focus:border-blue-500 placeholder:text-zinc-600"
+                        />
+                      </div>
+                    )}
                   </div>
 
-                  <div>
-                    <input
-                      type="number"
-                      placeholder={p.stock != null ? String(p.stock) : '∞'}
-                      value={ov.custom_stock ?? ''}
-                      onChange={e => setOverride(p.id, 'custom_stock', e.target.value)}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white text-right focus:outline-none focus:border-blue-500 placeholder:text-zinc-600"
-                    />
-                  </div>
+                  {/* MauDau expanded: name_ru + description_ru */}
+                  {isMaudau && isExpanded && (
+                    <div className="px-5 pb-3 space-y-2 bg-purple-950/10 border-t border-zinc-800/60">
+                      <p className="text-[11px] text-zinc-600 pt-2">Назва та опис російською (необов'язково — якщо не вказано, буде використано українські)</p>
+                      <div>
+                        <label className="text-[11px] text-zinc-500 block mb-0.5">name_ru</label>
+                        <input
+                          type="text"
+                          placeholder={p.name}
+                          value={ov.name_ru ?? ''}
+                          onChange={e => setOverride(p.id, 'name_ru', e.target.value)}
+                          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-zinc-500 block mb-0.5">description_ru</label>
+                        <textarea
+                          rows={2}
+                          placeholder="Опис рос. мовою (за замовчуванням — укр.)"
+                          value={ov.description_ru ?? ''}
+                          onChange={e => setOverride(p.id, 'description_ru', e.target.value)}
+                          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600 resize-none"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -436,6 +528,28 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           )}
         </div>
       </div>
+
+      {/* MauDau: feed URL info */}
+      {isMaudau && (
+        <div className="bg-zinc-900 border border-purple-900/40 rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-white mb-2">🟣 URL фіду для MauDau</h2>
+          <p className="text-xs text-zinc-500 mb-3">
+            Вкажіть цей URL у особистому кабінеті MauDau для автоматичного імпорту товарів.
+            Фід оновлюється відповідно до налаштованого тригеру (рекомендовано: щодня о 6:00).
+          </p>
+          <div className="flex items-center gap-3">
+            <code className="text-xs font-mono text-purple-300 bg-zinc-800 px-3 py-2 rounded-lg flex-1 select-all">
+              https://hs-merchant.vercel.app/api/feeds/{feedSlug}
+            </code>
+            <button
+              onClick={() => navigator.clipboard.writeText(`https://hs-merchant.vercel.app/api/feeds/${feedSlug}`)}
+              className="text-xs px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 rounded-lg transition-colors whitespace-nowrap"
+            >
+              Копіювати
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
