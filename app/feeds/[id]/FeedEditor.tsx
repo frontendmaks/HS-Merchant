@@ -1,5 +1,5 @@
 'use client'
-import { useState, useTransition, useMemo } from 'react'
+import { useState, useTransition, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
 type Product = {
@@ -56,6 +56,24 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [generating, setGenerating] = useState(false)
 
   const isMaudau = feed.marketplace?.slug === 'maudau' || feed.marketplace?.name?.toLowerCase().includes('maudau')
+
+  // MauDau: available categories fetched from API
+  const [maudauCategories, setMaudauCategories] = useState<{ slug: string; title: string }[]>([])
+  const [maudauCatsLoading, setMaudauCatsLoading] = useState(false)
+  const [maudauCatsError, setMaudauCatsError] = useState('')
+
+  useEffect(() => {
+    if (!isMaudau) return
+    setMaudauCatsLoading(true)
+    fetch('/api/maudau/categories')
+      .then(r => r.json())
+      .then(d => {
+        setMaudauCategories(d.categories ?? [])
+        if (d.error) setMaudauCatsError('Не вдалося завантажити категорії MauDau')
+      })
+      .catch(() => setMaudauCatsError('Не вдалося завантажити категорії MauDau'))
+      .finally(() => setMaudauCatsLoading(false))
+  }, [isMaudau])
 
   const [feedName, setFeedName] = useState(feed.name)
   const [feedSlug, setFeedSlug] = useState(feed.slug)
@@ -359,28 +377,56 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           {/* MauDau: Category portal_id mapping */}
           {isMaudau && (
             <div className="bg-zinc-900 border border-purple-900/50 rounded-xl p-5">
-              <h2 className="text-sm font-semibold text-white mb-1">🟣 MauDau — категорії (portal_id)</h2>
+              <div className="flex items-start justify-between gap-2 mb-1">
+                <h2 className="text-sm font-semibold text-white">🟣 MauDau — категорії</h2>
+                {maudauCatsLoading && (
+                  <span className="text-xs text-zinc-500">Завантаження...</span>
+                )}
+              </div>
               <p className="text-xs text-zinc-500 mb-4">
-                Вкажіть <span className="font-mono text-zinc-300">portal_id</span> для кожної категорії з файлу характеристик MauDau.
+                Зіставте свої категорії з категоріями MauDau.
                 Відображаються тільки категорії вибраних товарів.
               </p>
+              {maudauCatsError && (
+                <p className="text-xs text-red-400 mb-3">{maudauCatsError}</p>
+              )}
               {activeCategories.length === 0 ? (
                 <p className="text-xs text-zinc-600">Спочатку виберіть товари праворуч.</p>
               ) : (
                 <div className="space-y-2">
                   {activeCategories.map(cat => (
                     <div key={cat} className="flex items-center gap-3">
-                      <span className="text-xs text-zinc-300 flex-1 truncate">{cat}</span>
-                      <input
-                        type="text"
-                        placeholder="portal_id"
-                        value={categoryPortalIds[cat] ?? ''}
-                        onChange={e => setCategoryPortalIds(prev => ({ ...prev, [cat]: e.target.value }))}
-                        className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white font-mono w-28 focus:outline-none focus:border-purple-500"
-                      />
+                      <span className="text-xs text-zinc-300 flex-1 min-w-0 truncate">{cat}</span>
+                      <span className="text-zinc-600 text-xs shrink-0">→</span>
+                      {maudauCategories.length > 0 ? (
+                        <select
+                          value={categoryPortalIds[cat] ?? ''}
+                          onChange={e => setCategoryPortalIds(prev => ({ ...prev, [cat]: e.target.value }))}
+                          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white w-48 focus:outline-none focus:border-purple-500"
+                        >
+                          <option value="">— оберіть категорію —</option>
+                          {maudauCategories.map(mc => (
+                            <option key={mc.slug} value={mc.slug}>{mc.title}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          placeholder="slug категорії"
+                          value={categoryPortalIds[cat] ?? ''}
+                          onChange={e => setCategoryPortalIds(prev => ({ ...prev, [cat]: e.target.value }))}
+                          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white font-mono w-40 focus:outline-none focus:border-purple-500"
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
+              )}
+              {maudauCategories.length === 0 && !maudauCatsLoading && !maudauCatsError && (
+                <p className="text-xs text-zinc-600 mt-3">
+                  Категорії не знайдено — переконайтеся що є активні товари в кабінеті MauDau,
+                  або введіть slug вручну.
+                </p>
               )}
             </div>
           )}
