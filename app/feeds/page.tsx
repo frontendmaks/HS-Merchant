@@ -103,7 +103,7 @@ export default async function FeedsPage() {
           const stats = feed.stats as { day: number; week: number; errors: number }
 
           return (
-            <Link key={feed.id} href={`/feeds/${feed.id}`}>
+            <Link key={feed.id} href={`/feeds/${feed.id}`} className="block">
               <div className="bg-zinc-900 border border-zinc-800 hover:border-zinc-600 rounded-xl px-6 py-5 transition-colors cursor-pointer">
                 <div className="flex items-center justify-between gap-4">
                   {/* Left */}
