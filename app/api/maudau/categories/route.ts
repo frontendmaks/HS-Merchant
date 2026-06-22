@@ -3,49 +3,19 @@
  *
  * Returns MauDau categories.
  * Priority:
- *   1. maudau_categories table (populated by /api/maudau/import-categories)
- *   2. Fallback: extract unique categories from merchant's existing MauDau products
+ *   1. maudau_categories table (if already populated)
+ *   2. Auto-seeds from static list and returns it
  */
 
-import { getMaudauJwt, invalidateMaudauJwt } from '@/lib/maudau'
 import { createServiceClient } from '@/lib/supabase/service'
+import { MAUDAU_CATEGORIES_SEED } from '@/lib/maudau-categories-seed'
 import { NextResponse } from 'next/server'
-
-async function fetchFromMaudauProducts(jwt: string): Promise<{ slug: string; title: string }[]> {
-  const base = process.env.MAUDAU_BASE!
-  const all: any[] = []
-  let page = 1
-
-  while (true) {
-    const res = await fetch(
-      `${base}/v1/merchant_public_api/products?per_page=100&page=${page}`,
-      { headers: { Authorization: `Bearer ${jwt}` }, cache: 'no-store' }
-    )
-    if (!res.ok) throw new Error(`MauDau products: ${res.status}`)
-    const data: any = await res.json()
-    const items: any[] = data?.data ?? data ?? []
-    all.push(...items)
-    if (items.length < 100) break
-    if (++page > 20) break
-  }
-
-  const seen = new Set<string>()
-  const cats: { slug: string; title: string }[] = []
-  for (const p of all) {
-    const cat = p.main_category
-    if (cat?.slug && !seen.has(cat.slug)) {
-      seen.add(cat.slug)
-      cats.push({ slug: cat.slug, title: cat.title_uk ?? cat.slug })
-    }
-  }
-  return cats.sort((a, b) => a.title.localeCompare(b.title, 'uk'))
-}
 
 export async function GET() {
   try {
     const supabase = createServiceClient()
 
-    // Priority 1: DB table (from Excel import)
+    // Priority 1: DB table
     const { data: dbCats } = await supabase
       .from('maudau_categories')
       .select('slug, title')
@@ -55,22 +25,16 @@ export async function GET() {
       return NextResponse.json({ categories: dbCats, source: 'db' })
     }
 
-    // Priority 2: Live MauDau products API
-    let jwt = await getMaudauJwt()
-    let categories: { slug: string; title: string }[]
-    try {
-      categories = await fetchFromMaudauProducts(jwt)
-    } catch (e: any) {
-      if (e.message?.includes('401') || e.message?.includes('403')) {
-        invalidateMaudauJwt()
-        jwt = await getMaudauJwt()
-        categories = await fetchFromMaudauProducts(jwt)
-      } else {
-        throw e
-      }
-    }
+    // Auto-seed from static list if DB is empty
+    await supabase
+      .from('maudau_categories')
+      .upsert(
+        MAUDAU_CATEGORIES_SEED.map(c => ({ slug: c.slug, title: c.title, parent_slug: null })),
+        { onConflict: 'slug' }
+      )
 
-    return NextResponse.json({ categories, source: 'api' })
+    const sorted = [...MAUDAU_CATEGORIES_SEED].sort((a, b) => a.title.localeCompare(b.title, 'uk'))
+    return NextResponse.json({ categories: sorted, source: 'seed' })
   } catch (err: any) {
     console.error('MauDau categories error:', err)
     return NextResponse.json({ categories: [], error: err.message }, { status: 500 })
