@@ -57,23 +57,53 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
   const isMaudau = feed.marketplace?.slug === 'maudau' || feed.marketplace?.name?.toLowerCase().includes('maudau')
 
-  // MauDau: available categories fetched from API
+  // MauDau: available categories fetched from API / DB
   const [maudauCategories, setMaudauCategories] = useState<{ slug: string; title: string }[]>([])
   const [maudauCatsLoading, setMaudauCatsLoading] = useState(false)
   const [maudauCatsError, setMaudauCatsError] = useState('')
+  const [maudauCatsSource, setMaudauCatsSource] = useState<'db' | 'api' | ''>('')
+  const [xlsxUploading, setXlsxUploading] = useState(false)
+  const [xlsxMsg, setXlsxMsg] = useState('')
 
-  useEffect(() => {
-    if (!isMaudau) return
+  const loadMaudauCategories = () => {
     setMaudauCatsLoading(true)
+    setMaudauCatsError('')
     fetch('/api/maudau/categories')
       .then(r => r.json())
       .then(d => {
         setMaudauCategories(d.categories ?? [])
+        setMaudauCatsSource(d.source ?? '')
         if (d.error) setMaudauCatsError('Не вдалося завантажити категорії MauDau')
       })
       .catch(() => setMaudauCatsError('Не вдалося завантажити категорії MauDau'))
       .finally(() => setMaudauCatsLoading(false))
+  }
+
+  useEffect(() => {
+    if (!isMaudau) return
+    loadMaudauCategories()
   }, [isMaudau])
+
+  const handleXlsxUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setXlsxUploading(true)
+    setXlsxMsg('')
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/maudau/import-categories', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error)
+      setXlsxMsg(`✅ Імпортовано ${data.count} категорій`)
+      loadMaudauCategories()
+    } catch (err: any) {
+      setXlsxMsg('❌ ' + (err.message ?? 'Помилка імпорту'))
+    } finally {
+      setXlsxUploading(false)
+      e.target.value = ''
+    }
+  }
 
   const [feedName, setFeedName] = useState(feed.name)
   const [feedSlug, setFeedSlug] = useState(feed.slug)
@@ -379,14 +409,39 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             <div className="bg-zinc-900 border border-purple-900/50 rounded-xl p-5">
               <div className="flex items-start justify-between gap-2 mb-1">
                 <h2 className="text-sm font-semibold text-white">🟣 MauDau — категорії</h2>
-                {maudauCatsLoading && (
-                  <span className="text-xs text-zinc-500">Завантаження...</span>
-                )}
+                {maudauCatsLoading && <span className="text-xs text-zinc-500">Завантаження...</span>}
               </div>
-              <p className="text-xs text-zinc-500 mb-4">
+              <p className="text-xs text-zinc-500 mb-3">
                 Зіставте свої категорії з категоріями MauDau.
-                Відображаються тільки категорії вибраних товарів.
+                {maudauCatsSource === 'db'
+                  ? <span className="text-emerald-500"> • {maudauCategories.length} кат. з файлу</span>
+                  : maudauCatsSource === 'api'
+                  ? <span className="text-amber-500"> • {maudauCategories.length} кат. з API (лише наявні)</span>
+                  : null}
               </p>
+
+              {/* Excel upload */}
+              <div className="mb-4 p-3 bg-zinc-800/60 rounded-lg border border-zinc-700">
+                <p className="text-xs text-zinc-400 mb-2">
+                  Для повного списку категорій — завантажте файл характеристик від MauDau (Excel/XLSX):
+                </p>
+                <label className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                  xlsxUploading
+                    ? 'border-zinc-700 text-zinc-600 cursor-not-allowed'
+                    : 'border-purple-700 text-purple-300 hover:bg-purple-900/20'
+                }`}>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    disabled={xlsxUploading}
+                    onChange={handleXlsxUpload}
+                  />
+                  {xlsxUploading ? '⏳ Імпорт...' : '📂 Завантажити файл характеристик'}
+                </label>
+                {xlsxMsg && <p className="mt-1.5 text-xs text-zinc-400">{xlsxMsg}</p>}
+              </div>
+
               {maudauCatsError && (
                 <p className="text-xs text-red-400 mb-3">{maudauCatsError}</p>
               )}
