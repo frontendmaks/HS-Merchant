@@ -5,19 +5,44 @@ import { useState, useEffect } from 'react'
 const MAUDAU_STATUSES = ['Нове', 'Прийнято', 'Узгоджено', 'На доставці', 'Прибуло', 'Доставлено', 'Скасовано']
 const ROZETKA_STATUSES = ['Нове', 'Опрацьовується', 'Комплектується', 'Передано в доставку', 'Доставляється', 'Чекає в пункті', 'Доставлено', 'Скасовано']
 
+// Exact names from MauDau API /v1/merchant_public_api/orders/cancellation_reasons
+// Used as fallback if API call fails
 const MAUDAU_CANCEL_REASONS_STATIC = [
-  'Немає в наявності',
-  'Покупець відмовився',
-  'Відсутній товар',
-  'Неправильне замовлення',
-  'Технічна проблема',
+  { id: 12,  name: 'Доставка: Відміна при доставці' },
+  { id: 44,  name: 'Термін: Не готовий очікувати товар під замовлення' },
+  { id: 45,  name: 'Термін: Протермінована поставка товару' },
+  { id: 47,  name: 'Наявність товару: Немає у наявності' },
+  { id: 49,  name: 'Ціна: Не влаштовує вартість доставки' },
+  { id: 53,  name: 'Система: Тестове замовлення' },
+  { id: 55,  name: 'Гість: Відмовився (не актуально)' },
+  { id: 56,  name: 'Гість: Немає відповіді від Гостя' },
+  { id: 57,  name: 'Гість: Замовив не той товар' },
+  { id: 58,  name: 'Гість: Не влаштовує час доставки' },
+  { id: 60,  name: 'Наявність товару: Товару немає у потрібній кількості' },
+  { id: 61,  name: 'Оплата: Не підходить спосіб оплати' },
+  { id: 62,  name: 'Оплата: Немає оплати' },
+  { id: 63,  name: 'Гість: Замовив в іншому магазині' },
+  { id: 64,  name: 'Гість: Думав, що замовив у MAUDAU' },
+  { id: 65,  name: 'Гість: Не підійшли характеристики товару' },
+  { id: 66,  name: 'Товар: Брак' },
+  { id: 67,  name: 'Ціна: Не актуальна ціна' },
+  { id: 68,  name: 'Гість: Дубль замовлення' },
+  { id: 69,  name: 'Інше - додати коментар' },
 ]
+
+// Rozetka cancel reasons — status ID encodes the reason
 const ROZETKA_CANCEL_REASONS = [
-  'Немає в наявності',
-  'Покупець відмовився',
-  'Не влаштовує якість',
-  'Пошкоджено при доставці',
-  'Дублікат замовлення',
+  { id: 45, name: 'Скасовано покупцем' },
+  { id: 40, name: 'Клієнт передумав' },
+  { id: 16, name: 'Немає в наявності' },
+  { id: 18, name: 'Не вдалося зв\'язатися' },
+  { id: 44, name: 'Фейкове замовлення' },
+  { id: 11, name: 'Не прийшов' },
+  { id: 12, name: 'Відмова при отриманні' },
+  { id: 17, name: 'Не влаштовує оплата' },
+  { id: 19, name: 'Повернено' },
+  { id: 50, name: 'Клієнт не оплатив' },
+  { id: 13, name: 'Скасовано' },
 ]
 
 const TERMINAL_STATUSES = new Set(['Скасовано', 'Доставлено'])
@@ -86,25 +111,20 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
         if (data.reasons && data.reasons.length > 0) {
           setMaudauReasons(data.reasons)
         } else {
-          // Fallback to static list represented as id-less objects for uniform rendering
-          setMaudauReasons(
-            MAUDAU_CANCEL_REASONS_STATIC.map((name, i) => ({ id: -(i + 1), name })),
-          )
+          setMaudauReasons(MAUDAU_CANCEL_REASONS_STATIC)
         }
       })
       .catch(() => {
-        setMaudauReasons(
-          MAUDAU_CANCEL_REASONS_STATIC.map((name, i) => ({ id: -(i + 1), name })),
-        )
+        setMaudauReasons(MAUDAU_CANCEL_REASONS_STATIC)
       })
       .finally(() => setMaudauReasonsLoading(false))
   }, [props.platform])
 
   const statuses = props.platform === 'rozetka' ? ROZETKA_STATUSES : MAUDAU_STATUSES
-  const cancelReasonNames =
+  const cancelReasonOptions: { id: number; name: string }[] =
     props.platform === 'rozetka'
       ? ROZETKA_CANCEL_REASONS
-      : maudauReasons.map(r => r.name)
+      : maudauReasons
 
   async function handleStatusChange(newStatus: string) {
     setStatusError('')
@@ -257,8 +277,8 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
               <option value="">
                 {maudauReasonsLoading ? 'Завантаження...' : '—'}
               </option>
-              {cancelReasonNames.map(r => (
-                <option key={r} value={r}>{r}</option>
+              {cancelReasonOptions.map(r => (
+                <option key={r.id} value={r.name}>{r.name}</option>
               ))}
             </select>
             {cancelLoading && <div className="text-zinc-500 text-xs mt-0.5">Скасування...</div>}

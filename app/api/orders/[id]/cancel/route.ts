@@ -31,7 +31,7 @@ export async function PATCH(
       const jwt = await getMaudauJwt()
 
       // Fetch cancellation reasons and find best match
-      const reasonsRes = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/cancellation_reasons`, {
+      const reasonsRes = await fetch(`${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/cancellation_reasons`, {
         headers: { Authorization: `Bearer ${jwt}` },
       })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
