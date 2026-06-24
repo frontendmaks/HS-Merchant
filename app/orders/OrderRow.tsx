@@ -90,6 +90,13 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
   const [ttnDraft, setTtnDraft] = useState(props.ttn || '')
   const [cancelReason, setCancelReason] = useState(props.cancel_reason || '')
 
+  useEffect(() => {
+    setStatus(props.status || '')
+    setTtn(props.ttn || '')
+    setTtnDraft(props.ttn || '')
+    setCancelReason(props.cancel_reason || '')
+  }, [props.status, props.ttn, props.cancel_reason])
+
   const [statusLoading, setStatusLoading] = useState(false)
   const [ttnLoading, setTtnLoading] = useState(false)
   const [cancelLoading, setCancelLoading] = useState(false)
