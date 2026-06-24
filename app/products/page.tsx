@@ -12,7 +12,7 @@ const PER_PAGE = 50
 const ALLOWED_SORT = ['name', 'price', 'stock', 'status', 'category_name', 'brand'] as const
 type SortCol = typeof ALLOWED_SORT[number]
 
-async function getProducts(q: string, page: number, sort: SortCol, dir: 'asc' | 'desc') {
+async function getProducts(q: string, page: number, sort: SortCol, dir: 'asc' | 'desc', sale: boolean) {
   const supabase = createServiceClient()
   const from = (page - 1) * PER_PAGE
   const to = from + PER_PAGE - 1
@@ -25,6 +25,7 @@ async function getProducts(q: string, page: number, sort: SortCol, dir: 'asc' | 
     .range(from, to)
 
   if (q) query = query.ilike('name', `%${q}%`)
+  if (sale) query = query.not('price_old', 'is', null)
 
   const { data, count } = await query
   return { products: data ?? [], total: count ?? 0 }
@@ -33,19 +34,20 @@ async function getProducts(q: string, page: number, sort: SortCol, dir: 'asc' | 
 export default async function ProductsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; page?: string; sort?: string; dir?: string }>
+  searchParams: Promise<{ q?: string; page?: string; sort?: string; dir?: string; sale?: string }>
 }) {
   const { getCurrentRole } = await import('@/lib/getRole')
   const { redirect } = await import('next/navigation')
   const userRole = await getCurrentRole()
   if (userRole === 'operator') redirect('/orders')
 
-  const { q = '', page: pageStr = '1', sort: sortRaw = 'name', dir: dirRaw = 'asc' } = await searchParams
+  const { q = '', page: pageStr = '1', sort: sortRaw = 'name', dir: dirRaw = 'asc', sale } = await searchParams
   const page = Math.max(1, parseInt(pageStr) || 1)
   const sort = (ALLOWED_SORT.includes(sortRaw as SortCol) ? sortRaw : 'name') as SortCol
   const dir = dirRaw === 'desc' ? 'desc' : 'asc'
+  const onSale = sale === '1'
 
-  const { products, total } = await getProducts(q, page, sort, dir)
+  const { products, total } = await getProducts(q, page, sort, dir, onSale)
   const totalPages = Math.ceil(total / PER_PAGE)
   const readOnly = userRole === 'viewer'
 
@@ -70,12 +72,13 @@ export default async function ProductsPage({
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
         {/* Table header */}
         <div className="grid gap-3 px-4 py-3 border-b border-zinc-800 bg-zinc-800/50"
-          style={{ gridTemplateColumns: '72px 1fr 160px 160px 100px 90px 90px 90px' }}>
+          style={{ gridTemplateColumns: '72px 1fr 160px 160px 100px 100px 90px 90px 90px' }}>
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Фото</div>
           <Suspense><SortableHeader column="name" label="Назва / Артикул" /></Suspense>
           <Suspense><SortableHeader column="category_name" label="Категорія" /></Suspense>
           <Suspense><SortableHeader column="brand" label="Бренд" /></Suspense>
           <Suspense><SortableHeader column="price" label="Ціна" className="justify-end" /></Suspense>
+          <div className="text-xs text-zinc-500 uppercase tracking-wide text-right">Акційна</div>
           <Suspense><SortableHeader column="stock" label="Залишок" className="justify-end" /></Suspense>
           <div className="text-xs text-zinc-500 uppercase tracking-wide text-center">Вага</div>
           <Suspense><SortableHeader column="status" label="Статус" className="justify-center" /></Suspense>
@@ -100,7 +103,7 @@ export default async function ProductsPage({
               <div
                 key={p.id}
                 className="grid gap-3 px-4 py-2.5 items-center hover:bg-zinc-800/40 transition-colors"
-                style={{ gridTemplateColumns: '72px 1fr 160px 160px 100px 90px 90px 90px' }}
+                style={{ gridTemplateColumns: '72px 1fr 160px 160px 100px 100px 90px 90px 90px' }}
               >
                 {/* Image — більша */}
                 <div className="w-14 h-14 rounded-lg overflow-hidden bg-zinc-800 shrink-0">
@@ -155,16 +158,25 @@ export default async function ProductsPage({
                   {noPrice ? (
                     <span className="text-red-500 text-sm">—</span>
                   ) : (
-                    <div>
-                      <div className="text-sm font-semibold text-white">
-                        {Number(p.price).toLocaleString('uk-UA')} ₴
-                      </div>
-                      {p.price_old && (
-                        <div className="text-xs text-zinc-600 line-through">
-                          {Number(p.price_old).toLocaleString('uk-UA')} ₴
-                        </div>
-                      )}
+                    <div className={`text-sm font-semibold ${p.price_old ? 'text-emerald-400' : 'text-white'}`}>
+                      {Number(p.price).toLocaleString('uk-UA')} ₴
                     </div>
+                  )}
+                </div>
+
+                {/* Sale price (old price = before discount) */}
+                <div className="text-right">
+                  {p.price_old ? (
+                    <div>
+                      <div className="text-xs text-zinc-500 line-through">
+                        {Number(p.price_old).toLocaleString('uk-UA')} ₴
+                      </div>
+                      <div className="text-[10px] text-emerald-600 mt-0.5">
+                        -{Math.round((1 - Number(p.price) / Number(p.price_old)) * 100)}%
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-zinc-700">—</span>
                   )}
                 </div>
 

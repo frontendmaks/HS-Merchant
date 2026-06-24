@@ -9,6 +9,7 @@ export default function ProductsToolbar({ total, readOnly }: { total: number; re
   const [isPending, startTransition] = useTransition()
 
   const search = params.get('q') ?? ''
+  const onSale = params.get('sale') === '1'
 
   const handleSearch = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value
@@ -19,6 +20,15 @@ export default function ProductsToolbar({ total, readOnly }: { total: number; re
       router.replace(`/products?${p.toString()}`)
     })
   }, [params, router])
+
+  const toggleSale = () => {
+    startTransition(() => {
+      const p = new URLSearchParams(params.toString())
+      if (onSale) p.delete('sale')
+      else { p.set('sale', '1'); p.delete('page') }
+      router.replace(`/products?${p.toString()}`)
+    })
+  }
 
   const handleSync = async () => {
     setSyncing(true)
@@ -55,6 +65,16 @@ export default function ProductsToolbar({ total, readOnly }: { total: number; re
           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">...</span>
         )}
       </div>
+      <button
+        onClick={toggleSale}
+        className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm transition-colors ${
+          onSale
+            ? 'bg-emerald-950 border-emerald-700 text-emerald-400'
+            : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200'
+        }`}
+      >
+        % З акцією
+      </button>
       <div className="text-xs text-zinc-500">{total} товарів</div>
       {!readOnly && (
         <button
