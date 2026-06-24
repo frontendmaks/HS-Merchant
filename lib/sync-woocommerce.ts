@@ -43,14 +43,22 @@ async function fetchWarehouseVariation(productId: number): Promise<{ price: numb
 }
 
 function extractWeight(name: string): string | null {
-  const match = name.match(/(?<![/а-яА-ЯіІїЇєЄa-zA-Z])(\d+(?:[.,]\d+)?)\s*(кг|мл|л(?!а)|г)(?![а-яА-ЯіІїЇєЄa-zA-Z/\d])/)
+  // Match weight/volume at end of name (common pattern: "Product Name, 250 г" or "Product 0.5 л")
+  // Look for number + unit, with comma/space before — covers г, мл, л, кг
+  // Must not be preceded by slash or letter (e.g. avoid "82,5%" → "5 г" false match)
+  const match = name.match(/(?:,\s*|(?<![/а-яА-ЯіІїЇєЄa-zA-Z%,]))(\d+(?:[.,]\d+)?)\s*(кг|мл|л(?![а-яА-ЯіІїЇєЄ])|г)(?![а-яА-ЯіІїЇєЄa-zA-Z/\d])/)
   if (!match) return null
-  return `${match[1]} ${match[2]}`
+  // Normalize: replace comma decimal separator with dot
+  const num = match[1].replace(',', '.')
+  return `${num} ${match[2]}`
 }
 
 function extractBrand(name: string): string {
-  const match = name.match(/[ТT][МM]\s+["'"«„"]([^"'"»",]+)/)
-  return match ? match[1].trim() : 'Галицька Свіжина'
+  // Match ТМ "Brand" / ТМ «Brand» / ТМ 'Brand' — with or without space between ТМ and quote
+  // Also match TM (latin letters) and various quote styles
+  const match = name.match(/[ТTтt][МMмm]\s*["'«„"“„«]([^"'»"”»,]{1,60})/)
+  if (match) return match[1].trim()
+  return 'Галицька Свіжина'
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -65,6 +73,14 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   }
   const weight = extractWeight(p.name)
   if (weight) attributes['Вага'] = weight
+
+  // Extract minimum quantity step from meta_data (various WC quantity plugins)
+  const stepMeta = (p.meta_data ?? []).find((m: any) =>
+    ['_alg_wc_pq_step', 'wc_min_quantity_step', '_wc_min_qty_step', 'minimum_quantity'].includes(m.key)
+  )
+  if (stepMeta?.value && parseFloat(stepMeta.value) > 0 && parseFloat(stepMeta.value) < 1) {
+    attributes['Крок'] = String(stepMeta.value)
+  }
 
   const category_name = pickMainCategory(p, categoryMap)
   const brand = extractBrand(p.name)

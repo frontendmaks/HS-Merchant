@@ -1,9 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import { NextRequest, NextResponse } from 'next/server'
-import { syncWoocommerce } from '@/lib/sync-woocommerce'
-
-// Auto-sync WooCommerce if last sync is older than this many hours
-const AUTO_SYNC_AFTER_HOURS = 2
 
 export async function GET(
   request: NextRequest,
@@ -32,42 +28,9 @@ export async function GET(
     return new NextResponse('Feed not found', { status: 404 })
   }
 
-  // Auto-sync WooCommerce if enabled and data is stale
-  let autoSynced = false
-  const autoSync = feed.settings?.auto_sync !== false // default true
-  if (autoSync) {
-    const { data: lastSync } = await supabase
-      .from('sync_logs')
-      .select('created_at')
-      .eq('status', 'success')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
-
-    const lastSyncAt = lastSync?.created_at ? new Date(lastSync.created_at) : null
-    const staleMs = AUTO_SYNC_AFTER_HOURS * 60 * 60 * 1000
-    const isStale = !lastSyncAt || Date.now() - lastSyncAt.getTime() > staleMs
-
-    if (isStale) {
-      try {
-        await syncWoocommerce('cron', 'feed-auto-sync')
-        autoSynced = true
-        // Reload products after sync
-        const { data: refreshed } = await supabase
-          .from('feeds')
-          .select(`
-            *,
-            marketplace:marketplaces(*),
-            feed_products(*, product:products(*))
-          `)
-          .eq('id', feed.id)
-          .single()
-        if (refreshed) Object.assign(feed, refreshed)
-      } catch (e) {
-        console.error('Auto-sync failed:', e)
-      }
-    }
-  }
+  // Auto-sync removed from feed request — causes timeout when MauDau/Rozetka pulls the feed.
+  // Sync WooCommerce manually or via scheduled cron separately.
+  const autoSynced = false
 
   const isMaudau = feed.marketplace?.slug === 'maudau' || feed.marketplace?.name?.toLowerCase().includes('maudau')
   const { xml, offersCount, errorsCount } = isMaudau
@@ -114,11 +77,12 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       const attrs = Object.entries(p.attributes as Record<string, string>)
         .map(([k, v]) => `<param name="${k}">${v}</param>`)
         .join('\n        ')
+      const oldPriceLine = p.price_old ? `\n      <oldprice>${p.price_old}</oldprice>` : ''
 
       return `
     <offer id="${p.id}" available="${p.status === 'active' && p.stock > 0}">
       <name>${escapeXml(name)}</name>
-      <price>${price}</price>
+      <price>${price}</price>${oldPriceLine}
       <currencyId>${p.currency}</currencyId>
       <categoryId>${p.category_id ?? 1}</categoryId>
       ${images}
@@ -146,6 +110,18 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
 </yml_catalog>`
 
   return { xml, offersCount: products.length, errorsCount: errors.length }
+}
+
+// Brand name normalization: our extracted name → MauDau's registered name
+const MAUDAU_BRAND_MAP: Record<string, string> = {
+  'Grissin Bon': 'GrissinBon',
+  'Pikolo': 'Піколо',
+  'Млекпол': 'Mlekpol',   // MauDau registered as Latin
+  'НАМЕ': 'Hame',          // MauDau registered as Hame
+}
+
+function normalizeMaudauBrand(brand: string): string {
+  return MAUDAU_BRAND_MAP[brand] ?? brand
 }
 
 /** MauDau-specific YML format per MauDau import spec */
@@ -179,16 +155,27 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
   const offersXml = activeFps
     .map((fp: any) => {
       const p = fp.product
-      const price = fp.custom_price ?? p.price
       const nameUa = fp.custom_name ?? p.name
       const nameRu = fp.name_ru ?? nameUa
-      const descUa = p.description ?? ''
-      const descRu = fp.description_ru ?? descUa
+      // MauDau requires non-empty description — fall back to product name if empty
+      const descUa = (p.description && p.description.trim()) ? p.description.trim() : nameUa
+      const descRu = (fp.description_ru && fp.description_ru.trim()) ? fp.description_ru.trim() : (descUa === nameUa ? nameRu : descUa)
       const stock = fp.custom_stock ?? p.stock
       const catId = catIndexMap.get(p.category_name ?? 'Без категорії') ?? 1
 
+      // Detect weighted product: has a step attribute like "Крок" in attributes
+      const attrs_map = (p.attributes as Record<string, string>) ?? {}
+      const stepAttr = attrs_map['Крок'] ?? attrs_map['крок'] ?? attrs_map['Мінімальний крок'] ?? null
+      const weightStep = stepAttr ? parseFloat(stepAttr.replace(',', '.')) : null
+
+      // Calculate unit price for weighted products (price stored as per-kg)
+      let unitPrice = fp.custom_price ?? p.price
+      if (!fp.custom_price && weightStep && weightStep > 0 && weightStep < 1) {
+        unitPrice = Math.round(p.price * weightStep)
+      }
+
       // Validate
-      if (!price || price <= 0) errors.push(`No price: ${p.sku || p.id}`)
+      if (!unitPrice || unitPrice <= 0) errors.push(`No price: ${p.sku || p.id}`)
       if (!nameUa) errors.push(`No name: ${p.sku || p.id}`)
       if (!p.images?.length) errors.push(`No images: ${p.sku || p.id}`)
 
@@ -197,7 +184,11 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
         .map((url: string) => `      <picture>${escapeXml(url)}</picture>`)
         .join('\n')
 
-      const attrs = Object.entries((p.attributes as Record<string, string>) ?? {})
+      // Exclude 'Вага' from params — MauDau has predefined weight values, arbitrary gram values cause warnings
+      // Also exclude step/крок (internal field)
+      const EXCLUDED_PARAMS = new Set(['Крок', 'крок', 'Мінімальний крок', 'Вага', 'вага'])
+      const attrs = Object.entries(attrs_map)
+        .filter(([k]) => !EXCLUDED_PARAMS.has(k))
         .map(([k, v]) => `      <param name="${escapeXml(k)}">${escapeXml(v)}</param>`)
         .join('\n')
 
@@ -206,18 +197,23 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '') || String(p.id).replace(/[^a-zA-Z0-9]/g, '')
 
-      const quantityLine = stock != null ? `\n      <quantity>${stock}</quantity>` : ''
+      // MauDau treats fractional quantity as 0 → use integer ceiling
+      const quantityInt = stock != null ? (stock > 0 ? Math.ceil(stock) : 0) : null
+      const quantityLine = quantityInt != null ? `\n      <quantity>${quantityInt}</quantity>` : ''
+
+      // Sale price: p.price = current (discounted), p.price_old = original price before discount
+      const oldPriceLine = p.price_old ? `\n      <price_old>${p.price_old}</price_old>` : ''
 
       return `    <offer id="${offerId}" available="true">
       <name_ua>${escapeXml(nameUa)}</name_ua>
       <name_ru>${escapeXml(nameRu)}</name_ru>
       <description_ua><![CDATA[${descUa}]]></description_ua>
       <description_ru><![CDATA[${descRu}]]></description_ru>
-      <price>${price ?? 0}</price>
+      <price>${unitPrice ?? 0}</price>${oldPriceLine}
       <currencyId>UAH</currencyId>
       <categoryId>${catId}</categoryId>${quantityLine}
 ${images}
-      <vendor>${escapeXml(p.brand ?? 'Галицька Свіжина')}</vendor>
+      <vendor>${escapeXml(normalizeMaudauBrand(p.brand ?? 'Галицька Свіжина'))}</vendor>
       <vendorCode>${escapeXml(p.sku ?? '')}</vendorCode>
 ${attrs}
     </offer>`

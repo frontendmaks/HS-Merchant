@@ -8,6 +8,7 @@ type Product = {
   category_name: string | null
   brand: string | null
   price: number
+  price_old: number | null
   stock: number | null
   images: string[]
 }
@@ -152,6 +153,22 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [xlsxMsg, setXlsxMsg] = useState('')
   const [syncingCats, setSyncingCats] = useState(false)
   const [syncCatsMsg, setSyncCatsMsg] = useState('')
+  const [syncingWC, setSyncingWC] = useState(false)
+  const [syncWCMsg, setSyncWCMsg] = useState('')
+
+  const handleSyncWC = async () => {
+    setSyncingWC(true)
+    setSyncWCMsg('')
+    try {
+      const res = await fetch('/api/sync/woocommerce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'manual', trigger: 'feed-editor' }) })
+      const data = await res.json()
+      setSyncWCMsg(data.success ? `✓ Синхронізовано: ${data.created ?? 0} нових, ${data.updated ?? 0} оновлено` : `Помилка: ${data.error ?? 'невідома'}`)
+    } catch {
+      setSyncWCMsg('Помилка підключення')
+    } finally {
+      setSyncingWC(false)
+    }
+  }
 
   const handleSyncAllCategories = async () => {
     setSyncingCats(true)
@@ -398,6 +415,18 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             {deleting ? '⏳' : '🗑 Видалити'}
           </button>
           <div className="w-px h-6 bg-zinc-800" />
+          <div className="flex flex-col items-end gap-1">
+            <button
+              onClick={handleSyncWC}
+              disabled={syncingWC}
+              className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              title="Синхронізувати товари з WooCommerce"
+            >
+              <span className={syncingWC ? 'animate-spin inline-block' : ''}>↻</span>
+              {syncingWC ? 'Синхронізація...' : 'Синк з WC'}
+            </button>
+            {syncWCMsg && <span className="text-[11px] text-zinc-400">{syncWCMsg}</span>}
+          </div>
           <button
             onClick={handleGenerate}
             disabled={generating}
@@ -644,11 +673,12 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           </div>
 
           {/* Column headers */}
-          <div className="grid grid-cols-[20px_36px_1fr_70px_56px] gap-2 px-4 py-2 bg-zinc-800/50 border-b border-zinc-800">
+          <div className="grid grid-cols-[20px_36px_1fr_70px_70px_56px] gap-2 px-4 py-2 bg-zinc-800/50 border-b border-zinc-800">
             <div className="text-xs text-zinc-600">✓</div>
             <div />
             <div className="text-xs text-zinc-600 uppercase tracking-wide">Товар</div>
             <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Ціна</div>
+            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Акційна</div>
             <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Залишок</div>
           </div>
 
@@ -667,7 +697,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
               return (
                 <div key={p.id} className={`transition-colors ${isActive ? 'hover:bg-zinc-800/30' : 'opacity-35 hover:opacity-60'}`}>
-                  <div className="grid grid-cols-[20px_36px_1fr_70px_56px] gap-2 px-4 py-2 items-center">
+                  <div className="grid grid-cols-[20px_36px_1fr_70px_70px_56px] gap-2 px-4 py-2 items-center">
                     {/* Checkbox */}
                     <input
                       type="checkbox"
@@ -706,6 +736,18 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                         onChange={e => setOverride(p.id, 'custom_price', e.target.value)}
                         className="w-full bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-xs text-white text-right focus:outline-none focus:border-amber-500 placeholder:text-zinc-500"
                       />
+                    </div>
+
+                    {/* Sale price (price_old = original, price = discounted) */}
+                    <div className="text-right">
+                      {p.price_old != null ? (
+                        <div>
+                          <div className="text-xs text-emerald-400 font-medium">{p.price} ₴</div>
+                          <div className="text-[10px] text-zinc-500 line-through">{p.price_old} ₴</div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-zinc-600">—</span>
+                      )}
                     </div>
 
                     {/* Stock */}
