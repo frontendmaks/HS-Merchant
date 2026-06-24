@@ -21,7 +21,7 @@ async function fetchWCPage(page: number) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchWarehouseVariation(productId: number): Promise<{ price: number | null; stock: number | null } | null> {
+async function fetchWarehouseVariation(productId: number): Promise<{ price: number | null; price_old: number | null; stock: number | null } | null> {
   const res = await wcFetch(`/products/${productId}/variations?per_page=100`)
   if (!res.ok) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,8 +36,12 @@ async function fetchWarehouseVariation(productId: number): Promise<{ price: numb
   )
   if (!match) return null
 
+  const salePrice = match.sale_price ? parseFloat(match.sale_price) : null
+  const regularPrice = parseFloat(match.regular_price || match.price || '0') || null
+
   return {
-    price: parseFloat(match.price || match.regular_price || '0') || null,
+    price: salePrice ?? regularPrice,
+    price_old: salePrice && regularPrice && salePrice < regularPrice ? regularPrice : null,
     stock: match.manage_stock ? (match.stock_quantity ?? 0) : null,
   }
 }
@@ -84,7 +88,21 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
 
   const category_name = pickMainCategory(p, categoryMap)
   const brand = extractBrand(p.name)
-  const price = (variation?.price) ?? (parseFloat(p.regular_price || p.price || '0') || 0)
+
+  // For simple products: use sale_price if set, otherwise regular_price
+  // For variable products: price comes from variation (already resolved with sale)
+  let price: number
+  let price_old: number | null
+  if (variation !== undefined && variation !== null) {
+    // Variable product with warehouse variation
+    price = variation.price ?? 0
+    price_old = (variation as any).price_old ?? null
+  } else {
+    const salePrice = p.sale_price ? parseFloat(p.sale_price) : null
+    const regularPrice = parseFloat(p.regular_price || p.price || '0') || 0
+    price = salePrice ?? regularPrice
+    price_old = salePrice && regularPrice && salePrice < regularPrice ? regularPrice : null
+  }
 
   let stock: number | null
   if (variation === undefined) {
@@ -102,7 +120,7 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
     description: p.description?.replace(/<[^>]*>/g, '').trim() || p.short_description?.replace(/<[^>]*>/g, '').trim() || null,
     sku: p.sku || null,
     price,
-    price_old: p.sale_price ? parseFloat(p.regular_price || '0') : null,
+    price_old,
     currency: 'UAH' as const,
     stock,
     status: 'active' as const,
