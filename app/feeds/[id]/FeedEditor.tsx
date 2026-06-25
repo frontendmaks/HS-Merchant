@@ -11,6 +11,7 @@ type Product = {
   price_old: number | null
   stock: number | null
   images: string[]
+  attributes: Record<string, string> | null
 }
 
 type FeedProduct = {
@@ -257,8 +258,48 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [productSearch, setProductSearch] = useState('')
   const [categorySearch, setCategorySearch] = useState('')
   const [showOnlySelected, setShowOnlySelected] = useState(false)
-  // Which product row is expanded (for MauDau extra fields)
+  // Which product row is expanded
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
+
+  // Bulk param add
+  const [bulkKey, setBulkKey] = useState('')
+  const [bulkValue, setBulkValue] = useState('')
+
+  const applyBulkParam = () => {
+    const key = bulkKey.trim()
+    const value = bulkValue.trim()
+    if (!key || !value) return
+    setOverrides(prev => {
+      const next = { ...prev }
+      filteredProducts.forEach(p => {
+        if (next[p.id]?.is_active !== true) return
+        next[p.id] = { ...next[p.id], custom_params: { ...(next[p.id]?.custom_params ?? {}), [key]: value } }
+      })
+      return next
+    })
+  }
+
+  const autoFillParams = () => {
+    setOverrides(prev => {
+      const next = { ...prev }
+      allProducts.forEach(p => {
+        if (next[p.id]?.is_active !== true) return
+        const existing = next[p.id]?.custom_params ?? {}
+        const auto: Record<string, string> = {}
+        // Вага упаковки — from WC attributes
+        const weight = p.attributes?.['Вага']
+        if (weight && !existing['Вага упаковки']) auto['Вага упаковки'] = weight
+        // Країна виробник — default Україна
+        if (!existing['Країна виробник']) auto['Країна виробник'] = 'Україна'
+        // Гарантія — standard food disclaimer
+        if (!existing['Гарантія']) auto['Гарантія'] = 'Відповідно до законодавства України'
+        if (Object.keys(auto).length > 0) {
+          next[p.id] = { ...next[p.id], custom_params: { ...auto, ...existing } }
+        }
+      })
+      return next
+    })
+  }
 
   // Categories filtered by search
   const filteredCategories = useMemo(() =>
@@ -663,7 +704,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             </div>
 
             {/* Bulk actions */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={selectAllVisible}
                 className="text-xs px-3 py-1.5 bg-emerald-900/40 hover:bg-emerald-900/60 border border-emerald-800 text-emerald-400 rounded-lg transition-colors"
@@ -672,6 +713,37 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                 onClick={deselectAllVisible}
                 className="text-xs px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 rounded-lg transition-colors"
               >✕ Зняти видимі</button>
+              <div className="w-px h-4 bg-zinc-700 mx-1" />
+              <button
+                onClick={autoFillParams}
+                title="Автоматично заповнює: Вага упаковки (з назви), Країна виробник, Гарантія — тільки для вибраних товарів, не перезаписує вже заповнені"
+                className="text-xs px-3 py-1.5 bg-amber-900/40 hover:bg-amber-900/60 border border-amber-800 text-amber-400 rounded-lg transition-colors whitespace-nowrap"
+              >✦ Автозаповнення</button>
+            </div>
+
+            {/* Bulk param add */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-zinc-500 shrink-0">Масово:</span>
+              <input
+                type="text"
+                placeholder="Назва (напр. Тип)"
+                value={bulkKey}
+                onChange={e => setBulkKey(e.target.value)}
+                className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 w-32"
+              />
+              <span className="text-zinc-600 text-xs">:</span>
+              <input
+                type="text"
+                placeholder="Значення"
+                value={bulkValue}
+                onChange={e => setBulkValue(e.target.value)}
+                className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 flex-1"
+              />
+              <button
+                onClick={applyBulkParam}
+                disabled={!bulkKey.trim() || !bulkValue.trim()}
+                className="text-xs px-3 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded transition-colors disabled:opacity-40 whitespace-nowrap"
+              >→ Всім вибраним</button>
             </div>
           </div>
 
