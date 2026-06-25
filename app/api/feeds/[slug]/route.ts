@@ -74,7 +74,8 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       const images = (p.images as string[])
         .map((url: string) => `<picture>${url}</picture>`)
         .join('\n        ')
-      const attrs = Object.entries(p.attributes as Record<string, string>)
+      const mergedAttrs = { ...(p.attributes as Record<string, string>), ...(fp.custom_params ?? {}) }
+      const attrs = Object.entries(mergedAttrs)
         .map(([k, v]) => `<param name="${k}">${v}</param>`)
         .join('\n        ')
       const oldPriceLine = p.price_old ? `\n      <oldprice>${p.price_old}</oldprice>` : ''
@@ -163,8 +164,8 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
       const stock = fp.custom_stock ?? p.stock
       const catId = catIndexMap.get(p.category_name ?? 'Без категорії') ?? 1
 
-      // Detect weighted product: has a step attribute like "Крок" in attributes
-      const attrs_map = (p.attributes as Record<string, string>) ?? {}
+      // Merge product attributes with feed-level custom params (custom_params override)
+      const attrs_map = { ...(p.attributes as Record<string, string>) ?? {}, ...(fp.custom_params ?? {}) }
       const stepAttr = attrs_map['Крок'] ?? attrs_map['крок'] ?? attrs_map['Мінімальний крок'] ?? null
       const weightStep = stepAttr ? parseFloat(stepAttr.replace(',', '.')) : null
 
@@ -189,7 +190,7 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
       const EXCLUDED_PARAMS = new Set(['Крок', 'крок', 'Мінімальний крок', 'Вага', 'вага'])
       const attrs = Object.entries(attrs_map)
         .filter(([k]) => !EXCLUDED_PARAMS.has(k))
-        .map(([k, v]) => `      <param name="${escapeXml(k)}">${escapeXml(v)}</param>`)
+        .map(([k, v]) => `      <param name="${escapeXml(k)}">${escapeXml(String(v))}</param>`)
         .join('\n')
 
       const offerId = (p.sku || String(p.external_id || p.id))

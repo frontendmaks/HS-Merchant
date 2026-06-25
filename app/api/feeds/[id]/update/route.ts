@@ -31,6 +31,7 @@ export async function POST(
         custom_name: ov.custom_name ?? null,
         name_ru: ov.name_ru?.trim() || null,
         description_ru: ov.description_ru?.trim() || null,
+        custom_params: ov.custom_params && Object.keys(ov.custom_params).length > 0 ? ov.custom_params : null,
       }))
 
       const { error: fpError } = await supabase

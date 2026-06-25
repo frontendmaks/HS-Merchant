@@ -22,6 +22,7 @@ type FeedProduct = {
   custom_name: string | null
   name_ru: string | null
   description_ru: string | null
+  custom_params: Record<string, string> | null
 }
 
 type Feed = {
@@ -48,6 +49,7 @@ type Override = {
   is_active?: boolean
   name_ru?: string
   description_ru?: string
+  custom_params?: Record<string, string>
 }
 
 /** Searchable category dropdown for MauDau portal_id mapping */
@@ -248,6 +250,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
       is_active: fp.is_active,
       name_ru: fp.name_ru ?? '',
       description_ru: fp.description_ru ?? '',
+      custom_params: fp.custom_params ?? {},
     }]))
   )
 
@@ -298,7 +301,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     )
   }
 
-  const setOverride = (productId: string, field: keyof Override, value: string | boolean) => {
+  const setOverride = (productId: string, field: keyof Override, value: string | boolean | Record<string, string>) => {
     setOverrides(prev => ({
       ...prev,
       [productId]: { ...prev[productId], [field]: value }
@@ -716,11 +719,11 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     {/* Name + category */}
                     <div className="min-w-0">
                       <button
-                        onClick={() => isMaudau && setExpandedProduct(isExpanded ? null : p.id)}
-                        className={`text-left w-full ${isMaudau ? 'cursor-pointer' : 'cursor-default'}`}
+                        onClick={() => setExpandedProduct(isExpanded ? null : p.id)}
+                        className="text-left w-full cursor-pointer"
                       >
                         <div className="text-xs text-white font-medium leading-snug line-clamp-2">
-                          {isMaudau && <span className="text-zinc-600 mr-1">{isExpanded ? '▾' : '▸'}</span>}
+                          <span className="text-zinc-600 mr-1">{isExpanded ? '▾' : '▸'}</span>
                           {p.name}
                         </div>
                         <div className="text-[11px] text-zinc-500 mt-0.5 truncate">{p.category_name}</div>
@@ -758,30 +761,97 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     </div>
                   </div>
 
-                  {/* MauDau expanded: name_ru + description_ru */}
-                  {isMaudau && isExpanded && (
-                    <div className="px-4 pb-3 space-y-2 bg-purple-950/10 border-t border-zinc-800/60">
-                      <p className="text-[11px] text-zinc-600 pt-2">Назва та опис рос. мовою (необов'язково — за замовчуванням укр.)</p>
-                      <div>
-                        <label className="text-[11px] text-zinc-500 block mb-0.5">name_ru</label>
-                        <input
-                          type="text"
-                          placeholder={p.name}
-                          value={ov.name_ru ?? ''}
-                          onChange={e => setOverride(p.id, 'name_ru', e.target.value)}
-                          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600"
-                        />
+                  {/* Expanded: characteristics + MauDau fields */}
+                  {isExpanded && (
+                    <div className="px-4 pb-3 space-y-3 bg-zinc-800/20 border-t border-zinc-800/60">
+                      {/* Custom params (all feeds) */}
+                      <div className="pt-2">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[11px] text-zinc-400 font-medium">Характеристики</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const params = { ...(ov.custom_params ?? {}) }
+                              const key = `Параметр ${Object.keys(params).length + 1}`
+                              params[key] = ''
+                              setOverride(p.id, 'custom_params', params)
+                            }}
+                            className="text-[10px] px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded transition-colors"
+                          >+ Додати</button>
+                        </div>
+                        {Object.keys(ov.custom_params ?? {}).length === 0 ? (
+                          <p className="text-[11px] text-zinc-600">Немає характеристик. Натисніть "+ Додати".</p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {Object.entries(ov.custom_params ?? {}).map(([key, val]) => (
+                              <div key={key} className="flex items-center gap-1.5">
+                                <input
+                                  type="text"
+                                  defaultValue={key}
+                                  onBlur={e => {
+                                    const newKey = e.target.value.trim()
+                                    if (!newKey || newKey === key) return
+                                    const params = { ...(ov.custom_params ?? {}) }
+                                    const value = params[key]
+                                    delete params[key]
+                                    params[newKey] = value
+                                    setOverride(p.id, 'custom_params', params)
+                                  }}
+                                  className="w-32 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-zinc-300 focus:outline-none focus:border-zinc-500"
+                                  placeholder="Назва"
+                                />
+                                <span className="text-zinc-600 text-xs">:</span>
+                                <input
+                                  type="text"
+                                  value={val}
+                                  onChange={e => {
+                                    const params = { ...(ov.custom_params ?? {}), [key]: e.target.value }
+                                    setOverride(p.id, 'custom_params', params)
+                                  }}
+                                  className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-zinc-500"
+                                  placeholder="Значення"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const params = { ...(ov.custom_params ?? {}) }
+                                    delete params[key]
+                                    setOverride(p.id, 'custom_params', params)
+                                  }}
+                                  className="text-zinc-600 hover:text-red-400 text-xs px-1 transition-colors"
+                                >✕</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <div>
-                        <label className="text-[11px] text-zinc-500 block mb-0.5">description_ru</label>
-                        <textarea
-                          rows={2}
-                          placeholder="Опис рос. мовою..."
-                          value={ov.description_ru ?? ''}
-                          onChange={e => setOverride(p.id, 'description_ru', e.target.value)}
-                          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600 resize-none"
-                        />
-                      </div>
+
+                      {/* MauDau-only: name_ru + description_ru */}
+                      {isMaudau && (
+                        <div className="space-y-2 border-t border-zinc-800/60 pt-2">
+                          <p className="text-[11px] text-zinc-600">Назва та опис рос. мовою (необов'язково)</p>
+                          <div>
+                            <label className="text-[11px] text-zinc-500 block mb-0.5">name_ru</label>
+                            <input
+                              type="text"
+                              placeholder={p.name}
+                              value={ov.name_ru ?? ''}
+                              onChange={e => setOverride(p.id, 'name_ru', e.target.value)}
+                              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[11px] text-zinc-500 block mb-0.5">description_ru</label>
+                            <textarea
+                              rows={2}
+                              placeholder="Опис рос. мовою..."
+                              value={ov.description_ru ?? ''}
+                              onChange={e => setOverride(p.id, 'description_ru', e.target.value)}
+                              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600 resize-none"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
