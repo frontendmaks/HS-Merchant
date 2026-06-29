@@ -286,13 +286,33 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         if (next[p.id]?.is_active !== true) return
         const existing = next[p.id]?.custom_params ?? {}
         const auto: Record<string, string> = {}
-        // Вага упаковки — from WC attributes
-        const weight = p.attributes?.['Вага']
-        if (weight && !existing['Вага упаковки']) auto['Вага упаковки'] = weight
-        // Країна виробник — default Україна
-        if (!existing['Країна виробник']) auto['Країна виробник'] = 'Україна'
-        // Гарантія — standard food disclaimer
-        if (!existing['Гарантія']) auto['Гарантія'] = 'Відповідно до законодавства України'
+
+        const attrs = p.attributes ?? {}
+        const minVal  = parseFloat(attrs['Мін']  ?? '0') || null
+        const stepVal = parseFloat(attrs['Крок'] ?? '0') || null
+        const unit    = attrs['Одиниця'] ?? 'шт'
+        const weightFromName = attrs['Вага'] // e.g. "0.5 кг"
+
+        // Weight logic:
+        // - if unit is кг/г/мл/л AND min == step → fixed-weight product (one package = min units)
+        //   → Вага упаковки = min_value + unit
+        // - if unit is кг/г AND min ≠ step → variable weight, use min_value as weight
+        // - fallback to weight extracted from product name
+        if (!existing['Вага упаковки']) {
+          const isWeightUnit = ['кг', 'г', 'мл', 'л'].includes(unit)
+          if (isWeightUnit && minVal) {
+            auto['Вага упаковки'] = `${minVal} ${unit}`
+          } else if (weightFromName) {
+            auto['Вага упаковки'] = weightFromName
+          }
+        }
+
+        // Країна виробника
+        if (!existing['Країна виробника']) auto['Країна виробника'] = 'Україна'
+
+        // Гарантія
+        if (!existing['Гарантія']) auto['Гарантія'] = 'Термін придатності вказаний на упаковці'
+
         if (Object.keys(auto).length > 0) {
           next[p.id] = { ...next[p.id], custom_params: { ...auto, ...existing } }
         }
@@ -766,6 +786,8 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               const isActive = ov.is_active === true
               const isExpanded = expandedProduct === p.id
               const thumb = p.images?.[0]
+              const paramCount = Object.keys(ov.custom_params ?? {}).length
+              const fewParams = isActive && paramCount < 3
               const stock = ov.custom_stock !== '' && ov.custom_stock != null
                 ? Number(ov.custom_stock)
                 : p.stock
@@ -794,9 +816,14 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                         onClick={() => setExpandedProduct(isExpanded ? null : p.id)}
                         className="text-left w-full cursor-pointer"
                       >
-                        <div className="text-xs text-white font-medium leading-snug line-clamp-2">
-                          <span className="text-zinc-600 mr-1">{isExpanded ? '▾' : '▸'}</span>
-                          {p.name}
+                        <div className="text-xs text-white font-medium leading-snug line-clamp-2 flex items-start gap-1">
+                          <span className="text-zinc-600 shrink-0 mt-px">{isExpanded ? '▾' : '▸'}</span>
+                          <span>{p.name}</span>
+                          {fewParams && (
+                            <span title={`Лише ${paramCount} характеристик (потрібно мін. 3)`} className="shrink-0 ml-1 text-[9px] px-1 py-px rounded bg-amber-900/60 text-amber-400 border border-amber-800/50 leading-tight mt-px">
+                              {paramCount}/3
+                            </span>
+                          )}
                         </div>
                         <div className="text-[11px] text-zinc-500 mt-0.5 truncate">{p.category_name}</div>
                       </button>

@@ -78,13 +78,17 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   const weight = extractWeight(p.name)
   if (weight) attributes['Вага'] = weight
 
-  // Extract minimum quantity step from meta_data (various WC quantity plugins)
-  const stepMeta = (p.meta_data ?? []).find((m: any) =>
-    ['_alg_wc_pq_step', 'wc_min_quantity_step', '_wc_min_qty_step', 'minimum_quantity'].includes(m.key)
-  )
-  if (stepMeta?.value && parseFloat(stepMeta.value) > 0 && parseFloat(stepMeta.value) < 1) {
-    attributes['Крок'] = String(stepMeta.value)
-  }
+  // Extract step, min_value, unit_base from WC meta_data
+  const meta = p.meta_data ?? []
+  const getMetaVal = (key: string) => meta.find((m: any) => m.key === key)?.value ?? null
+
+  const stepVal = parseFloat(getMetaVal('step') ?? getMetaVal('_alg_wc_pq_step') ?? getMetaVal('wc_min_quantity_step') ?? '0') || null
+  const minVal  = parseFloat(getMetaVal('min_value') ?? getMetaVal('minimum_quantity') ?? '0') || null
+  const unitBase = (getMetaVal('unit_base') as string | null) ?? 'шт'
+
+  if (stepVal && stepVal > 0) attributes['Крок'] = String(stepVal)
+  if (minVal && minVal > 0)   attributes['Мін']  = String(minVal)
+  if (unitBase)               attributes['Одиниця'] = unitBase
 
   const category_name = pickMainCategory(p, categoryMap)
   const brand = extractBrand(p.name)

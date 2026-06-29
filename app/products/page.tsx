@@ -72,7 +72,7 @@ export default async function ProductsPage({
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
         {/* Table header */}
         <div className="grid gap-3 px-4 py-3 border-b border-zinc-800 bg-zinc-800/50"
-          style={{ gridTemplateColumns: '72px 1fr 160px 160px 100px 100px 90px 90px 90px' }}>
+          style={{ gridTemplateColumns: '72px 1fr 160px 160px 100px 100px 90px 70px 60px 60px 90px' }}>
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Фото</div>
           <Suspense><SortableHeader column="name" label="Назва / Артикул" /></Suspense>
           <Suspense><SortableHeader column="category_name" label="Категорія" /></Suspense>
@@ -81,6 +81,8 @@ export default async function ProductsPage({
           <div className="text-xs text-zinc-500 uppercase tracking-wide text-right">Акційна</div>
           <Suspense><SortableHeader column="stock" label="Залишок" className="justify-end" /></Suspense>
           <div className="text-xs text-zinc-500 uppercase tracking-wide text-center">Вага</div>
+          <div className="text-xs text-zinc-500 uppercase tracking-wide text-center">Мін</div>
+          <div className="text-xs text-zinc-500 uppercase tracking-wide text-center">Крок</div>
           <Suspense><SortableHeader column="status" label="Статус" className="justify-center" /></Suspense>
         </div>
 
@@ -98,12 +100,15 @@ export default async function ProductsPage({
             const zeroStock = stockVal === 0 && p.status === 'active'
             const attrs = p.attributes as Record<string, string> | null
             const weight = attrs?.['Вага'] ?? null
+            const minVal = attrs?.['Мін'] ?? null
+            const stepVal = attrs?.['Крок'] ?? null
+            const unitBase = attrs?.['Одиниця'] ?? null
 
             return (
               <div
                 key={p.id}
                 className="grid gap-3 px-4 py-2.5 items-center hover:bg-zinc-800/40 transition-colors"
-                style={{ gridTemplateColumns: '72px 1fr 160px 160px 100px 100px 90px 90px 90px' }}
+                style={{ gridTemplateColumns: '72px 1fr 160px 160px 100px 100px 90px 70px 60px 60px 90px' }}
               >
                 {/* Image — більша */}
                 <div className="w-14 h-14 rounded-lg overflow-hidden bg-zinc-800 shrink-0">
@@ -194,6 +199,20 @@ export default async function ProductsPage({
                 {/* Weight */}
                 <div className="text-xs text-zinc-500 text-center">
                   {weight ?? <span className="text-zinc-700">—</span>}
+                </div>
+
+                {/* Min */}
+                <div className="text-xs text-center">
+                  {minVal
+                    ? <span className="text-zinc-400">{minVal}{unitBase && unitBase !== 'шт' ? <span className="text-zinc-600"> {unitBase}</span> : ''}</span>
+                    : <span className="text-zinc-700">—</span>}
+                </div>
+
+                {/* Step */}
+                <div className="text-xs text-center">
+                  {stepVal
+                    ? <span className={stepVal === minVal ? 'text-blue-400' : 'text-amber-400'}>{stepVal}</span>
+                    : <span className="text-zinc-700">—</span>}
                 </div>
 
                 {/* Status */}
