@@ -255,11 +255,55 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     }]))
   )
 
+  const [translating, setTranslating] = useState<Record<string, boolean>>({})
+
+  async function translateField(productId: string, field: 'name_ru' | 'description_ru', sourceText: string) {
+    if (!sourceText.trim()) return
+    setTranslating(t => ({ ...t, [`${productId}:${field}`]: true }))
+    try {
+      const res = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: sourceText }),
+      })
+      const data = await res.json()
+      if (data.translation) setOverride(productId, field, data.translation)
+    } finally {
+      setTranslating(t => ({ ...t, [`${productId}:${field}`]: false }))
+    }
+  }
+
   const [productSearch, setProductSearch] = useState('')
   const [categorySearch, setCategorySearch] = useState('')
   const [showOnlySelected, setShowOnlySelected] = useState(false)
   // Which product row is expanded
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
+
+  // Auto-translate name_ru when a row expands and field is empty
+  useEffect(() => {
+    if (!expandedProduct || !isMaudau) return
+    const ov = overrides[expandedProduct] ?? {}
+    if (!ov.name_ru?.trim()) {
+      const product = allProducts.find(p => p.id === expandedProduct)
+      if (product) translateField(expandedProduct, 'name_ru', product.name)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedProduct])
+
+  const [bulkTranslating, setBulkTranslating] = useState(false)
+
+  async function translateAllEmpty() {
+    if (bulkTranslating) return
+    setBulkTranslating(true)
+    const toTranslate = filteredProducts.filter(p => {
+      const ov = overrides[p.id] ?? {}
+      return ov.is_active && !ov.name_ru?.trim()
+    })
+    for (const p of toTranslate) {
+      await translateField(p.id, 'name_ru', p.name)
+    }
+    setBulkTranslating(false)
+  }
 
   // Bulk param add
   const [bulkKey, setBulkKey] = useState('')
@@ -684,6 +728,15 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                   onChange={e => setProductSearch(e.target.value)}
                   className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-red-500 w-36"
                 />
+                {isMaudau && (
+                  <button
+                    onClick={translateAllEmpty}
+                    disabled={bulkTranslating}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-purple-800 text-purple-300 hover:bg-purple-900/20 transition-colors disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {bulkTranslating ? '⏳ Перекладаю...' : '🔄 Перекласти всі'}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -930,7 +983,17 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                         <div className="space-y-2 border-t border-zinc-800/60 pt-2">
                           <p className="text-[11px] text-zinc-600">Назва та опис рос. мовою (необов'язково)</p>
                           <div>
-                            <label className="text-[11px] text-zinc-500 block mb-0.5">name_ru</label>
+                            <div className="flex items-center justify-between mb-0.5">
+                              <label className="text-[11px] text-zinc-500">name_ru</label>
+                              <button
+                                type="button"
+                                disabled={translating[`${p.id}:name_ru`]}
+                                onClick={() => translateField(p.id, 'name_ru', p.name)}
+                                className="text-[10px] text-purple-400 hover:text-purple-300 disabled:opacity-40 transition-colors"
+                              >
+                                {translating[`${p.id}:name_ru`] ? '⏳' : '🔄 Перекласти'}
+                              </button>
+                            </div>
                             <input
                               type="text"
                               placeholder={p.name}
@@ -940,7 +1003,17 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                             />
                           </div>
                           <div>
-                            <label className="text-[11px] text-zinc-500 block mb-0.5">description_ru</label>
+                            <div className="flex items-center justify-between mb-0.5">
+                              <label className="text-[11px] text-zinc-500">description_ru</label>
+                              <button
+                                type="button"
+                                disabled={translating[`${p.id}:description_ru`] || !ov.description_ru?.trim()}
+                                onClick={() => translateField(p.id, 'description_ru', ov.description_ru ?? '')}
+                                className="text-[10px] text-purple-400 hover:text-purple-300 disabled:opacity-40 transition-colors"
+                              >
+                                {translating[`${p.id}:description_ru`] ? '⏳' : '🔄 Перекласти'}
+                              </button>
+                            </div>
                             <textarea
                               rows={2}
                               placeholder="Опис рос. мовою..."
