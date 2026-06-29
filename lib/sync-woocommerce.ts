@@ -84,7 +84,10 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
 
   const stepVal = parseFloat(getMetaVal('step') ?? getMetaVal('_alg_wc_pq_step') ?? getMetaVal('wc_min_quantity_step') ?? '0') || null
   const minVal  = parseFloat(getMetaVal('min_value') ?? getMetaVal('minimum_quantity') ?? '0') || null
-  const unitBase = (getMetaVal('unit_base') as string | null) ?? 'шт'
+  // unit_base may be multilingual: "[:uk]кг[:en]kg[:]" — extract Ukrainian part
+  const rawUnit = (getMetaVal('unit_base') as string | null) ?? 'шт'
+  const unitMatch = rawUnit.match(/\[:uk\]([^\[]+)/)
+  const unitBase = unitMatch ? unitMatch[1].trim() : rawUnit.trim()
 
   if (stepVal && stepVal > 0) attributes['Крок'] = String(stepVal)
   if (minVal && minVal > 0)   attributes['Мін']  = String(minVal)
