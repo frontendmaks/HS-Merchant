@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 type Product = {
   id: string
   name: string
+  description: string | null
   category_name: string | null
   brand: string | null
   price: number
@@ -266,8 +267,15 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: sourceText }),
       })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        console.error('translate failed:', err?.error ?? res.status)
+        return
+      }
       const data = await res.json()
       if (data.translation) setOverride(productId, field, data.translation)
+    } catch (e) {
+      console.error('translate error:', e)
     } finally {
       setTranslating(t => ({ ...t, [`${productId}:${field}`]: false }))
     }
@@ -353,13 +361,17 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           }
         }
 
+        // Назва українською
+        if (!existing['Назва']) auto['Назва'] = p.name
+
+        // Опис українською (з WC short_description)
+        if (!existing['Опис'] && p.description?.trim()) auto['Опис'] = p.description.trim()
+
+        // Торгова марка
+        if (!existing['Торгова марка'] && p.brand) auto['Торгова марка'] = p.brand
+
         // Країна виробник
         if (!existing['Країна виробник']) auto['Країна виробник'] = 'Україна'
-
-        // Торгова марка (з бренду якщо не "Галицька Свіжина")
-        if (!existing['Торгова марка'] && p.brand && p.brand !== 'Галицька Свіжина') {
-          auto['Торгова марка'] = p.brand
-        }
 
         // Гарантія
         if (!existing['Гарантія']) auto['Гарантія'] = 'Термін придатності вказаний на упаковці'
