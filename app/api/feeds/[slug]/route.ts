@@ -210,7 +210,14 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
         'Мін', 'мін', 'Одиниця', 'одиниця', 'Назва', 'Опис',
         'Тип обробки', 'Країна виробник',
       ])
-      const attrs = Object.entries(attrs_map)
+      // Ensure Торгова марка is always present as a param (from custom_params or brand field)
+      const brandForParam = attrs_map['Торгова марка'] ?? normalizeMaudauBrand(p.brand ?? 'Галицька Свіжина')
+      const attrsWithDefaults: Record<string, string> = {
+        'Торгова марка': brandForParam,
+        ...attrs_map,
+      }
+
+      const attrs = Object.entries(attrsWithDefaults)
         .filter(([k, v]) => !EXCLUDED_PARAMS.has(k) && String(v).trim())
         .map(([k, v]) => `      <param name="${escapeXml(k)}">${escapeXml(String(v))}</param>`)
         .join('\n')
