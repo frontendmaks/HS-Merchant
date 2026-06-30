@@ -70,8 +70,8 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       const p = fp.product
       const price = fp.custom_price ?? p.price
       const name = fp.custom_name ?? p.name
-      if (!price) errors.push(`No price: ${p.id}`)
-      if (!name) errors.push(`No name: ${p.id}`)
+      if (!price) errors.push(`Немає ціни: ${name || p.sku || p.id}`)
+      if (!name) errors.push(`Немає назви: ${p.sku || p.id}`)
       const images = (p.images as string[])
         .map((url: string) => `<picture>${url}</picture>`)
         .join('\n        ')
@@ -176,9 +176,10 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
       }
 
       // Validate
-      if (!unitPrice || unitPrice <= 0) errors.push(`No price: ${p.sku || p.id}`)
-      if (!nameUa) errors.push(`No name: ${p.sku || p.id}`)
-      if (!p.images?.length) errors.push(`No images: ${p.sku || p.id}`)
+      const label = nameUa || p.sku || p.id
+      if (!unitPrice || unitPrice <= 0) errors.push(`Немає ціни: ${label}`)
+      if (!nameUa) errors.push(`Немає назви: ${p.sku || p.id}`)
+      if (!p.images?.length) errors.push(`Немає фото: ${label}`)
 
       const images = ((p.images as string[]) ?? [])
         .slice(0, 12)
