@@ -361,12 +361,6 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           }
         }
 
-        // Назва українською
-        if (!existing['Назва']) auto['Назва'] = p.name
-
-        // Опис українською (з WC short_description)
-        if (!existing['Опис'] && p.description?.trim()) auto['Опис'] = p.description.trim()
-
         // Торгова марка
         if (!existing['Торгова марка'] && p.brand) auto['Торгова марка'] = p.brand
 
@@ -878,7 +872,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     {/* Thumbnail */}
                     <div className="w-8 h-8 rounded overflow-hidden bg-zinc-800 shrink-0 flex items-center justify-center">
                       {thumb
-                        ? <img src={thumb} alt="" className="w-full h-full object-cover" />
+                        ? <img src={thumb} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
                         : <span className="text-zinc-700 text-[10px]">—</span>}
                     </div>
 

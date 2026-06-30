@@ -187,7 +187,7 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
 
       // Exclude 'Вага' from params — MauDau has predefined weight values, arbitrary gram values cause warnings
       // Also exclude step/крок (internal field)
-      const EXCLUDED_PARAMS = new Set(['Крок', 'крок', 'Мінімальний крок', 'Вага', 'вага'])
+      const EXCLUDED_PARAMS = new Set(['Крок', 'крок', 'Мінімальний крок', 'Вага', 'вага', 'Мін', 'мін', 'Одиниця', 'одиниця', 'Назва', 'Опис'])
       const attrs = Object.entries(attrs_map)
         .filter(([k]) => !EXCLUDED_PARAMS.has(k))
         .map(([k, v]) => `      <param name="${escapeXml(k)}">${escapeXml(String(v))}</param>`)
