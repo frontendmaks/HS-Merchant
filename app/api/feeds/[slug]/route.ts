@@ -133,24 +133,23 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
 
   // Build ordered list of unique categories from active products
   const categoryPortalIds: Record<string, string> = feed.settings?.category_portal_ids ?? {}
-  const seenCats = new Set<string>()
-  const categoryList: { name: string; portalId: string; fallbackId: number }[] = []
-  // catIdMap: catName → the id to use in <categoryId> (portal_id if mapped, fallback number otherwise)
+  // catIdMap: our catName → portal_id to use in <categoryId>
   const catIdMap = new Map<string, string>()
+  // seenPortalIds: deduplicate <category> blocks by portal_id
+  const seenPortalIds = new Map<string, string>() // portalId → first catName
+  let fallbackCounter = 0
 
   for (const fp of activeFps) {
     const catName = fp.product.category_name ?? 'Без категорії'
-    if (!seenCats.has(catName)) {
-      seenCats.add(catName)
-      const fallbackId = categoryList.length + 1
-      const portalId = categoryPortalIds[catName] ?? String(fallbackId)
-      categoryList.push({ name: catName, portalId, fallbackId })
-      catIdMap.set(catName, portalId)
-    }
+    if (catIdMap.has(catName)) continue
+    const portalId = categoryPortalIds[catName] ?? String(++fallbackCounter)
+    catIdMap.set(catName, portalId)
+    if (!seenPortalIds.has(portalId)) seenPortalIds.set(portalId, catName)
   }
 
-  const categoriesXml = categoryList
-    .map(c => `    <category id="${escapeXml(c.portalId)}">${escapeXml(c.name)}</category>`)
+  // One <category> per unique portal_id
+  const categoriesXml = [...seenPortalIds.entries()]
+    .map(([portalId, name]) => `    <category id="${escapeXml(portalId)}">${escapeXml(name)}</category>`)
     .join('\n')
 
   const offersXml = activeFps
