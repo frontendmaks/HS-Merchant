@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/service'
+import { sanitizeSku } from '@/lib/transliterate'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(
@@ -193,10 +194,7 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
         .map(([k, v]) => `      <param name="${escapeXml(k)}">${escapeXml(String(v))}</param>`)
         .join('\n')
 
-      const offerId = (p.sku || String(p.external_id || p.id))
-        .replace(/[^a-zA-Z0-9\-_]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '') || String(p.id).replace(/[^a-zA-Z0-9]/g, '')
+      const offerId = sanitizeSku(p.sku || String(p.external_id || p.id))
 
       // MauDau treats fractional quantity as 0 → use integer ceiling
       const quantityInt = stock != null ? (stock > 0 ? Math.ceil(stock) : 0) : null

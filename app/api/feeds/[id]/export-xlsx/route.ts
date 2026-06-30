@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/service'
+import { sanitizeSku } from '@/lib/transliterate'
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 
@@ -24,16 +25,12 @@ export async function GET(
     const cp = (fp.custom_params ?? {}) as Record<string, string>
 
     const name = fp.custom_name ?? p.name ?? ''
-    const sku = p.sku ?? p.id ?? ''
+    const rawSku = p.sku ?? p.id ?? ''
+    const sku = sanitizeSku(rawSku)
     const price = fp.custom_price ?? p.price ?? ''
 
-    // Use SKU as id only if it's purely numeric/latin (no Cyrillic)
-    // Cyrillic SKUs (Я0150, К0116) need to go as barcode only; id stays empty for MauDau matching
-    const isCyrillicSku = sku && /[а-яА-ЯіІїЇєЄёЁ]/.test(sku)
-    const maudauId = isCyrillicSku ? '' : sku
-
     return {
-      id: maudauId,
+      id: sku,
       brand_name_uk: cp['Торгова марка'] ?? p.brand ?? 'Галицька Свіжина',
       'packaging_info.temperature_mode': cp['Тип обробки'] ?? '',
       country_title_uk: cp['Країна виробник'] ?? 'Україна',
