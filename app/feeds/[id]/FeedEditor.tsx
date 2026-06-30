@@ -287,13 +287,18 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   // Which product row is expanded
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
 
-  // Auto-translate name_ru when a row expands and field is empty
+  // Auto-translate name_ru and description_ru when a row expands and fields are empty
   useEffect(() => {
     if (!expandedProduct || !isMaudau) return
     const ov = overrides[expandedProduct] ?? {}
+    const product = allProducts.find(p => p.id === expandedProduct)
+    if (!product) return
     if (!ov.name_ru?.trim()) {
-      const product = allProducts.find(p => p.id === expandedProduct)
-      if (product) translateField(expandedProduct, 'name_ru', product.name)
+      translateField(expandedProduct, 'name_ru', product.name)
+    }
+    if (!ov.description_ru?.trim()) {
+      const descSource = ov.custom_params?.['Опис']?.trim() || product.description?.trim()
+      if (descSource) translateField(expandedProduct, 'description_ru', descSource)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedProduct])
@@ -305,10 +310,15 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     setBulkTranslating(true)
     const toTranslate = filteredProducts.filter(p => {
       const ov = overrides[p.id] ?? {}
-      return ov.is_active && !ov.name_ru?.trim()
+      return ov.is_active && (!ov.name_ru?.trim() || !ov.description_ru?.trim())
     })
     for (const p of toTranslate) {
-      await translateField(p.id, 'name_ru', p.name)
+      const ov = overrides[p.id] ?? {}
+      if (!ov.name_ru?.trim()) await translateField(p.id, 'name_ru', p.name)
+      if (!ov.description_ru?.trim()) {
+        const descSource = ov.custom_params?.['Опис']?.trim() || p.description?.trim()
+        if (descSource) await translateField(p.id, 'description_ru', descSource)
+      }
     }
     setBulkTranslating(false)
   }
@@ -1020,8 +1030,8 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                               <label className="text-[11px] text-zinc-500">description_ru</label>
                               <button
                                 type="button"
-                                disabled={translating[`${p.id}:description_ru`] || !ov.description_ru?.trim()}
-                                onClick={() => translateField(p.id, 'description_ru', ov.description_ru ?? '')}
+                                disabled={translating[`${p.id}:description_ru`] || !(ov.custom_params?.['Опис']?.trim() || p.description?.trim())}
+                                onClick={() => translateField(p.id, 'description_ru', ov.custom_params?.['Опис']?.trim() || p.description?.trim() || '')}
                                 className="text-[10px] text-purple-400 hover:text-purple-300 disabled:opacity-40 transition-colors"
                               >
                                 {translating[`${p.id}:description_ru`] ? '⏳' : '🔄 Перекласти'}
