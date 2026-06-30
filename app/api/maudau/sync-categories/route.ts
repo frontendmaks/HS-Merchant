@@ -15,7 +15,7 @@ export async function POST() {
     const { error } = await supabase
       .from('maudau_categories')
       .upsert(
-        MAUDAU_CATEGORIES_SEED.map(c => ({ slug: c.slug, title: c.title, parent_slug: null })),
+        MAUDAU_CATEGORIES_SEED.map(c => ({ slug: c.slug, title: c.title, portal_id: c.portal_id ?? null, parent_slug: null })),
         { onConflict: 'slug' }
       )
 

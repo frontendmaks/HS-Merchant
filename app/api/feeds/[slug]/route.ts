@@ -34,8 +34,19 @@ export async function GET(
   const autoSynced = false
 
   const isMaudau = feed.marketplace?.slug === 'maudau' || feed.marketplace?.name?.toLowerCase().includes('maudau')
+
+  // Build slug→portalId map from maudau_categories for numeric portal_id lookup
+  let slugToPortalId: Record<string, string> = {}
+  if (isMaudau) {
+    const { data: cats } = await supabase
+      .from('maudau_categories')
+      .select('slug, portal_id')
+      .not('portal_id', 'is', null)
+    if (cats) slugToPortalId = Object.fromEntries(cats.map((c: any) => [c.slug, c.portal_id]))
+  }
+
   const { xml, offersCount, errorsCount, errors } = isMaudau
-    ? generateMaudauYML(feed)
+    ? generateMaudauYML(feed, slugToPortalId)
     : generateYML(feed)
 
   // Log access (fire-and-forget)
@@ -128,7 +139,7 @@ function normalizeMaudauBrand(brand: string): string {
 }
 
 /** MauDau-specific YML format per MauDau import spec */
-function generateMaudauYML(feed: any): { xml: string; offersCount: number; errorsCount: number; errors: string[] } {
+function generateMaudauYML(feed: any, slugToPortalId: Record<string, string> = {}): { xml: string; offersCount: number; errorsCount: number; errors: string[] } {
   const activeFps = feed.feed_products.filter((fp: any) => fp.is_active && fp.product)
   const errors: string[] = []
 
@@ -143,7 +154,11 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
   for (const fp of activeFps) {
     const catName = fp.product.category_name ?? 'Без категорії'
     if (catIdMap.has(catName)) continue
-    const portalId = categoryPortalIds[catName] ?? ''
+    // Resolve portal_id: if slug stored → look up numeric id; if already numeric → use directly
+    const rawPortalId = categoryPortalIds[catName] ?? ''
+    const portalId = rawPortalId
+      ? (/^\d+$/.test(rawPortalId) ? rawPortalId : (slugToPortalId[rawPortalId] ?? rawPortalId))
+      : ''
     if (portalId && seenPortalIds.has(portalId)) {
       // Reuse existing numeric id for this portal_id
       const existing = categoryRows.find(r => r.portalId === portalId)!
