@@ -212,20 +212,19 @@ function generateMaudauYML(feed: any, slugToPortalId: Record<string, string> = {
       // country: dedicated XML tag (Ukrainian name)
       const countryName = attrs_map['Країна виробник'] ?? 'Україна'
 
-      // Excluded from <param>: internal fields + fields that have dedicated XML tags
+      // Excluded from <param>: internal fields, fields with dedicated XML tags,
+      // and fields whose values MauDau doesn't accept (cause non-critical warnings)
       const EXCLUDED_PARAMS = new Set([
         'Крок', 'крок', 'Мінімальний крок', 'Вага', 'вага',
         'Мін', 'мін', 'Одиниця', 'одиниця', 'Назва', 'Опис',
         'Тип обробки', 'Країна виробник',
+        // MauDau doesn't accept these values / characteristic not available in all categories:
+        'Гарантія',       // value "Відповідно до законодавства України" not in MauDau list
+        'Упаковка',       // value "Вакуумний пакет" not in MauDau allowed values
+        'Вага упаковки',  // MauDau doesn't recognize this characteristic name
       ])
-      // Ensure Торгова марка is always present as a param (from custom_params or brand field)
-      const brandForParam = attrs_map['Торгова марка'] ?? normalizeMaudauBrand(p.brand ?? 'Галицька Свіжина')
-      const attrsWithDefaults: Record<string, string> = {
-        'Торгова марка': brandForParam,
-        ...attrs_map,
-      }
 
-      const attrs = Object.entries(attrsWithDefaults)
+      const attrs = Object.entries(attrs_map)
         .filter(([k, v]) => !EXCLUDED_PARAMS.has(k) && String(v).trim())
         .map(([k, v]) => `      <param name="${escapeXml(k)}">${escapeXml(String(v))}</param>`)
         .join('\n')
