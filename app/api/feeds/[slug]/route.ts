@@ -134,24 +134,23 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
   // Build ordered list of unique categories from active products
   const categoryPortalIds: Record<string, string> = feed.settings?.category_portal_ids ?? {}
   const seenCats = new Set<string>()
-  const categoryList: { id: number; name: string; portalId: string | null }[] = []
-  const catIndexMap = new Map<string, number>()
+  const categoryList: { name: string; portalId: string; fallbackId: number }[] = []
+  // catIdMap: catName → the id to use in <categoryId> (portal_id if mapped, fallback number otherwise)
+  const catIdMap = new Map<string, string>()
 
   for (const fp of activeFps) {
     const catName = fp.product.category_name ?? 'Без категорії'
     if (!seenCats.has(catName)) {
       seenCats.add(catName)
-      const idx = categoryList.length + 1
-      categoryList.push({ id: idx, name: catName, portalId: categoryPortalIds[catName] ?? null })
-      catIndexMap.set(catName, idx)
+      const fallbackId = categoryList.length + 1
+      const portalId = categoryPortalIds[catName] ?? String(fallbackId)
+      categoryList.push({ name: catName, portalId, fallbackId })
+      catIdMap.set(catName, portalId)
     }
   }
 
   const categoriesXml = categoryList
-    .map(c => {
-      const portalAttr = c.portalId ? ` portal_id="${c.portalId}"` : ''
-      return `    <category id="${c.id}"${portalAttr}>${escapeXml(c.name)}</category>`
-    })
+    .map(c => `    <category id="${escapeXml(c.portalId)}">${escapeXml(c.name)}</category>`)
     .join('\n')
 
   const offersXml = activeFps
@@ -163,7 +162,7 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
       const descUa = (p.description && p.description.trim()) ? p.description.trim() : nameUa
       const descRu = (fp.description_ru && fp.description_ru.trim()) ? fp.description_ru.trim() : (descUa === nameUa ? nameRu : descUa)
       const stock = fp.custom_stock ?? p.stock
-      const catId = catIndexMap.get(p.category_name ?? 'Без категорії') ?? 1
+      const catId = catIdMap.get(p.category_name ?? 'Без категорії') ?? '1'
 
       // Merge product attributes with feed-level custom params (custom_params override)
       const attrs_map = { ...(p.attributes as Record<string, string>) ?? {}, ...(fp.custom_params ?? {}) }
