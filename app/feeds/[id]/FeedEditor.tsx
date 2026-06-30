@@ -830,13 +830,22 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                   className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-red-500 w-36"
                 />
                 {isMaudau && (
-                  <button
-                    onClick={translateAllEmpty}
-                    disabled={bulkTranslating}
-                    className="text-xs px-3 py-1.5 rounded-lg border border-purple-800 text-purple-300 hover:bg-purple-900/20 transition-colors disabled:opacity-50 whitespace-nowrap"
-                  >
-                    {bulkTranslating ? '⏳ Перекладаю...' : '🔄 Перекласти всі'}
-                  </button>
+                  <>
+                    <button
+                      onClick={translateAllEmpty}
+                      disabled={bulkTranslating}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-purple-800 text-purple-300 hover:bg-purple-900/20 transition-colors disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {bulkTranslating ? '⏳ Перекладаю...' : '🔄 Перекласти всі'}
+                    </button>
+                    <a
+                      href={`/api/feeds/${feed.id}/export-xlsx`}
+                      download="maudau-products.xlsx"
+                      className="text-xs px-3 py-1.5 rounded-lg border border-emerald-800 text-emerald-300 hover:bg-emerald-900/20 transition-colors whitespace-nowrap"
+                    >
+                      📥 Експорт XLSX
+                    </a>
+                  </>
                 )}
               </div>
             </div>
