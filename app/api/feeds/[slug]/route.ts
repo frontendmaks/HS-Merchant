@@ -144,10 +144,10 @@ function generateMaudauYML(feed: any, slugToPortalId: Record<string, string> = {
   const errors: string[] = []
 
   // Build ordered list of unique categories from active products
-  // Per MauDau spec: id = our stable numeric id, portal_id = MauDau category id for auto-matching
+  // Per MauDau spec: id = our stable numeric id (unique per WC category),
+  // portal_id = MauDau category id for auto-matching (may repeat across WC categories)
   const categoryPortalIds: Record<string, string> = feed.settings?.category_portal_ids ?? {}
   const catIdMap = new Map<string, string>()       // catName → our numeric id
-  const seenPortalIds = new Set<string>()           // deduplicate by portal_id
   const categoryRows: { numId: string; portalId: string; name: string }[] = []
   let numCounter = 0
 
@@ -159,15 +159,8 @@ function generateMaudauYML(feed: any, slugToPortalId: Record<string, string> = {
     const portalId = rawPortalId
       ? (/^\d+$/.test(rawPortalId) ? rawPortalId : (slugToPortalId[rawPortalId] ?? rawPortalId))
       : ''
-    if (portalId && seenPortalIds.has(portalId)) {
-      // Reuse existing numeric id for this portal_id
-      const existing = categoryRows.find(r => r.portalId === portalId)!
-      catIdMap.set(catName, existing.numId)
-      continue
-    }
     const numId = String(++numCounter)
     catIdMap.set(catName, numId)
-    if (portalId) seenPortalIds.add(portalId)
     categoryRows.push({ numId, portalId, name: catName })
   }
 
