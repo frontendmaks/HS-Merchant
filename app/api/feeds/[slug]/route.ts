@@ -33,7 +33,7 @@ export async function GET(
   const autoSynced = false
 
   const isMaudau = feed.marketplace?.slug === 'maudau' || feed.marketplace?.name?.toLowerCase().includes('maudau')
-  const { xml, offersCount, errorsCount } = isMaudau
+  const { xml, offersCount, errorsCount, errors } = isMaudau
     ? generateMaudauYML(feed)
     : generateYML(feed)
 
@@ -44,6 +44,7 @@ export async function GET(
     accessed_at: now,
     offers_count: offersCount,
     errors_count: errorsCount,
+    errors: errors,
     auto_synced: autoSynced,
   }).then(() => {})
 
@@ -61,7 +62,7 @@ export async function GET(
 }
 
 /** Generic YML format */
-function generateYML(feed: any): { xml: string; offersCount: number; errorsCount: number } {
+function generateYML(feed: any): { xml: string; offersCount: number; errorsCount: number; errors: string[] } {
   const errors: string[] = []
   const products = feed.feed_products
     .filter((fp: any) => fp.is_active && fp.product)
@@ -110,7 +111,7 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
   </shop>
 </yml_catalog>`
 
-  return { xml, offersCount: products.length, errorsCount: errors.length }
+  return { xml, offersCount: products.length, errorsCount: errors.length, errors }
 }
 
 // Brand name normalization: our extracted name → MauDau's registered name
@@ -126,7 +127,7 @@ function normalizeMaudauBrand(brand: string): string {
 }
 
 /** MauDau-specific YML format per MauDau import spec */
-function generateMaudauYML(feed: any): { xml: string; offersCount: number; errorsCount: number } {
+function generateMaudauYML(feed: any): { xml: string; offersCount: number; errorsCount: number; errors: string[] } {
   const activeFps = feed.feed_products.filter((fp: any) => fp.is_active && fp.product)
   const errors: string[] = []
 
@@ -242,7 +243,7 @@ ${offersXml}
   </shop>
 </yml_catalog>`
 
-  return { xml, offersCount: activeFps.length, errorsCount: errors.length }
+  return { xml, offersCount: activeFps.length, errorsCount: errors.length, errors }
 }
 
 function escapeXml(str: string): string {

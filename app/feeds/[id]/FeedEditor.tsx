@@ -1169,8 +1169,9 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 }
 
 function FeedAccessStats({ feedId }: { feedId: string }) {
-  const [logs, setLogs] = useState<{ accessed_at: string; offers_count: number | null; errors_count: number | null; auto_synced: boolean }[]>([])
+  const [logs, setLogs] = useState<{ accessed_at: string; offers_count: number | null; errors_count: number | null; errors: string[] | null; auto_synced: boolean }[]>([])
   const [loading, setLoading] = useState(true)
+  const [expandedLog, setExpandedLog] = useState<number | null>(null)
 
   useEffect(() => {
     fetch(`/api/feeds/${feedId}/access-logs`)
@@ -1226,14 +1227,30 @@ function FeedAccessStats({ feedId }: { feedId: string }) {
       <div className="text-xs text-zinc-500 mb-2">Останні 10 звернень</div>
       <div className="space-y-1">
         {logs.slice(0, 10).map((l, i) => (
-          <div key={i} className="flex items-center gap-3 text-xs py-1 border-b border-zinc-800 last:border-0">
-            <span className="font-mono text-zinc-400 w-28 shrink-0">{fmt(l.accessed_at)}</span>
-            <span className="text-zinc-300">{l.offers_count ?? '?'} товарів</span>
-            {(l.errors_count ?? 0) > 0 && (
-              <span className="text-red-400">⚠ {l.errors_count} помилок</span>
-            )}
-            {l.auto_synced && (
-              <span className="text-emerald-500 ml-auto">🔄 WC синк</span>
+          <div key={i} className="border-b border-zinc-800 last:border-0">
+            <div className="flex items-center gap-3 text-xs py-1.5">
+              <span className="font-mono text-zinc-400 w-28 shrink-0">{fmt(l.accessed_at)}</span>
+              <span className="text-zinc-300">{l.offers_count ?? '?'} товарів</span>
+              {(l.errors_count ?? 0) > 0 ? (
+                <button
+                  onClick={() => setExpandedLog(expandedLog === i ? null : i)}
+                  className="text-red-400 hover:text-red-300 transition-colors"
+                >
+                  ⚠ {l.errors_count} помилок {expandedLog === i ? '▲' : '▼'}
+                </button>
+              ) : (
+                <span className="text-emerald-600 text-[10px]">✓ OK</span>
+              )}
+              {l.auto_synced && (
+                <span className="text-emerald-500 ml-auto">🔄 WC синк</span>
+              )}
+            </div>
+            {expandedLog === i && (l.errors ?? []).length > 0 && (
+              <div className="mb-2 ml-28 bg-red-950/30 border border-red-900/40 rounded p-2 space-y-0.5">
+                {(l.errors ?? []).map((e, j) => (
+                  <div key={j} className="text-[11px] text-red-300 font-mono">{e}</div>
+                ))}
+              </div>
             )}
           </div>
         ))}

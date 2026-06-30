@@ -10,7 +10,7 @@ export async function GET(
 
   const { data: logs } = await supabase
     .from('feed_access_logs')
-    .select('accessed_at, offers_count, errors_count, auto_synced')
+    .select('accessed_at, offers_count, errors_count, errors, auto_synced')
     .eq('feed_id', id)
     .gte('accessed_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
     .order('accessed_at', { ascending: false })
