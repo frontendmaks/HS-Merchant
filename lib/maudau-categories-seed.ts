@@ -142,7 +142,7 @@ export const MAUDAU_CATEGORIES_SEED: { slug: string; title: string; portal_id?: 
   { slug: 'syrovyna-dlia-vyrobnytstva-alkoholiu', title: 'Сировина для виробництва алкоголю' },
   // Товари для барбекю
   { slug: 'tovary-dlia-barbekiu-ta-piknika', title: 'Товари для барбекю та пікніка' },
-  { slug: 'vugillia-ta-aksesuari-dlya-rozpalyuvannya', title: 'Вугілля та аксесуари для розпалювання' },
+  { slug: 'vugillia-ta-aksesuari-dlya-rozpalyuvannya', title: 'Вугілля та аксесуари для розпалювання', portal_id: '860' },
   // Спортивне харчування
   { slug: 'sportyvne-kharchuvannia', title: 'Спортивне харчування' },
   // Дитяче харчування
