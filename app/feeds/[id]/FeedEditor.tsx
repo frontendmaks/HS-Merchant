@@ -328,20 +328,22 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
       const next = { ...prev }
       allProducts.forEach(p => {
         if (next[p.id]?.is_active !== true) return
-        const existing = next[p.id]?.custom_params ?? {}
+        const existing = { ...(next[p.id]?.custom_params ?? {}) }
+
+        // Normalize: merge "Країна виробника" → "Країна виробник"
+        if (existing['Країна виробника'] && !existing['Країна виробник']) {
+          existing['Країна виробник'] = existing['Країна виробника']
+        }
+        delete existing['Країна виробника']
+
         const auto: Record<string, string> = {}
 
         const attrs = p.attributes ?? {}
         const minVal  = parseFloat(attrs['Мін']  ?? '0') || null
-        const stepVal = parseFloat(attrs['Крок'] ?? '0') || null
         const unit    = attrs['Одиниця'] ?? 'шт'
-        const weightFromName = attrs['Вага'] // e.g. "0.5 кг"
+        const weightFromName = attrs['Вага']
 
-        // Weight logic:
-        // - if unit is кг/г/мл/л AND min == step → fixed-weight product (one package = min units)
-        //   → Вага упаковки = min_value + unit
-        // - if unit is кг/г AND min ≠ step → variable weight, use min_value as weight
-        // - fallback to weight extracted from product name
+        // Вага упаковки
         if (!existing['Вага упаковки']) {
           const isWeightUnit = ['кг', 'г', 'мл', 'л'].includes(unit)
           if (isWeightUnit && minVal) {
@@ -351,13 +353,18 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           }
         }
 
-        // Країна виробника
-        if (!existing['Країна виробника']) auto['Країна виробника'] = 'Україна'
+        // Країна виробник
+        if (!existing['Країна виробник']) auto['Країна виробник'] = 'Україна'
+
+        // Торгова марка (з бренду якщо не "Галицька Свіжина")
+        if (!existing['Торгова марка'] && p.brand && p.brand !== 'Галицька Свіжина') {
+          auto['Торгова марка'] = p.brand
+        }
 
         // Гарантія
         if (!existing['Гарантія']) auto['Гарантія'] = 'Термін придатності вказаний на упаковці'
 
-        if (Object.keys(auto).length > 0) {
+        if (Object.keys(auto).length > 0 || JSON.stringify(existing) !== JSON.stringify(next[p.id]?.custom_params ?? {})) {
           next[p.id] = { ...next[p.id], custom_params: { ...auto, ...existing } }
         }
       })
@@ -789,7 +796,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               <div className="w-px h-4 bg-zinc-700 mx-1" />
               <button
                 onClick={autoFillParams}
-                title="Автоматично заповнює: Вага упаковки (з назви), Країна виробник, Гарантія — тільки для вибраних товарів, не перезаписує вже заповнені"
+                title="Автоматично заповнює: Вага упаковки, Країна виробник, Торгова марка, Гарантія — тільки для активних товарів, не перезаписує вже заповнені. Також видаляє дублікат 'Країна виробника'."
                 className="text-xs px-3 py-1.5 bg-amber-900/40 hover:bg-amber-900/60 border border-amber-800 text-amber-400 rounded-lg transition-colors whitespace-nowrap"
               >✦ Автозаповнення</button>
             </div>

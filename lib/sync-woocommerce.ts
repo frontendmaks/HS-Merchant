@@ -72,7 +72,9 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   const attributes: Record<string, string> = {}
   for (const attr of p.attributes ?? []) {
     const name: string = attr.name ?? ''
-    if (name.includes('Storage') || name.includes('Склад')) continue
+    const slug: string = attr.slug ?? ''
+    // Skip warehouse/storage attribute (multilingual name or pa_storage slug)
+    if (slug === 'pa_storage' || /\[:en\]Storage/i.test(name)) continue
     if (attr.options?.length) attributes[name] = attr.options.join(', ')
   }
   const weight = extractWeight(p.name)
