@@ -128,10 +128,20 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
 
 // Brand name normalization: our extracted name → MauDau's registered name
 const MAUDAU_BRAND_MAP: Record<string, string> = {
-  'Grissin Bon': 'GrissinBon',
-  'Pikolo': 'Піколо',
-  'Млекпол': 'Mlekpol',   // MauDau registered as Latin
-  'НАМЕ': 'Hame',          // MauDau registered as Hame
+  // Case corrections (brand exists in MauDau but wrong case in our DB)
+  'VODA UA': 'Voda UA',
+  'Клуб сиру': 'Клуб Сиру',
+  'DIJO': 'Dijo',
+  'HELCOM': 'Helcom',
+  'AKURA': 'Akura',
+  // Aliases / Latin↔Cyrillic variants
+  'Млековіта': 'Mlekovita',
+  'Kazerei': 'Käserei Champignon',  // likely same brand
+  'Kaserei': 'Käserei Champignon',
+  'Млекпол': 'Mlekpol',
+  'НАМЕ': 'Hame',
+  // Brands missing from MauDau → map to closest known brand or Галицька Свіжина as fallback
+  // These need to be added to MauDau brand catalog; for now leave as-is so MauDau sees them
 }
 
 function normalizeMaudauBrand(brand: string): string {
