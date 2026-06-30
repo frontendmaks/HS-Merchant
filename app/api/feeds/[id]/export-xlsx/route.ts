@@ -28,11 +28,13 @@ export async function GET(
     const rawSku = p.sku ?? p.id ?? ''
     const sku = sanitizeSku(rawSku)
     const price = fp.custom_price ?? p.price ?? ''
+    const typObrobky = cp['Тип обробки'] ?? ''
+    const tempMode = /замор/i.test(typObrobky) ? 'freezing' : 'cooling'
 
     return {
       id: sku,
       brand_name_uk: cp['Торгова марка'] ?? p.brand ?? 'Галицька Свіжина',
-      'packaging_info.temperature_mode': cp['Тип обробки'] ?? '',
+      'packaging_info.temperature_mode': tempMode,
       country_title_uk: cp['Країна виробник'] ?? 'Україна',
       title_uk: name,
       title_ru: fp.name_ru ?? '',

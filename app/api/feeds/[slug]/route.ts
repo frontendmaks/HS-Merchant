@@ -225,10 +225,10 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
       const oldPriceLine = p.price_old ? `\n      <price_old>${p.price_old}</price_old>` : ''
 
       return `    <offer id="${offerId}" available="true">
-      <name_ua>${escapeXml(nameUa)}</name_ua>
-      <name_ru>${escapeXml(nameRu)}</name_ru>
-      <description_ua>${escapeXml(descUa)}</description_ua>
-      <description_ru>${escapeXml(descRu)}</description_ru>
+      <name_ua>${escapeXml(nameUa.slice(0, 255))}</name_ua>
+      <name_ru>${escapeXml(nameRu.slice(0, 255))}</name_ru>
+      <description_ua>${descToXml(descUa)}</description_ua>
+      <description_ru>${descToXml(descRu)}</description_ru>
       <price>${unitPrice ?? 0}</price>${oldPriceLine}
       <currencyId>UAH</currencyId>
       <categoryId>${catId}</categoryId>${quantityLine}
@@ -268,10 +268,23 @@ ${offersXml}
 
 function escapeXml(str: string): string {
   if (!str) return ''
-  return str
+  return stripControlChars(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;')
+}
+
+// For descriptions: MauDau allows HTML but no CDATA — escape only & keep tags intact
+function descToXml(str: string, maxLen = 10000): string {
+  if (!str) return ''
+  return stripControlChars(str)
+    .slice(0, maxLen)
+    .replace(/&/g, '&amp;')
+}
+
+// Strip XML-forbidden control characters (ASCII 0-8, 11-12, 14-31)
+function stripControlChars(str: string): string {
+  return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
 }
