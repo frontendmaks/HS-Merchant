@@ -11,7 +11,7 @@ export default async function FeedPage({ params }: { params: Promise<{ id: strin
   const [{ data: feed }, { data: feedProducts }, { data: allProducts }, { data: marketplaces }] = await Promise.all([
     supabase.from('feeds').select('*, marketplace:marketplaces(id, name, slug)').eq('id', id).single(),
     supabase.from('feed_products').select('*').eq('feed_id', id),
-    supabase.from('products').select('id, name, description, category_name, brand, price, price_old, stock, images, attributes').eq('status', 'active').order('name'),
+    supabase.from('products').select('id, name, description, category_name, categories, brand, price, price_old, stock, images, attributes').eq('status', 'active').order('name'),
     supabase.from('marketplaces').select('id, name'),
   ])
 

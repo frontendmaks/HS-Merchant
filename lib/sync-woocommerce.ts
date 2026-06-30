@@ -96,6 +96,9 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   if (unitBase)               attributes['Одиниця'] = unitBase
 
   const category_name = pickMainCategory(p, categoryMap)
+  const categories = (p.categories ?? [])
+    .map((c: { id: number; name: string }) => categoryMap.get(c.id) ?? c.name)
+    .filter(Boolean) as string[]
   const brand = extractBrand(p.name)
 
   // For simple products: use sale_price if set, otherwise regular_price
@@ -135,6 +138,7 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
     status: 'active' as const,
     images,
     attributes,
+    categories,
     vendor: brand,
     brand,
     category_name,

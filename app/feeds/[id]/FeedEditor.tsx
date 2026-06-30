@@ -7,6 +7,7 @@ type Product = {
   name: string
   description: string | null
   category_name: string | null
+  categories: string[] | null
   brand: string | null
   price: number
   price_old: number | null
@@ -341,6 +342,72 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     })
   }
 
+  // ── MauDau smart inference ──────────────────────────────────────────────
+  function inferType(name: string): string | null {
+    const n = name.toLowerCase()
+    if (/стейк/.test(n)) return 'Стейк'
+    if (/фрикадел/.test(n)) return 'Фрикадельки'
+    if (/тефтел/.test(n)) return 'Тефтелі'
+    if (/котлет/.test(n)) return 'Котлети'
+    if (/шашлик/.test(n)) return 'Шашлик'
+    if (/кебаб/.test(n)) return 'Кебаб'
+    if (/люля/.test(n)) return 'Люля-кебаб'
+    if (/відбивн/.test(n)) return 'Відбивні'
+    if (/шніцел/.test(n)) return 'Шніцель'
+    if (/медальйон/.test(n)) return 'Медальйони'
+    if (/рулет/.test(n)) return 'Рулет'
+    if (/буженин/.test(n)) return 'Буженина'
+    if (/гуляш/.test(n)) return 'Гуляш'
+    if (/паштет/.test(n)) return 'Паштети'
+    if (/карбонад/.test(n)) return 'Карбонад'
+    if (/сосис|сарделк/.test(n)) return 'Сосиски для гриля'
+    if (/ребр/.test(n)) return 'Ребра'
+    if (/фарш/.test(n)) return 'Фарш'
+    if (/нагетс/.test(n)) return 'Нагетси'
+    if (/стрипс/.test(n)) return 'Стрипси'
+    if (/рулька/.test(n)) return 'Рулька'
+    if (/філе/.test(n)) return 'Філе'
+    if (/грудк/.test(n)) return 'Грудка'
+    if (/стегн/.test(n)) return 'Стегно'
+    if (/крильц|крило/.test(n)) return 'Крила'
+    if (/голінк/.test(n)) return 'Гомілка'
+    return null
+  }
+
+  function inferBase(name: string, categories: string[]): string | null {
+    const text = (name + ' ' + categories.join(' ')).toLowerCase()
+    if (/ягнят|баранин/.test(text)) return 'Баранина'
+    if (/кролик/.test(text)) return 'Кролик'
+    if (/індич/.test(text)) return 'Індичка'
+    if (/качк/.test(text)) return 'Качка'
+    if (/курч|кур'яч|курк|курятин/.test(text)) return 'Курка'
+    if (/(ялович|телят).*свин|свин.*(ялович|телят)/.test(text)) return 'Свинина та яловичина'
+    if (/ялович|телятин|теляч/.test(text)) return 'Яловичина'
+    if (/свинин|свин/.test(text)) return 'Свинина'
+    return null
+  }
+
+  function inferCookingMethods(type: string | null, name: string): string | null {
+    const grillTypes = new Set(['Стейк', 'Шашлик', 'Кебаб', 'Люля-кебаб', 'Відбивні', 'Карбонад', 'Сосиски для гриля', 'Котлети', 'Медальйони'])
+    const panTypes = new Set(['Стейк', 'Котлети', 'Тефтелі', 'Фрикадельки', 'Відбивні', 'Шніцель', 'Медальйони', 'Сосиски для гриля', 'Філе', 'Грудка', 'Нагетси', 'Стрипси'])
+    const ovenTypes = new Set(['Ребра', 'Рулет', 'Буженина', 'Гуляш', 'Котлети', 'Тефтелі', 'Рулька', 'Стегно', 'Крила', 'Гомілка', 'Карбонад', 'Нагетси'])
+    const potTypes = new Set(['Гуляш', 'Ребра', 'Рулька', 'Стегно', 'Гомілка', 'Фарш'])
+    if (!type) return null
+    const methods: string[] = []
+    if (grillTypes.has(type)) methods.push('На мангалі або грилі')
+    if (panTypes.has(type)) methods.push('На сковорідці')
+    if (ovenTypes.has(type)) methods.push('У духовці')
+    if (potTypes.has(type)) methods.push('У каструлі')
+    return methods.length ? methods.join(', ') : null
+  }
+
+  function inferProcessing(name: string, categories: string[]): string {
+    const text = (name + ' ' + categories.join(' ')).toLowerCase()
+    if (/замор/.test(text)) return 'Морожений'
+    return 'Охолоджений'
+  }
+  // ────────────────────────────────────────────────────────────────────────
+
   const autoFillParams = () => {
     setOverrides(prev => {
       const next = { ...prev }
@@ -379,6 +446,17 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
         // Гарантія
         if (!existing['Гарантія']) auto['Гарантія'] = 'Термін придатності вказаний на упаковці'
+
+        // MauDau smart fields
+        const cats = p.categories ?? []
+        const mType = inferType(p.name)
+        if (mType && !existing['Тип']) auto['Тип'] = mType
+        const mBase = inferBase(p.name, cats)
+        if (mBase && !existing['Основа']) auto['Основа'] = mBase
+        const mCooking = inferCookingMethods(mType, p.name)
+        if (mCooking && !existing['Спосіб приготування']) auto['Спосіб приготування'] = mCooking
+        if (!existing['Тип обробки']) auto['Тип обробки'] = inferProcessing(p.name, cats)
+        if (!existing['Упаковка']) auto['Упаковка'] = 'Вакуумний пакет'
 
         if (Object.keys(auto).length > 0 || JSON.stringify(existing) !== JSON.stringify(next[p.id]?.custom_params ?? {})) {
           next[p.id] = { ...next[p.id], custom_params: { ...auto, ...existing } }
