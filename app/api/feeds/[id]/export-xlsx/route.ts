@@ -11,54 +11,44 @@ export async function GET(
 
   const { data: feedProducts } = await supabase
     .from('feed_products')
-    .select('*, product:products(id, name, description, category_name, brand, price, price_old, stock, images, attributes, sku)')
+    .select('*, product:products(id, name, description, category_name, brand, price, price_old, sku)')
     .eq('feed_id', id)
-    .eq('active', true)
+    .eq('is_active', true)
 
-  if (!feedProducts) {
-    return NextResponse.json({ error: 'No products' }, { status: 404 })
+  if (!feedProducts?.length) {
+    return NextResponse.json({ error: 'No active products' }, { status: 404 })
   }
 
   const rows = feedProducts.map((fp: any) => {
-    const p = fp.product
-    const params = (fp.custom_params ?? {}) as Record<string, string>
+    const p = fp.product ?? {}
+    const cp = (fp.custom_params ?? {}) as Record<string, string>
 
     const name = fp.custom_name ?? p.name ?? ''
-    const nameRu = fp.name_ru ?? ''
-    const descUk = params['Опис'] ?? p.description ?? ''
-    const descRu = fp.description_ru ?? ''
-    const skladUk = params['Склад'] ?? ''
-    const brand = params['Торгова марка'] ?? p.brand ?? 'Галицька Свіжина'
-    const country = params['Країна виробник'] ?? 'Україна'
-    const tempMode = params['Тип обробки'] ?? ''
-    const type = params['Тип'] ?? ''
-    const weightVal = params['Вага упаковки'] ?? params['Вага'] ?? ''
-    const price = fp.custom_price ?? p.price ?? ''
-    const oldPrice = p.price_old ?? ''
     const sku = p.sku ?? p.id ?? ''
+    const price = fp.custom_price ?? p.price ?? ''
 
     return {
       id: sku,
-      brand_name_uk: brand,
-      'packaging_info.temperature_mode': tempMode,
-      country_title_uk: country,
+      brand_name_uk: cp['Торгова марка'] ?? p.brand ?? 'Галицька Свіжина',
+      'packaging_info.temperature_mode': cp['Тип обробки'] ?? '',
+      country_title_uk: cp['Країна виробник'] ?? 'Україна',
       title_uk: name,
-      title_ru: nameRu,
-      description_uk: descUk,
-      description_ru: descRu,
-      'composition.content_uk': skladUk,
+      title_ru: fp.name_ru ?? '',
+      description_uk: cp['Опис'] ?? p.description ?? '',
+      description_ru: fp.description_ru ?? '',
+      'composition.content_uk': cp['Склад'] ?? '',
       'composition.content_ru': '',
       source_document_name: '',
-      type,
+      type: cp['Тип'] ?? '',
       'packaging_info.height': '',
-      'packaging_info.weight': weightVal,
+      'packaging_info.weight': cp['Вага упаковки'] ?? cp['Вага'] ?? '',
       'packaging_info.width': '',
       'packaging_info.length': '',
       'supply_info.repeat_period_days': '',
       barcode: sku,
       additional_barcodes: '',
       price,
-      old_price: oldPrice,
+      old_price: p.price_old ?? '',
     }
   })
 
@@ -68,10 +58,15 @@ export async function GET(
 
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
 
+  // filename like template: DD-MM-YYYY_HH-MM-SS_fields_import_products.xlsx
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const filename = `${pad(now.getDate())}-${pad(now.getMonth()+1)}-${now.getFullYear()}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}_fields_import_products.xlsx`
+
   return new NextResponse(buf, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': `attachment; filename="maudau-products.xlsx"`,
+      'Content-Disposition': `attachment; filename="${filename}"`,
     },
   })
 }
