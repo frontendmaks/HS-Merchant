@@ -133,24 +133,35 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
   const errors: string[] = []
 
   // Build ordered list of unique categories from active products
+  // Per MauDau spec: id = our stable numeric id, portal_id = MauDau category id for auto-matching
   const categoryPortalIds: Record<string, string> = feed.settings?.category_portal_ids ?? {}
-  // catIdMap: our catName → portal_id to use in <categoryId>
-  const catIdMap = new Map<string, string>()
-  // seenPortalIds: deduplicate <category> blocks by portal_id
-  const seenPortalIds = new Map<string, string>() // portalId → first catName
-  let fallbackCounter = 0
+  const catIdMap = new Map<string, string>()       // catName → our numeric id
+  const seenPortalIds = new Set<string>()           // deduplicate by portal_id
+  const categoryRows: { numId: string; portalId: string; name: string }[] = []
+  let numCounter = 0
 
   for (const fp of activeFps) {
     const catName = fp.product.category_name ?? 'Без категорії'
     if (catIdMap.has(catName)) continue
-    const portalId = categoryPortalIds[catName] ?? String(++fallbackCounter)
-    catIdMap.set(catName, portalId)
-    if (!seenPortalIds.has(portalId)) seenPortalIds.set(portalId, catName)
+    const portalId = categoryPortalIds[catName] ?? ''
+    if (portalId && seenPortalIds.has(portalId)) {
+      // Reuse existing numeric id for this portal_id
+      const existing = categoryRows.find(r => r.portalId === portalId)!
+      catIdMap.set(catName, existing.numId)
+      continue
+    }
+    const numId = String(++numCounter)
+    catIdMap.set(catName, numId)
+    if (portalId) seenPortalIds.add(portalId)
+    categoryRows.push({ numId, portalId, name: catName })
   }
 
-  // One <category> per unique portal_id
-  const categoriesXml = [...seenPortalIds.entries()]
-    .map(([portalId, name]) => `    <category id="${escapeXml(portalId)}">${escapeXml(name)}</category>`)
+  // <category id="1" portal_id="ковбаси"> — id is our numeric, portal_id is MauDau's
+  const categoriesXml = categoryRows
+    .map(({ numId, portalId, name }) => {
+      const portalAttr = portalId ? ` portal_id="${escapeXml(portalId)}"` : ''
+      return `    <category id="${numId}"${portalAttr}>${escapeXml(name)}</category>`
+    })
     .join('\n')
 
   const offersXml = activeFps
@@ -186,11 +197,21 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
         .map((url: string) => `      <picture>${escapeXml(url)}</picture>`)
         .join('\n')
 
-      // Exclude 'Вага' from params — MauDau has predefined weight values, arbitrary gram values cause warnings
-      // Also exclude step/крок (internal field)
-      const EXCLUDED_PARAMS = new Set(['Крок', 'крок', 'Мінімальний крок', 'Вага', 'вага', 'Мін', 'мін', 'Одиниця', 'одиниця', 'Назва', 'Опис'])
+      // temperature_mode: MauDau expects "cooling" or "freezing" (English), not Ukrainian
+      const typObrobky = attrs_map['Тип обробки'] ?? ''
+      const tempMode = /замор/i.test(typObrobky) ? 'freezing' : 'cooling'
+
+      // country: dedicated XML tag (Ukrainian name)
+      const countryName = attrs_map['Країна виробник'] ?? 'Україна'
+
+      // Excluded from <param>: internal fields + fields that have dedicated XML tags
+      const EXCLUDED_PARAMS = new Set([
+        'Крок', 'крок', 'Мінімальний крок', 'Вага', 'вага',
+        'Мін', 'мін', 'Одиниця', 'одиниця', 'Назва', 'Опис',
+        'Тип обробки', 'Країна виробник',
+      ])
       const attrs = Object.entries(attrs_map)
-        .filter(([k]) => !EXCLUDED_PARAMS.has(k))
+        .filter(([k, v]) => !EXCLUDED_PARAMS.has(k) && String(v).trim())
         .map(([k, v]) => `      <param name="${escapeXml(k)}">${escapeXml(String(v))}</param>`)
         .join('\n')
 
@@ -206,11 +227,13 @@ function generateMaudauYML(feed: any): { xml: string; offersCount: number; error
       return `    <offer id="${offerId}" available="true">
       <name_ua>${escapeXml(nameUa)}</name_ua>
       <name_ru>${escapeXml(nameRu)}</name_ru>
-      <description_ua><![CDATA[${descUa}]]></description_ua>
-      <description_ru><![CDATA[${descRu}]]></description_ru>
+      <description_ua>${escapeXml(descUa)}</description_ua>
+      <description_ru>${escapeXml(descRu)}</description_ru>
       <price>${unitPrice ?? 0}</price>${oldPriceLine}
       <currencyId>UAH</currencyId>
       <categoryId>${catId}</categoryId>${quantityLine}
+      <temperature_mode>${tempMode}</temperature_mode>
+      <country>${escapeXml(countryName)}</country>
 ${images}
       <vendor>${escapeXml(normalizeMaudauBrand(p.brand ?? 'Галицька Свіжина'))}</vendor>
       <vendorCode>${escapeXml(p.sku ?? '')}</vendorCode>
