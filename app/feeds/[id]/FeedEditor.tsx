@@ -506,7 +506,12 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         if (!existing['Вага'] && hasAttr('Вага')) {
           const isWeightUnit = ['кг', 'г', 'мл', 'л'].includes(unit)
           if (isWeightUnit && minVal) {
-            auto['Вага'] = `${minVal} ${unit}`
+            // Convert кг → г when < 1 кг (0.3 кг → 300 г), keep л/мл as-is
+            if (unit === 'кг' && minVal < 1) {
+              auto['Вага'] = `${Math.round(minVal * 1000)} г`
+            } else {
+              auto['Вага'] = `${minVal} ${unit}`
+            }
           } else if (weightFromName) {
             auto['Вага'] = weightFromName
           }
