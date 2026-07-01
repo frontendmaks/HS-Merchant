@@ -18,7 +18,7 @@ export async function GET() {
     // Priority 1: DB table
     const { data: dbCats } = await supabase
       .from('maudau_categories')
-      .select('slug, title')
+      .select('slug, title, portal_id, attributes')
       .order('title')
 
     if (dbCats && dbCats.length > 0) {

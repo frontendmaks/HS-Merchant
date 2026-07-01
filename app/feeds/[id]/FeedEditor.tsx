@@ -150,7 +150,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const isMaudau = feed.marketplace?.slug === 'maudau' || feed.marketplace?.name?.toLowerCase().includes('maudau')
 
   // MauDau: available categories fetched from API / DB
-  const [maudauCategories, setMaudauCategories] = useState<{ slug: string; title: string }[]>([])
+  const [maudauCategories, setMaudauCategories] = useState<{ slug: string; title: string; portal_id?: string; attributes?: { name: string; type: string; values: string[] }[] }[]>([])
   const [maudauCatsLoading, setMaudauCatsLoading] = useState(false)
   const [maudauCatsError, setMaudauCatsError] = useState('')
   const [maudauCatsSource, setMaudauCatsSource] = useState<'db' | 'api' | ''>('')
@@ -502,16 +502,37 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     [allProducts, overrides]
   )
 
+  // portal_id → attributes map for quick lookup
+  const portalIdAttrsMap = useMemo(() => {
+    const map: Record<string, { name: string; type: string; values: string[] }[]> = {}
+    for (const cat of maudauCategories) {
+      if (cat.portal_id && cat.attributes) map[cat.portal_id] = cat.attributes
+    }
+    return map
+  }, [maudauCategories])
+
   // Per-product validation issues
   function getProductIssues(p: any, ov: any): { type: 'error' | 'warn'; text: string }[] {
     const issues: { type: 'error' | 'warn'; text: string }[] = []
     if (!p.images || p.images.length === 0) issues.push({ type: 'error', text: 'Немає фото' })
     if (!p.brand) issues.push({ type: 'warn', text: 'Немає бренду' })
-    if (isMaudau && p.category_name && !categoryPortalIds[p.category_name]) {
-      issues.push({ type: 'warn', text: 'Категорія не зіставлена' })
+    const params = ov.custom_params ?? {}
+    if (isMaudau && p.category_name) {
+      const portalId = categoryPortalIds[p.category_name]
+      if (!portalId) {
+        issues.push({ type: 'warn', text: 'Категорія не зіставлена' })
+      } else {
+        // Check which required characteristics are missing
+        const catAttrs = portalIdAttrsMap[portalId] ?? []
+        const SKIP = new Set(['Гарантія', 'Азійські', 'Інша пропозиція'])
+        const missing = catAttrs
+          .filter(a => !SKIP.has(a.name) && !params[a.name])
+          .map(a => a.name)
+        if (missing.length > 0) {
+          issues.push({ type: 'warn', text: `Відсутні: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` +${missing.length - 3}` : ''}` })
+        }
+      }
     }
-    const paramCount = Object.keys(ov.custom_params ?? {}).length
-    if (paramCount < 3) issues.push({ type: 'warn', text: `Мало характеристик (${paramCount}/3)` })
     return issues
   }
 
