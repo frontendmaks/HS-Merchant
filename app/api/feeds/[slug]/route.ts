@@ -136,8 +136,9 @@ const MAUDAU_BRAND_MAP: Record<string, string> = {
   'AKURA': 'Akura',
   // Aliases / Latin↔Cyrillic variants
   'Млековіта': 'Mlekovita',
-  'Kazerei': 'Käserei Champignon',  // likely same brand
+  'Kazerei': 'Käserei Champignon',
   'Kaserei': 'Käserei Champignon',
+  'Kazereil': 'Käserei Champignon',
   'Млекпол': 'Mlekpol',
   'НАМЕ': 'Hame',
   // Brands registered in MauDau under a different name
@@ -232,12 +233,13 @@ function generateMaudauYML(feed: any, slugToPortalId: Record<string, string> = {
         'Мін', 'мін', 'Одиниця', 'одиниця', 'Назва', 'Опис',
         // Fields rendered as dedicated MauDau XML tags instead of <param>
         'Тип обробки', 'Країна виробник',
-        // Fields with values MauDau doesn't accept / not valid characteristics:
+        // Sent via <vendor> tag — must NOT also be a <param> (MauDau rejects duplicate)
+        'Торгова марка',
+        // Fields with values MauDau doesn't accept / causes non-critical warnings:
         'Гарантія',       // value "Термін придатності вказаний на упаковці" not in MauDau list
+        'Упаковка',       // "Вакуумний пакет" not in MauDau allowed values for this characteristic
+        'Вага', 'вага',   // MauDau does not accept free-text weight values like "300 г"
         'Вага упаковки',  // not a MauDau characteristic name (legacy field)
-        // Note: 'Вага' is intentionally NOT excluded — it's a valid MauDau characteristic.
-        // WC internal 'Вага' (raw number) in p.attributes gets overridden by custom_params['Вага']
-        // which has a properly formatted value like "500 г" from autoFillParams.
       ])
 
       const attrs = Object.entries(attrs_map)
