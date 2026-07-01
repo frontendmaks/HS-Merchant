@@ -227,17 +227,29 @@ function generateMaudauYML(feed: any, slugToPortalId: Record<string, string> = {
       // Excluded from <param>: internal fields, fields with dedicated XML tags,
       // and fields whose values MauDau doesn't accept (cause non-critical warnings)
       const EXCLUDED_PARAMS = new Set([
-        'Крок', 'крок', 'Мінімальний крок', 'Вага', 'вага',
+        // WooCommerce internal pricing/unit fields (not product characteristics)
+        'Крок', 'крок', 'Мінімальний крок',
         'Мін', 'мін', 'Одиниця', 'одиниця', 'Назва', 'Опис',
+        // Fields rendered as dedicated MauDau XML tags instead of <param>
         'Тип обробки', 'Країна виробник',
-        // MauDau doesn't accept these values / characteristic not available in all categories:
-        'Гарантія',       // value "Відповідно до законодавства України" not in MauDau list
-        'Упаковка',       // value "Вакуумний пакет" not in MauDau allowed values
-        'Вага упаковки',  // MauDau doesn't recognize this characteristic name
+        // Fields with values MauDau doesn't accept / not valid characteristics:
+        'Гарантія',       // value "Термін придатності вказаний на упаковці" not in MauDau list
+        'Вага упаковки',  // not a MauDau characteristic name (legacy field)
+        // Note: 'Вага' is intentionally NOT excluded — it's a valid MauDau characteristic.
+        // WC internal 'Вага' (raw number) in p.attributes gets overridden by custom_params['Вага']
+        // which has a properly formatted value like "500 г" from autoFillParams.
       ])
 
       const attrs = Object.entries(attrs_map)
-        .filter(([k, v]) => !EXCLUDED_PARAMS.has(k) && String(v).trim())
+        .filter(([k, v]) => {
+          if (EXCLUDED_PARAMS.has(k)) return false
+          const s = String(v).trim()
+          if (!s) return false
+          // Skip raw numeric 'Вага' values from WC internal attributes (e.g. "0.5");
+          // only pass through formatted values like "500 г" or "1.5 кг"
+          if ((k === 'Вага' || k === 'вага') && /^\d+([.,]\d+)?$/.test(s)) return false
+          return true
+        })
         .map(([k, v]) => `      <param name="${escapeXml(k)}">${escapeXml(String(v))}</param>`)
         .join('\n')
 

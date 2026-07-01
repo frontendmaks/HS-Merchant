@@ -463,13 +463,13 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         const unit = attrs['Одиниця'] ?? 'шт'
         const weightFromName = attrs['Вага']
 
-        // Вага — only if category supports it
-        if (!existing['Вага упаковки'] && hasAttr('Вага')) {
+        // Вага — only if category supports it; store as 'Вага' (the MauDau attribute name)
+        if (!existing['Вага'] && hasAttr('Вага')) {
           const isWeightUnit = ['кг', 'г', 'мл', 'л'].includes(unit)
           if (isWeightUnit && minVal) {
-            auto['Вага упаковки'] = `${minVal} ${unit}`
+            auto['Вага'] = `${minVal} ${unit}`
           } else if (weightFromName) {
-            auto['Вага упаковки'] = weightFromName
+            auto['Вага'] = weightFromName
           }
         }
 
@@ -569,15 +569,24 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     if (!p.brand) issues.push({ type: 'warn', text: 'Немає бренду' })
     const params = ov.custom_params ?? {}
     if (isMaudau && p.category_name) {
-      const portalId = categoryPortalIds[p.category_name]
-      if (!portalId) {
+      const rawMapping = categoryPortalIds[p.category_name]
+      if (!rawMapping) {
         issues.push({ type: 'warn', text: 'Категорія не зіставлена' })
       } else {
-        // Check which required characteristics are missing
-        const catAttrs = portalIdAttrsMap[portalId] ?? []
-        const SKIP = new Set(['Гарантія', 'Азійські', 'Інша пропозиція'])
+        // Resolve slug → numeric portal_id (same logic as getCatPortalId)
+        const portalId = /^\d+$/.test(rawMapping) ? rawMapping : (slugToPortalIdClient[rawMapping] ?? '')
+        const catAttrs = portalId ? (portalIdAttrsMap[portalId] ?? []) : []
+        // Merge product attributes + custom_params (same logic as XML route)
+        const allParams = { ...(p.attributes ?? {}), ...params }
+        // Skip fields that are handled as dedicated XML tags or excluded from <param>
+        const SKIP = new Set([
+          'Гарантія', 'Азійські', 'Інша пропозиція', 'Спеціальні пропозиції', 'Десерти',
+          'Тип обробки',       // → temperature_mode tag
+          'Країна виробник',   // → country tag
+          'Вага упаковки',     // excluded from XML
+        ])
         const missing = catAttrs
-          .filter(a => !SKIP.has(a.name) && !params[a.name])
+          .filter(a => !SKIP.has(a.name) && !allParams[a.name])
           .map(a => a.name)
         if (missing.length > 0) {
           issues.push({ type: 'warn', text: `Відсутні: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` +${missing.length - 3}` : ''}` })
