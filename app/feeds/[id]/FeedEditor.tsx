@@ -346,9 +346,11 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   }
 
   // ── MauDau smart inference ──────────────────────────────────────────────
+
+  // Infer type only for meat/seafood products (by exact word boundaries)
   function inferType(name: string): string | null {
     const n = name.toLowerCase()
-    if (/стейк/.test(n)) return 'Стейк'
+    if (/\bстейк/.test(n)) return 'Стейк'
     if (/фрикадел/.test(n)) return 'Фрикадельки'
     if (/тефтел/.test(n)) return 'Тефтелі'
     if (/котлет/.test(n)) return 'Котлети'
@@ -358,18 +360,18 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     if (/відбивн/.test(n)) return 'Відбивні'
     if (/шніцел/.test(n)) return 'Шніцель'
     if (/медальйон/.test(n)) return 'Медальйони'
-    if (/рулет/.test(n)) return 'Рулет'
+    if (/\bрулет\b/.test(n)) return 'Рулет'
     if (/буженин/.test(n)) return 'Буженина'
     if (/гуляш/.test(n)) return 'Гуляш'
-    if (/паштет/.test(n)) return 'Паштети'
+    if (/\bпаштет/.test(n)) return 'Паштети'
     if (/карбонад/.test(n)) return 'Карбонад'
     if (/сосис|сарделк/.test(n)) return 'Сосиски для гриля'
-    if (/ребр/.test(n)) return 'Ребра'
-    if (/фарш/.test(n)) return 'Фарш'
+    if (/\bребр/.test(n)) return 'Ребра'
+    if (/\bфарш\b/.test(n)) return 'Фарш'  // \b = ціле слово, не "фарширований"
     if (/нагетс/.test(n)) return 'Нагетси'
     if (/стрипс/.test(n)) return 'Стрипси'
-    if (/рулька/.test(n)) return 'Рулька'
-    if (/філе/.test(n)) return 'Філе'
+    if (/\bрулька/.test(n)) return 'Рулька'
+    if (/\bфіле\b/.test(n)) return 'Філе'
     if (/грудк/.test(n)) return 'Грудка'
     if (/стегн/.test(n)) return 'Стегно'
     if (/крильц|крило/.test(n)) return 'Крила'
@@ -409,6 +411,31 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     if (/замор/.test(text)) return 'Морожений'
     return 'Охолоджений'
   }
+
+  // Infer country from WooCommerce categories array
+  function inferCountry(cats: string[]): string {
+    for (const cat of cats) {
+      const m = cat.match(/Власний імпорт з (.+)/i)
+      if (m) return m[1].trim()
+    }
+    return 'Україна'
+  }
+
+  // Slug → portalId resolver using maudauCategories (client-side)
+  const slugToPortalIdClient = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const cat of maudauCategories) {
+      if ((cat as any).slug && (cat as any).portal_id) map[(cat as any).slug] = (cat as any).portal_id
+    }
+    return map
+  }, [maudauCategories])
+
+  function getCatPortalId(wcCategoryName: string): string {
+    const raw = categoryPortalIds[wcCategoryName] ?? ''
+    if (!raw) return ''
+    if (/^\d+$/.test(raw)) return raw
+    return slugToPortalIdClient[raw] ?? ''
+  }
   // ────────────────────────────────────────────────────────────────────────
 
   const autoFillParams = () => {
@@ -426,13 +453,18 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
         const auto: Record<string, string> = {}
 
+        // Get MauDau attributes for this product's category
+        const portalId = getCatPortalId(p.category_name ?? '')
+        const catAttrs = portalId ? (portalIdAttrsMap[portalId] ?? []) : []
+        const hasAttr = (name: string) => catAttrs.some(a => a.name === name)
+
         const attrs = p.attributes ?? {}
-        const minVal  = parseFloat(attrs['Мін']  ?? '0') || null
-        const unit    = attrs['Одиниця'] ?? 'шт'
+        const minVal = parseFloat(attrs['Мін'] ?? '0') || null
+        const unit = attrs['Одиниця'] ?? 'шт'
         const weightFromName = attrs['Вага']
 
-        // Вага упаковки
-        if (!existing['Вага упаковки']) {
+        // Вага — only if category supports it
+        if (!existing['Вага упаковки'] && hasAttr('Вага')) {
           const isWeightUnit = ['кг', 'г', 'мл', 'л'].includes(unit)
           if (isWeightUnit && minVal) {
             auto['Вага упаковки'] = `${minVal} ${unit}`
@@ -444,22 +476,41 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         // Торгова марка
         if (!existing['Торгова марка'] && p.brand) auto['Торгова марка'] = p.brand
 
-        // Країна виробник
-        if (!existing['Країна виробник']) auto['Країна виробник'] = 'Україна'
+        // Країна виробник — витягуємо з WC категорій ("Власний імпорт з Італії")
+        if (!existing['Країна виробник']) {
+          auto['Країна виробник'] = inferCountry(p.categories ?? [])
+        }
 
         // Гарантія
         if (!existing['Гарантія']) auto['Гарантія'] = 'Термін придатності вказаний на упаковці'
 
-        // MauDau smart fields
         const cats = p.categories ?? []
-        const mType = inferType(p.name)
-        if (mType && !existing['Тип']) auto['Тип'] = mType
-        const mBase = inferBase(p.name, cats)
-        if (mBase && !existing['Основа']) auto['Основа'] = mBase
-        const mCooking = inferCookingMethods(mType, p.name)
-        if (mCooking && !existing['Спосіб приготування']) auto['Спосіб приготування'] = mCooking
-        if (!existing['Тип обробки']) auto['Тип обробки'] = inferProcessing(p.name, cats)
-        if (!existing['Упаковка']) auto['Упаковка'] = 'Вакуумний пакет'
+
+        // Тип обробки — тільки якщо категорія підтримує
+        if (!existing['Тип обробки'] && hasAttr('Тип обробки')) {
+          auto['Тип обробки'] = inferProcessing(p.name, cats)
+        }
+
+        // Тип — тільки якщо категорія підтримує і є збіг
+        if (!existing['Тип'] && hasAttr('Тип')) {
+          const mType = inferType(p.name)
+          if (mType) auto['Тип'] = mType
+        }
+
+        // Основа — тільки якщо категорія підтримує і є збіг
+        if (!existing['Основа'] && hasAttr('Основа')) {
+          const mBase = inferBase(p.name, cats)
+          if (mBase) auto['Основа'] = mBase
+        }
+
+        // Спосіб приготування — тільки якщо категорія підтримує
+        if (!existing['Спосіб приготування'] && hasAttr('Спосіб приготування')) {
+          const mType = (existing['Тип'] || auto['Тип']) ?? inferType(p.name)
+          const mCooking = inferCookingMethods(mType ?? null, p.name)
+          if (mCooking) auto['Спосіб приготування'] = mCooking
+        }
+
+        // Упаковка — НЕ додаємо автоматично, бо допустимі значення різні в кожній категорії
 
         if (Object.keys(auto).length > 0 || JSON.stringify(existing) !== JSON.stringify(next[p.id]?.custom_params ?? {})) {
           next[p.id] = { ...next[p.id], custom_params: { ...auto, ...existing } }
