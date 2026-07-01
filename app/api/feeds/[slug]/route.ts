@@ -140,8 +140,10 @@ const MAUDAU_BRAND_MAP: Record<string, string> = {
   'Kaserei': 'Käserei Champignon',
   'Млекпол': 'Mlekpol',
   'НАМЕ': 'Hame',
-  // Brands missing from MauDau → map to closest known brand or Галицька Свіжина as fallback
-  // These need to be added to MauDau brand catalog; for now leave as-is so MauDau sees them
+  // Brands registered in MauDau under a different name
+  'Вербена': 'Verbena',
+  'Натахтарі': 'Natakhtari',
+  'Козуб': 'Козуб Продукт',
 }
 
 function normalizeMaudauBrand(brand: string): string {
