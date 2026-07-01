@@ -367,7 +367,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     if (/карбонад/.test(n)) return 'Карбонад'
     if (/сосис|сарделк/.test(n)) return 'Сосиски для гриля'
     if (/\bребр/.test(n)) return 'Ребра'
-    if (/\bфарш\b/.test(n)) return 'Фарш'  // \b = ціле слово, не "фарширований"
+    if (/фарш(?![а-яіїєьА-ЯІЇЄ])/.test(n)) return 'Фарш'  // не "фарширований" (за фарш не йде кирилична літера)
     if (/нагетс/.test(n)) return 'Нагетси'
     if (/стрипс/.test(n)) return 'Стрипси'
     if (/\bрулька/.test(n)) return 'Рулька'
@@ -515,57 +515,46 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         // Торгова марка
         if (!existing['Торгова марка'] && p.brand) auto['Торгова марка'] = p.brand
 
-        // Країна виробник — завжди виводимо з WC категорій, перезаписуємо "Україна" якщо є точніше
+        // Країна виробник — завжди перераховуємо з WC категорій (видаляємо з existing щоб auto виграв)
         const inferredCountry = inferCountry(p.categories ?? [])
-        if (!existing['Країна виробник'] || existing['Країна виробник'] === 'Україна') {
-          auto['Країна виробник'] = inferredCountry
-        }
+        delete existing['Країна виробник']
+        auto['Країна виробник'] = inferredCountry
 
         // Гарантія
         if (!existing['Гарантія']) auto['Гарантія'] = 'Термін придатності вказаний на упаковці'
 
         const cats = p.categories ?? []
 
-        // Тип обробки — тільки якщо категорія підтримує
+        // Тип обробки — завжди перераховуємо якщо категорія підтримує, інакше видаляємо
+        delete existing['Тип обробки']
         if (hasAttr('Тип обробки')) {
           auto['Тип обробки'] = inferProcessing(p.name, cats)
-        } else {
-          // видаляємо якщо категорія не підтримує
-          delete existing['Тип обробки']
         }
 
-        // Тип — тільки якщо категорія підтримує; ВИДАЛЯЄМО якщо не підтримує (старі дані)
+        // Тип — перераховуємо inference; якщо результат null або категорія не підтримує — видаляємо
+        delete existing['Тип']
         if (hasAttr('Тип')) {
-          if (!existing['Тип']) {
-            const mType = inferType(p.name)
-            if (mType) auto['Тип'] = mType
-          }
-        } else {
-          delete existing['Тип']
+          const mType = inferType(p.name)
+          if (mType) auto['Тип'] = mType
+          // якщо mType === null — поле просто не буде додане (видалене з existing вище)
         }
 
-        // Основа — тільки якщо категорія підтримує; видаляємо якщо ні
+        // Основа — перераховуємо; якщо null або категорія не підтримує — видаляємо
+        delete existing['Основа']
         if (hasAttr('Основа')) {
-          if (!existing['Основа']) {
-            const mBase = inferBase(p.name, cats)
-            if (mBase) auto['Основа'] = mBase
-          }
-        } else {
-          delete existing['Основа']
+          const mBase = inferBase(p.name, cats)
+          if (mBase) auto['Основа'] = mBase
         }
 
-        // Спосіб приготування — тільки якщо категорія підтримує; видаляємо якщо ні
+        // Спосіб приготування — перераховуємо; якщо категорія не підтримує — видаляємо
+        delete existing['Спосіб приготування']
         if (hasAttr('Спосіб приготування')) {
-          if (!existing['Спосіб приготування']) {
-            const mType = (existing['Тип'] || auto['Тип']) ?? inferType(p.name)
-            const mCooking = inferCookingMethods(mType ?? null, p.name)
-            if (mCooking) auto['Спосіб приготування'] = mCooking
-          }
-        } else {
-          delete existing['Спосіб приготування']
+          const mType = auto['Тип'] ?? inferType(p.name)
+          const mCooking = inferCookingMethods(mType ?? null, p.name)
+          if (mCooking) auto['Спосіб приготування'] = mCooking
         }
 
-        // Упаковка — НЕ додаємо автоматично; але якщо є значення що не підходить — не чіпаємо (юзер має заповнити вручну)
+        // Упаковка — НЕ чіпаємо (юзер має заповнити вручну, значення різні в кожній категорії)
 
         next[p.id] = { ...next[p.id], custom_params: { ...auto, ...existing } }
       })
