@@ -476,9 +476,10 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         // Торгова марка
         if (!existing['Торгова марка'] && p.brand) auto['Торгова марка'] = p.brand
 
-        // Країна виробник — витягуємо з WC категорій ("Власний імпорт з Італії")
-        if (!existing['Країна виробник']) {
-          auto['Країна виробник'] = inferCountry(p.categories ?? [])
+        // Країна виробник — завжди виводимо з WC категорій, перезаписуємо "Україна" якщо є точніше
+        const inferredCountry = inferCountry(p.categories ?? [])
+        if (!existing['Країна виробник'] || existing['Країна виробник'] === 'Україна') {
+          auto['Країна виробник'] = inferredCountry
         }
 
         // Гарантія
@@ -487,34 +488,47 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         const cats = p.categories ?? []
 
         // Тип обробки — тільки якщо категорія підтримує
-        if (!existing['Тип обробки'] && hasAttr('Тип обробки')) {
+        if (hasAttr('Тип обробки')) {
           auto['Тип обробки'] = inferProcessing(p.name, cats)
+        } else {
+          // видаляємо якщо категорія не підтримує
+          delete existing['Тип обробки']
         }
 
-        // Тип — тільки якщо категорія підтримує і є збіг
-        if (!existing['Тип'] && hasAttr('Тип')) {
-          const mType = inferType(p.name)
-          if (mType) auto['Тип'] = mType
+        // Тип — тільки якщо категорія підтримує; ВИДАЛЯЄМО якщо не підтримує (старі дані)
+        if (hasAttr('Тип')) {
+          if (!existing['Тип']) {
+            const mType = inferType(p.name)
+            if (mType) auto['Тип'] = mType
+          }
+        } else {
+          delete existing['Тип']
         }
 
-        // Основа — тільки якщо категорія підтримує і є збіг
-        if (!existing['Основа'] && hasAttr('Основа')) {
-          const mBase = inferBase(p.name, cats)
-          if (mBase) auto['Основа'] = mBase
+        // Основа — тільки якщо категорія підтримує; видаляємо якщо ні
+        if (hasAttr('Основа')) {
+          if (!existing['Основа']) {
+            const mBase = inferBase(p.name, cats)
+            if (mBase) auto['Основа'] = mBase
+          }
+        } else {
+          delete existing['Основа']
         }
 
-        // Спосіб приготування — тільки якщо категорія підтримує
-        if (!existing['Спосіб приготування'] && hasAttr('Спосіб приготування')) {
-          const mType = (existing['Тип'] || auto['Тип']) ?? inferType(p.name)
-          const mCooking = inferCookingMethods(mType ?? null, p.name)
-          if (mCooking) auto['Спосіб приготування'] = mCooking
+        // Спосіб приготування — тільки якщо категорія підтримує; видаляємо якщо ні
+        if (hasAttr('Спосіб приготування')) {
+          if (!existing['Спосіб приготування']) {
+            const mType = (existing['Тип'] || auto['Тип']) ?? inferType(p.name)
+            const mCooking = inferCookingMethods(mType ?? null, p.name)
+            if (mCooking) auto['Спосіб приготування'] = mCooking
+          }
+        } else {
+          delete existing['Спосіб приготування']
         }
 
-        // Упаковка — НЕ додаємо автоматично, бо допустимі значення різні в кожній категорії
+        // Упаковка — НЕ додаємо автоматично; але якщо є значення що не підходить — не чіпаємо (юзер має заповнити вручну)
 
-        if (Object.keys(auto).length > 0 || JSON.stringify(existing) !== JSON.stringify(next[p.id]?.custom_params ?? {})) {
-          next[p.id] = { ...next[p.id], custom_params: { ...auto, ...existing } }
-        }
+        next[p.id] = { ...next[p.id], custom_params: { ...auto, ...existing } }
       })
       return next
     })
@@ -528,7 +542,6 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
   // Filtered products list based on category filter setting
   const filteredProducts = useMemo(() => {
-    setCurrentPage(1)
     return allProducts.filter(p => {
       const ov = overrides[p.id] ?? {}
       if (showOnlySelected && ov.is_active !== true) return false
@@ -546,6 +559,11 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues, overrides])
+
+  // Reset to page 1 whenever filters change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues])
 
   // Count actually selected (active) products across ALL products
   const selectedCount = useMemo(() =>
