@@ -285,6 +285,9 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [productSearch, setProductSearch] = useState('')
   const [categorySearch, setCategorySearch] = useState('')
   const [showOnlySelected, setShowOnlySelected] = useState(false)
+  const [showOnlyWithIssues, setShowOnlyWithIssues] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const PAGE_SIZE = 50
   // Which product row is expanded
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
 
@@ -473,22 +476,44 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   )
 
   // Filtered products list based on category filter setting
-  const filteredProducts = useMemo(() => allProducts.filter(p => {
-    if (showOnlySelected && overrides[p.id]?.is_active !== true) return false
-    if (selectedCategories.length > 0) {
-      if (!p.category_name || !selectedCategories.includes(p.category_name)) return false
-    }
-    if (productSearch) {
-      return p.name.toLowerCase().includes(productSearch.toLowerCase())
-    }
-    return true
-  }), [allProducts, selectedCategories, productSearch, showOnlySelected, overrides])
+  const filteredProducts = useMemo(() => {
+    setCurrentPage(1)
+    return allProducts.filter(p => {
+      const ov = overrides[p.id] ?? {}
+      if (showOnlySelected && ov.is_active !== true) return false
+      if (selectedCategories.length > 0) {
+        if (!p.category_name || !selectedCategories.includes(p.category_name)) return false
+      }
+      if (productSearch) {
+        if (!p.name.toLowerCase().includes(productSearch.toLowerCase())) return false
+      }
+      if (showOnlyWithIssues) {
+        if (ov.is_active !== true) return false
+        if (getProductIssues(p, ov).length === 0) return false
+      }
+      return true
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues, overrides])
 
   // Count actually selected (active) products across ALL products
   const selectedCount = useMemo(() =>
     allProducts.filter(p => overrides[p.id]?.is_active === true).length,
     [allProducts, overrides]
   )
+
+  // Per-product validation issues
+  function getProductIssues(p: any, ov: any): { type: 'error' | 'warn'; text: string }[] {
+    const issues: { type: 'error' | 'warn'; text: string }[] = []
+    if (!p.images || p.images.length === 0) issues.push({ type: 'error', text: 'Немає фото' })
+    if (!p.brand) issues.push({ type: 'warn', text: 'Немає бренду' })
+    if (isMaudau && p.category_name && !categoryPortalIds[p.category_name]) {
+      issues.push({ type: 'warn', text: 'Категорія не зіставлена' })
+    }
+    const paramCount = Object.keys(ov.custom_params ?? {}).length
+    if (paramCount < 3) issues.push({ type: 'warn', text: `Мало характеристик (${paramCount}/3)` })
+    return issues
+  }
 
   // Active categories (derived from selected products) for MauDau portal_id section
   const activeCategories = useMemo(() => {
@@ -822,6 +847,16 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                 >
                   {showOnlySelected ? '✓ Вибрані' : 'Вибрані'}
                 </button>
+                <button
+                  onClick={() => setShowOnlyWithIssues(v => !v)}
+                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
+                    showOnlyWithIssues
+                      ? 'bg-red-700 border-red-700 text-white'
+                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-red-700'
+                  }`}
+                >
+                  ⚠ З помилками
+                </button>
                 <input
                   type="text"
                   placeholder="🔍 Пошук..."
@@ -940,15 +975,18 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Залишок</div>
           </div>
 
-          <div className="overflow-y-auto flex-1 max-h-[560px] divide-y divide-zinc-800/60">
+          <div className="overflow-y-auto divide-y divide-zinc-800/60" style={{ minHeight: 400, maxHeight: 'calc(100vh - 420px)' }}>
             {filteredProducts.length === 0 && (
               <div className="py-12 text-center text-zinc-600 text-sm">Немає товарів</div>
             )}
-            {filteredProducts.slice(0, 500).map(p => {
+            {filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map(p => {
               const ov = overrides[p.id] ?? {}
               const isActive = ov.is_active === true
               const isExpanded = expandedProduct === p.id
               const thumb = p.images?.[0]
+              const issues = getProductIssues(p, ov)
+              const hasErrors = issues.some(i => i.type === 'error')
+              const hasWarns = issues.some(i => i.type === 'warn')
               const paramCount = Object.keys(ov.custom_params ?? {}).length
               const fewParams = isActive && paramCount < 3
               const stock = ov.custom_stock !== '' && ov.custom_stock != null
@@ -956,7 +994,11 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                 : p.stock
 
               return (
-                <div key={p.id} className={`transition-colors ${isActive ? 'hover:bg-zinc-800/30' : 'opacity-35 hover:opacity-60'}`}>
+                <div key={p.id} className={`transition-colors border-l-2 ${
+                  isActive && hasErrors ? 'border-red-600' :
+                  isActive && hasWarns ? 'border-amber-600' :
+                  'border-transparent'
+                } ${isActive ? 'hover:bg-zinc-800/30' : 'opacity-35 hover:opacity-60'}`}>
                   <div className="grid grid-cols-[20px_36px_1fr_70px_70px_56px] gap-2 px-4 py-2 items-center">
                     {/* Checkbox */}
                     <input
@@ -967,28 +1009,36 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     />
 
                     {/* Thumbnail */}
-                    <div className="w-8 h-8 rounded overflow-hidden bg-zinc-800 shrink-0 flex items-center justify-center">
+                    <div className={`w-8 h-8 rounded overflow-hidden shrink-0 flex items-center justify-center ${!thumb ? 'bg-red-950 border border-red-800' : 'bg-zinc-800'}`}>
                       {thumb
                         ? <img src={thumb} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
-                        : <span className="text-zinc-700 text-[10px]">—</span>}
+                        : <span className="text-red-500 text-[10px] font-bold">!</span>}
                     </div>
 
-                    {/* Name + category */}
+                    {/* Name + category + issues */}
                     <div className="min-w-0">
                       <button
                         onClick={() => setExpandedProduct(isExpanded ? null : p.id)}
                         className="text-left w-full cursor-pointer"
                       >
-                        <div className="text-xs text-white font-medium leading-snug line-clamp-2 flex items-start gap-1">
+                        <div className="text-xs text-white font-medium leading-snug flex items-start gap-1 flex-wrap">
                           <span className="text-zinc-600 shrink-0 mt-px">{isExpanded ? '▾' : '▸'}</span>
-                          <span>{p.name}</span>
-                          {fewParams && (
-                            <span title={`Лише ${paramCount} характеристик (потрібно мін. 3)`} className="shrink-0 ml-1 text-[9px] px-1 py-px rounded bg-amber-900/60 text-amber-400 border border-amber-800/50 leading-tight mt-px">
-                              {paramCount}/3
-                            </span>
-                          )}
+                          <span className="line-clamp-1">{p.name}</span>
                         </div>
                         <div className="text-[11px] text-zinc-500 mt-0.5 truncate">{p.category_name}</div>
+                        {isActive && issues.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {issues.map((iss, i) => (
+                              <span key={i} className={`text-[9px] px-1.5 py-px rounded leading-tight border ${
+                                iss.type === 'error'
+                                  ? 'bg-red-950/70 text-red-400 border-red-800/50'
+                                  : 'bg-amber-950/70 text-amber-400 border-amber-800/50'
+                              }`}>
+                                {iss.type === 'error' ? '✕' : '⚠'} {iss.text}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </button>
                     </div>
 
@@ -1141,9 +1191,43 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             })}
           </div>
 
-          {filteredProducts.length > 500 && (
-            <div className="px-4 py-2 border-t border-zinc-800 text-xs text-zinc-600 text-center">
-              Показано 500 з {filteredProducts.length}. Уточніть пошук або категорію.
+          {/* Pagination */}
+          {filteredProducts.length > PAGE_SIZE && (
+            <div className="px-4 py-3 border-t border-zinc-800 flex items-center justify-between gap-2">
+              <span className="text-xs text-zinc-500">
+                {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredProducts.length)} з {filteredProducts.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  className="text-xs px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 rounded disabled:opacity-30 transition-colors"
+                >← Назад</button>
+                {Array.from({ length: Math.ceil(filteredProducts.length / PAGE_SIZE) }, (_, i) => i + 1)
+                  .filter(pg => pg === 1 || pg === Math.ceil(filteredProducts.length / PAGE_SIZE) || Math.abs(pg - currentPage) <= 2)
+                  .reduce<(number | '...')[]>((acc, pg, i, arr) => {
+                    if (i > 0 && pg - (arr[i - 1] as number) > 1) acc.push('...')
+                    acc.push(pg)
+                    return acc
+                  }, [])
+                  .map((pg, i) => pg === '...'
+                    ? <span key={`e${i}`} className="text-xs text-zinc-600 px-1">…</span>
+                    : <button
+                        key={pg}
+                        onClick={() => setCurrentPage(pg as number)}
+                        className={`text-xs px-2.5 py-1 rounded border transition-colors ${
+                          currentPage === pg
+                            ? 'bg-red-700 border-red-700 text-white'
+                            : 'bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-400'
+                        }`}
+                      >{pg}</button>
+                  )}
+                <button
+                  disabled={currentPage === Math.ceil(filteredProducts.length / PAGE_SIZE)}
+                  onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredProducts.length / PAGE_SIZE), p + 1))}
+                  className="text-xs px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 rounded disabled:opacity-30 transition-colors"
+                >Вперед →</button>
+              </div>
             </div>
           )}
         </div>
