@@ -1246,6 +1246,20 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                 ? Number(ov.custom_stock)
                 : p.stock
 
+              // MauDau structured attrs for expanded view
+              const curParams = ov.custom_params ?? {}
+              const catPortalId = isMaudau ? getCatPortalId(p.category_name ?? '') : ''
+              const catAttrsExp: { name: string; type: string; values: string[] }[] = catPortalId ? (portalIdAttrsMap[catPortalId] ?? []) : []
+              const catAttrNames = new Set(catAttrsExp.map(a => a.name))
+              const extraParams = Object.entries(curParams).filter(([k]) => !catAttrNames.has(k))
+              const setParam = (key: string, value: string) =>
+                setOverride(p.id, 'custom_params', { ...curParams, [key]: value })
+              const clearParam = (key: string) => {
+                const next = { ...curParams }
+                delete next[key]
+                setOverride(p.id, 'custom_params', next)
+              }
+
               return (
                 <div key={p.id} className={`transition-colors border-l-2 ${
                   isActive && hasErrors ? 'border-red-600' :
@@ -1327,22 +1341,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                   </div>
 
                   {/* Expanded: characteristics + MauDau fields */}
-                  {isExpanded && (() => {
-                    const params = ov.custom_params ?? {}
-                    const catPortalId = isMaudau ? getCatPortalId(p.category_name ?? '') : ''
-                    const catAttrsExp = catPortalId ? (portalIdAttrsMap[catPortalId] ?? []) : []
-                    const catAttrNames = new Set(catAttrsExp.map((a: any) => a.name))
-                    const extraParams = Object.entries(params).filter(([k]) => !catAttrNames.has(k))
-
-                    const setParam = (key: string, value: string) =>
-                      setOverride(p.id, 'custom_params', { ...params, [key]: value })
-                    const clearParam = (key: string) => {
-                      const next = { ...params }
-                      delete next[key]
-                      setOverride(p.id, 'custom_params', next)
-                    }
-
-                    return (
+                  {isExpanded && (
                     <div className="px-4 pb-3 space-y-3 bg-zinc-800/20 border-t border-zinc-800/60">
                       <div className="pt-2">
                         <div className="flex items-center justify-between mb-1.5">
@@ -1350,7 +1349,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                           <button
                             type="button"
                             onClick={() => {
-                              const key = `Параметр ${Object.keys(params).length + 1}`
+                              const key = `Параметр ${Object.keys(curParams).length + 1}`
                               setParam(key, '')
                             }}
                             className="text-[10px] px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded transition-colors"
@@ -1362,8 +1361,8 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                           <div className="space-y-1.5">
                             {catAttrsExp.map((attr: any) => {
                               const val: string = attr.name === 'Вага'
-                                ? (params['Вага'] ?? params['Вага упаковки'] ?? '')
-                                : (params[attr.name] ?? '')
+                                ? (curParams['Вага'] ?? curParams['Вага упаковки'] ?? '')
+                                : (curParams[attr.name] ?? '')
                               const isEmpty = !val
                               const rawValues: string[] = attr.values ?? []
                               const hasDropdown = rawValues.length > 0
@@ -1416,12 +1415,12 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                         )}
 
                         {/* Extra params not in MauDau catAttrs (or non-MauDau flat list) */}
-                        {(catAttrsExp.length === 0 ? Object.entries(params) : extraParams).length > 0 && (
+                        {(catAttrsExp.length === 0 ? Object.entries(curParams) : extraParams).length > 0 && (
                           <div className={`space-y-1.5 ${catAttrsExp.length > 0 ? 'mt-2 pt-2 border-t border-zinc-800/40' : ''}`}>
                             {catAttrsExp.length > 0 && extraParams.length > 0 && (
                               <p className="text-[10px] text-zinc-600 mb-1">Додаткові поля</p>
                             )}
-                            {(catAttrsExp.length === 0 ? Object.entries(params) : extraParams).map(([key, val]) => (
+                            {(catAttrsExp.length === 0 ? Object.entries(curParams) : extraParams).map(([key, val]) => (
                               <div key={key} className="flex items-center gap-1.5">
                                 <input
                                   type="text"
@@ -1429,7 +1428,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                                   onBlur={e => {
                                     const newKey = e.target.value.trim()
                                     if (!newKey || newKey === key) return
-                                    const next = { ...params }
+                                    const next = { ...curParams }
                                     const v = next[key]
                                     delete next[key]
                                     next[newKey] = v
@@ -1456,7 +1455,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                           </div>
                         )}
 
-                        {catAttrsExp.length === 0 && Object.keys(params).length === 0 && (
+                        {catAttrsExp.length === 0 && Object.keys(curParams).length === 0 && (
                           <p className="text-[11px] text-zinc-600">Немає характеристик. Натисніть "+ Додати".</p>
                         )}
                       </div>
@@ -1508,8 +1507,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                         </div>
                       )}
                     </div>
-                    )
-                  })()}
+                  )}
                 </div>
               )
             })}
