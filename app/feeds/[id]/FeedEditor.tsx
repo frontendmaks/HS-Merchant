@@ -704,8 +704,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
       }
       return true
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues, overrides])
+  }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues, overrides, portalIdAttrsMap, slugToPortalIdClient, categoryPortalIds, isMaudau])
 
   // Reset to page 1 whenever filters change
   useEffect(() => {
@@ -1084,7 +1083,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setShowOnlySelected(v => !v)}
+                  onClick={() => { setShowOnlySelected(v => !v); setShowOnlyWithIssues(false) }}
                   className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
                     showOnlySelected
                       ? 'bg-emerald-600 border-emerald-600 text-white'
@@ -1094,7 +1093,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                   {showOnlySelected ? '✓ Вибрані' : 'Вибрані'}
                 </button>
                 <button
-                  onClick={() => setShowOnlyWithIssues(v => !v)}
+                  onClick={() => { setShowOnlyWithIssues(v => !v); setShowOnlySelected(false) }}
                   className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
                     showOnlyWithIssues
                       ? 'bg-red-700 border-red-700 text-white'
