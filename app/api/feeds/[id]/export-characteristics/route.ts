@@ -192,10 +192,16 @@ export async function GET(
     // Build merged params (custom_params + inferred)
     const params: Record<string, string> = { ...cp }
 
-    // Тип
+    // Тип — re-infer from name with allowed values (overrides any previously stored value)
     if (hasAttr('Тип')) {
-      const mType = inferType(name, attrValues('Тип'))
-      if (mType) params['Тип'] = mType
+      const allowed = attrValues('Тип')
+      const mType = inferType(name, allowed)
+      // Use inferred if valid; otherwise keep existing only if it's in allowed list
+      if (mType) {
+        params['Тип'] = mType
+      } else if (params['Тип'] && allowed.length && !allowed.includes(params['Тип'])) {
+        delete params['Тип']
+      }
     }
 
     // Сорт
@@ -245,12 +251,15 @@ export async function GET(
     }
 
     // Build row: id + category attributes
+    const META_SKIP = new Set(['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад'])
     const row: Record<string, string> = { id: productId }
     for (const attr of catAttrs) {
-      const v = params[attr.name] ?? params['Вага упаковки'] ?? ''
-      // Only include known characteristic columns (skip meta fields)
-      if (['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад'].includes(attr.name)) continue
-      row[attr.name] = v || ''
+      if (META_SKIP.has(attr.name)) continue
+      // For Вага: fallback to Вага упаковки; for all other attrs: only use their own value
+      const v = attr.name === 'Вага'
+        ? (params['Вага'] ?? params['Вага упаковки'] ?? '')
+        : (params[attr.name] ?? '')
+      row[attr.name] = v
     }
 
     if (!categorySheets.has(catTitle)) {
