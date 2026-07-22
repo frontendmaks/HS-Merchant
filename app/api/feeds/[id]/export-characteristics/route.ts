@@ -321,12 +321,12 @@ export async function GET(
   for (const [, group] of categoryGroups) {
     const { catTitle, catAttrs, products } = group
     const sheetAttrs = catAttrs.filter(a => !['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад'].includes(a.name))
-    const headers = ['id', ...sheetAttrs.map(a => a.name)]
+    const headers = ['vendor_code', ...sheetAttrs.map(a => a.name)]
 
     const wsData: (string | null)[][] = [headers]
     for (const product of products) {
       const row = headers.map(h => {
-        if (h === 'id') return product.id
+        if (h === 'vendor_code') return product.id
         if (h === 'Вага') return product.params['Вага'] ?? product.params['Вага упаковки'] ?? null
         return product.params[h] ?? null
       })
