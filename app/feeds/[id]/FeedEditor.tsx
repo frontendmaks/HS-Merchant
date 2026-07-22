@@ -689,6 +689,15 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     [categories, categorySearch]
   )
 
+  // portal_id → attributes map for quick lookup
+  const portalIdAttrsMap = useMemo(() => {
+    const map: Record<string, { name: string; type: string; values: string[] }[]> = {}
+    for (const cat of maudauCategories) {
+      if (cat.portal_id && cat.attributes) map[cat.portal_id] = cat.attributes
+    }
+    return map
+  }, [maudauCategories])
+
   // Filtered products list based on category filter setting
   const filteredProducts = useMemo(() => {
     return allProducts.filter(p => {
@@ -718,15 +727,6 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     allProducts.filter(p => overrides[p.id]?.is_active === true).length,
     [allProducts, overrides]
   )
-
-  // portal_id → attributes map for quick lookup
-  const portalIdAttrsMap = useMemo(() => {
-    const map: Record<string, { name: string; type: string; values: string[] }[]> = {}
-    for (const cat of maudauCategories) {
-      if (cat.portal_id && cat.attributes) map[cat.portal_id] = cat.attributes
-    }
-    return map
-  }, [maudauCategories])
 
   // Per-product validation issues
   function getProductIssues(p: any, ov: any): { type: 'error' | 'warn'; text: string }[] {
