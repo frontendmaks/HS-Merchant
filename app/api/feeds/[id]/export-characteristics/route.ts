@@ -109,6 +109,52 @@ function fixTypObr(v: string): string {
   return TYP_OBR_FIX[v] ?? (VALID_TYP_OBR.has(v) ? v : 'Охолоджені')
 }
 
+// ── Weight helpers ────────────────────────────────────────────────────────────
+
+function parseGrams(s: string): number | null {
+  const m = s.match(/([\d.,]+)\s*(кг|г|мл|л)/i)
+  if (!m) return null
+  const n = parseFloat(m[1].replace(',', '.'))
+  const u = m[2].toLowerCase()
+  if (u === 'кг' || u === 'л') return n * 1000
+  return n
+}
+
+function closestWeight(rawWeight: string, allowedValues: string[]): string {
+  if (!allowedValues.length) return rawWeight
+  const isRangeBucket = allowedValues.some(v => /до |понад |- /i.test(v))
+  if (isRangeBucket) {
+    const grams = parseGrams(rawWeight)
+    if (grams == null) return ''
+    for (const v of allowedValues) {
+      if (/^до\s/i.test(v)) {
+        const max = parseGrams(v.replace(/^до\s/i, ''))
+        if (max != null && grams <= max) return v
+      } else if (/^понад\s/i.test(v)) {
+        const min = parseGrams(v.replace(/^понад\s/i, ''))
+        if (min != null && grams > min) return v
+      } else {
+        const parts = v.split(/\s*-\s*/)
+        if (parts.length === 2) {
+          const lo = parseGrams(parts[0]), hi = parseGrams(parts[1])
+          if (lo != null && hi != null && grams >= lo && grams <= hi) return v
+        }
+      }
+    }
+    return ''
+  }
+  const grams = parseGrams(rawWeight)
+  if (grams == null) return ''
+  let best = '', bestDiff = Infinity
+  for (const v of allowedValues) {
+    const vg = parseGrams(v)
+    if (vg == null) continue
+    const diff = Math.abs(vg - grams)
+    if (diff < bestDiff) { bestDiff = diff; best = v }
+  }
+  return bestDiff < grams * 0.3 ? best : ''
+}
+
 // ── Claude AI inference ───────────────────────────────────────────────────────
 
 const META_SKIP = new Set(['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад', 'Гарантія', 'Тип обробки'])
@@ -317,19 +363,25 @@ export async function GET(
       const pAttrs = p.attributes ?? {}
       const unit = pAttrs['Одиниця'] ?? 'шт'
       const wAttr = pAttrs['Вага']
-      if (wAttr) {
-        params['Вага'] = wAttr
-      } else {
+      let rawWeight = wAttr ?? ''
+      if (!rawWeight) {
         const minVal = parseFloat(pAttrs['Мін'] ?? '0') || null
         if (minVal && ['кг', 'г', 'мл', 'л'].includes(unit)) {
-          params['Вага'] = unit === 'кг' && minVal < 1
+          rawWeight = unit === 'кг' && minVal < 1
             ? `${Math.round(minVal * 1000)} г`
             : `${minVal} ${unit}`
         }
       }
+      if (rawWeight) {
+        const allowedWeights = attrValues('Вага')
+        const matched = closestWeight(rawWeight, allowedWeights)
+        if (matched) params['Вага'] = matched
+      }
     }
-    if (!params['Гарантія']) {
-      params['Гарантія'] = 'Відповідно до законодавства України'
+    // Гарантія — pick first allowed value from MauDau (e.g. '<p>24 міс</p>')
+    if (!params['Гарантія'] && hasAttr('Гарантія')) {
+      const firstVal = catAttrs.find(a => a.name === 'Гарантія')?.values?.[0]
+      if (firstVal) params['Гарантія'] = firstVal
     }
 
     if (!categoryGroups.has(catTitle)) {

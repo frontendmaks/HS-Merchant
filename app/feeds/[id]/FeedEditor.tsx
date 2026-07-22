@@ -345,6 +345,58 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     })
   }
 
+  // Strip HTML tags for display (e.g. MauDau Гарантія values have <p>...</p>)
+  function stripHtml(s: string): string {
+    return s.replace(/<[^>]+>/g, '').trim()
+  }
+
+  // Find the closest standard weight from MauDau's allowed list
+  function closestWeight(rawWeight: string, allowedValues: string[]): string {
+    if (!allowedValues.length) return rawWeight
+    // Check range buckets like "До 50 г", "101 г - 300 г", "Понад 500 г"
+    const isRangeBucket = allowedValues.some(v => /до |понад |- /i.test(v))
+    if (isRangeBucket) {
+      const grams = parseGrams(rawWeight)
+      if (grams == null) return ''
+      for (const v of allowedValues) {
+        if (/^до\s/i.test(v)) {
+          const max = parseGrams(v.replace(/^до\s/i, ''))
+          if (max != null && grams <= max) return v
+        } else if (/^понад\s/i.test(v)) {
+          const min = parseGrams(v.replace(/^понад\s/i, ''))
+          if (min != null && grams > min) return v
+        } else {
+          const parts = v.split(/\s*-\s*/)
+          if (parts.length === 2) {
+            const lo = parseGrams(parts[0]), hi = parseGrams(parts[1])
+            if (lo != null && hi != null && grams >= lo && grams <= hi) return v
+          }
+        }
+      }
+      return ''
+    }
+    // Exact numeric weights — find closest
+    const grams = parseGrams(rawWeight)
+    if (grams == null) return ''
+    let best = '', bestDiff = Infinity
+    for (const v of allowedValues) {
+      const vg = parseGrams(v)
+      if (vg == null) continue
+      const diff = Math.abs(vg - grams)
+      if (diff < bestDiff) { bestDiff = diff; best = v }
+    }
+    return bestDiff < grams * 0.3 ? best : '' // only use if within 30%
+  }
+
+  function parseGrams(s: string): number | null {
+    const m = s.match(/([\d.,]+)\s*(кг|г|мл|л)/i)
+    if (!m) return null
+    const n = parseFloat(m[1].replace(',', '.'))
+    const u = m[2].toLowerCase()
+    if (u === 'кг' || u === 'л') return n * 1000
+    return n
+  }
+
   // ── MauDau smart inference ──────────────────────────────────────────────
 
   // Infer type only for meat/seafood products (by exact word boundaries)
@@ -539,18 +591,20 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         const unit = attrs['Одиниця'] ?? 'шт'
         const weightFromName = attrs['Вага']
 
-        // Вага — only if category supports it; store as 'Вага' (the MauDau attribute name)
+        // Вага — only if category supports it; match to closest standard MauDau weight
         if (!existing['Вага'] && hasAttr('Вага')) {
+          const weightAttr = catAttrs.find((a: any) => a.name === 'Вага')
+          const allowedWeights: string[] = weightAttr?.values ?? []
           const isWeightUnit = ['кг', 'г', 'мл', 'л'].includes(unit)
-          if (isWeightUnit && minVal) {
-            // Convert кг → г when < 1 кг (0.3 кг → 300 г), keep л/мл as-is
-            if (unit === 'кг' && minVal < 1) {
-              auto['Вага'] = `${Math.round(minVal * 1000)} г`
-            } else {
-              auto['Вага'] = `${minVal} ${unit}`
-            }
-          } else if (weightFromName) {
-            auto['Вага'] = weightFromName
+          let rawWeight = weightFromName ?? ''
+          if (!rawWeight && isWeightUnit && minVal) {
+            rawWeight = unit === 'кг' && minVal < 1
+              ? `${Math.round(minVal * 1000)} г`
+              : `${minVal} ${unit}`
+          }
+          if (rawWeight) {
+            const matched = closestWeight(rawWeight, allowedWeights)
+            if (matched) auto['Вага'] = matched
           }
         }
 
@@ -562,8 +616,12 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         delete existing['Країна виробник']
         auto['Країна виробник'] = inferredCountry
 
-        // Гарантія
-        if (!existing['Гарантія']) auto['Гарантія'] = 'Термін придатності вказаний на упаковці'
+        // Гарантія — use first allowed MauDau value (e.g. '<p>24 міс</p>'); leave empty if category has no allowed values
+        if (!existing['Гарантія'] && hasAttr('Гарантія')) {
+          const garAttr = catAttrs.find((a: any) => a.name === 'Гарантія')
+          const firstVal = garAttr?.values?.[0]
+          if (firstVal) auto['Гарантія'] = firstVal
+        }
 
         const cats = p.categories ?? []
 
@@ -1269,28 +1327,101 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                   </div>
 
                   {/* Expanded: characteristics + MauDau fields */}
-                  {isExpanded && (
+                  {isExpanded && (() => {
+                    const params = ov.custom_params ?? {}
+                    const catPortalId = isMaudau ? getCatPortalId(p.category_name ?? '') : ''
+                    const catAttrsExp = catPortalId ? (portalIdAttrsMap[catPortalId] ?? []) : []
+                    const catAttrNames = new Set(catAttrsExp.map((a: any) => a.name))
+                    const extraParams = Object.entries(params).filter(([k]) => !catAttrNames.has(k))
+
+                    const setParam = (key: string, value: string) =>
+                      setOverride(p.id, 'custom_params', { ...params, [key]: value })
+                    const clearParam = (key: string) => {
+                      const next = { ...params }
+                      delete next[key]
+                      setOverride(p.id, 'custom_params', next)
+                    }
+
+                    return (
                     <div className="px-4 pb-3 space-y-3 bg-zinc-800/20 border-t border-zinc-800/60">
-                      {/* Custom params (all feeds) */}
                       <div className="pt-2">
                         <div className="flex items-center justify-between mb-1.5">
                           <span className="text-[11px] text-zinc-400 font-medium">Характеристики</span>
                           <button
                             type="button"
                             onClick={() => {
-                              const params = { ...(ov.custom_params ?? {}) }
                               const key = `Параметр ${Object.keys(params).length + 1}`
-                              params[key] = ''
-                              setOverride(p.id, 'custom_params', params)
+                              setParam(key, '')
                             }}
                             className="text-[10px] px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded transition-colors"
                           >+ Додати</button>
                         </div>
-                        {Object.keys(ov.custom_params ?? {}).length === 0 ? (
-                          <p className="text-[11px] text-zinc-600">Немає характеристик. Натисніть "+ Додати".</p>
-                        ) : (
+
+                        {/* MauDau: structured category attributes with dropdowns */}
+                        {catAttrsExp.length > 0 && (
                           <div className="space-y-1.5">
-                            {Object.entries(ov.custom_params ?? {}).map(([key, val]) => (
+                            {catAttrsExp.map((attr: any) => {
+                              const val: string = attr.name === 'Вага'
+                                ? (params['Вага'] ?? params['Вага упаковки'] ?? '')
+                                : (params[attr.name] ?? '')
+                              const isEmpty = !val
+                              const rawValues: string[] = attr.values ?? []
+                              const hasDropdown = rawValues.length > 0
+
+                              return (
+                                <div key={attr.name} className="flex items-center gap-1.5">
+                                  <span className={`w-36 shrink-0 text-[11px] truncate ${isEmpty ? 'text-amber-400' : 'text-zinc-400'}`}>
+                                    {attr.name}
+                                  </span>
+                                  <span className="text-zinc-600 text-xs shrink-0">:</span>
+                                  {hasDropdown ? (
+                                    <select
+                                      value={val}
+                                      onChange={e => setParam(attr.name, e.target.value)}
+                                      className={`flex-1 min-w-0 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none cursor-pointer ${
+                                        isEmpty
+                                          ? 'bg-amber-950/30 border border-amber-600 focus:border-amber-400'
+                                          : 'bg-zinc-800 border border-zinc-700 focus:border-zinc-500'
+                                      }`}
+                                    >
+                                      <option value="">— Обрати —</option>
+                                      {rawValues.map((v: string, i: number) => (
+                                        <option key={i} value={v}>{stripHtml(v)}</option>
+                                      ))}
+                                    </select>
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={val}
+                                      onChange={e => setParam(attr.name, e.target.value)}
+                                      className={`flex-1 min-w-0 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none ${
+                                        isEmpty
+                                          ? 'bg-amber-950/30 border border-amber-600 focus:border-amber-400'
+                                          : 'bg-zinc-800 border border-zinc-700 focus:border-zinc-500'
+                                      }`}
+                                      placeholder="Значення"
+                                    />
+                                  )}
+                                  {val && (
+                                    <button
+                                      type="button"
+                                      onClick={() => clearParam(attr.name)}
+                                      className="text-zinc-600 hover:text-red-400 text-xs px-1 transition-colors shrink-0"
+                                    >✕</button>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+
+                        {/* Extra params not in MauDau catAttrs (or non-MauDau flat list) */}
+                        {(catAttrsExp.length === 0 ? Object.entries(params) : extraParams).length > 0 && (
+                          <div className={`space-y-1.5 ${catAttrsExp.length > 0 ? 'mt-2 pt-2 border-t border-zinc-800/40' : ''}`}>
+                            {catAttrsExp.length > 0 && extraParams.length > 0 && (
+                              <p className="text-[10px] text-zinc-600 mb-1">Додаткові поля</p>
+                            )}
+                            {(catAttrsExp.length === 0 ? Object.entries(params) : extraParams).map(([key, val]) => (
                               <div key={key} className="flex items-center gap-1.5">
                                 <input
                                   type="text"
@@ -1298,11 +1429,11 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                                   onBlur={e => {
                                     const newKey = e.target.value.trim()
                                     if (!newKey || newKey === key) return
-                                    const params = { ...(ov.custom_params ?? {}) }
-                                    const value = params[key]
-                                    delete params[key]
-                                    params[newKey] = value
-                                    setOverride(p.id, 'custom_params', params)
+                                    const next = { ...params }
+                                    const v = next[key]
+                                    delete next[key]
+                                    next[newKey] = v
+                                    setOverride(p.id, 'custom_params', next)
                                   }}
                                   className="w-32 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-zinc-300 focus:outline-none focus:border-zinc-500"
                                   placeholder="Назва"
@@ -1311,25 +1442,22 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                                 <input
                                   type="text"
                                   value={val}
-                                  onChange={e => {
-                                    const params = { ...(ov.custom_params ?? {}), [key]: e.target.value }
-                                    setOverride(p.id, 'custom_params', params)
-                                  }}
+                                  onChange={e => setParam(key, e.target.value)}
                                   className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-zinc-500"
                                   placeholder="Значення"
                                 />
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    const params = { ...(ov.custom_params ?? {}) }
-                                    delete params[key]
-                                    setOverride(p.id, 'custom_params', params)
-                                  }}
+                                  onClick={() => clearParam(key)}
                                   className="text-zinc-600 hover:text-red-400 text-xs px-1 transition-colors"
                                 >✕</button>
                               </div>
                             ))}
                           </div>
+                        )}
+
+                        {catAttrsExp.length === 0 && Object.keys(params).length === 0 && (
+                          <p className="text-[11px] text-zinc-600">Немає характеристик. Натисніть "+ Додати".</p>
                         )}
                       </div>
 
@@ -1380,7 +1508,8 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                         </div>
                       )}
                     </div>
-                  )}
+                    )
+                  })()}
                 </div>
               )
             })}
