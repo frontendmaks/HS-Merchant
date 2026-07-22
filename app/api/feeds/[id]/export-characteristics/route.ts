@@ -1,8 +1,9 @@
+import Anthropic from '@anthropic-ai/sdk'
 import { createServiceClient } from '@/lib/supabase/service'
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 
-// ── Inference helpers (mirrors FeedEditor.tsx logic) ──────────────────────────
+// ── Regex inference helpers ───────────────────────────────────────────────────
 
 function inferType(name: string, allowedValues: string[] = []): string | null {
   const n = name.toLowerCase()
@@ -108,6 +109,88 @@ function fixTypObr(v: string): string {
   return TYP_OBR_FIX[v] ?? (VALID_TYP_OBR.has(v) ? v : 'Охолоджені')
 }
 
+// ── Claude AI inference ───────────────────────────────────────────────────────
+
+const META_SKIP = new Set(['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад', 'Гарантія', 'Тип обробки'])
+
+async function claudeInferBatch(
+  anthropic: Anthropic,
+  categoryTitle: string,
+  catAttrs: { name: string; values: string[] }[],
+  products: { id: string; name: string; description: string; params: Record<string, string> }[],
+): Promise<Record<string, Record<string, string>>> {
+  const fillableAttrs = catAttrs.filter(a => !META_SKIP.has(a.name) && a.name !== 'Вага' && a.name !== 'Упаковка')
+
+  // Find products that have at least one empty fillable attribute
+  const needsFill = products.filter(p =>
+    fillableAttrs.some(a => !p.params[a.name])
+  )
+  if (!needsFill.length) return {}
+
+  const attrsDesc = fillableAttrs.map(a =>
+    a.values?.length
+      ? `- ${a.name}: [${a.values.join(', ')}]`
+      : `- ${a.name}: (довільний текст)`
+  ).join('\n')
+
+  const productsJson = JSON.stringify(needsFill.map(p => ({
+    id: p.id,
+    name: p.name,
+    description: p.description || null,
+    // Pass already-filled params so Claude can use them as context
+    already_filled: Object.fromEntries(
+      fillableAttrs.filter(a => p.params[a.name]).map(a => [a.name, p.params[a.name]])
+    ),
+    // List which fields still need filling
+    fill_these: fillableAttrs.filter(a => !p.params[a.name]).map(a => a.name),
+  })))
+
+  const prompt = `Ти заповнюєш характеристики товарів для українського маркетплейсу МауДау.
+Категорія: "${categoryTitle}"
+
+Атрибути та допустимі значення:
+${attrsDesc}
+
+Правила:
+1. Якщо є допустимі значення у дужках [] — використовуй ТІЛЬКИ їх. Якщо кілька підходять — вибери найточніше одне.
+2. Для полів з "довільний текст" — пиши коротко і конкретно українською.
+3. Основу (м'ясо) визначай з назви: свинина, яловичина, курка, індичка, качка, кролик, баранина.
+4. Якщо не можеш визначити — поверни null для цього поля.
+5. Заповнюй ТІЛЬКИ поля зі списку fill_these для кожного товару.
+
+Товари:
+${productsJson}
+
+Поверни ТІЛЬКИ валідний JSON масив без жодних пояснень:
+[{"id": "...", "поле": "значення або null", ...}]`
+
+  const response = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 4096,
+    messages: [{ role: 'user', content: prompt }],
+  })
+
+  const text = (response.content[0] as { type: string; text: string }).text.trim()
+  // Extract JSON array from response (may have markdown code block)
+  const jsonMatch = text.match(/\[[\s\S]*\]/)
+  if (!jsonMatch) return {}
+
+  const result: Record<string, Record<string, string>> = {}
+  try {
+    const arr = JSON.parse(jsonMatch[0]) as { id: string; [key: string]: string | null }[]
+    for (const item of arr) {
+      const { id, ...fields } = item
+      result[id] = {}
+      for (const [k, v] of Object.entries(fields)) {
+        if (v && v !== 'null') result[id][k] = v
+      }
+    }
+  } catch {
+    // ignore parse errors, return empty
+  }
+  return result
+}
+
 // ── Route ─────────────────────────────────────────────────────────────────────
 
 export async function GET(
@@ -116,6 +199,7 @@ export async function GET(
 ) {
   const { id } = await params
   const supabase = createServiceClient()
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
   // 1. Feed + settings
   const { data: feed } = await supabase
@@ -128,13 +212,13 @@ export async function GET(
 
   const categoryPortalIds: Record<string, string> = feed.settings?.category_portal_ids ?? {}
 
-  // 2. Active feed products
+  // 2. Active feed products (include description)
   const { data: feedProducts } = await supabase
     .from('feed_products')
     .select(`
       custom_params,
       product:products (
-        external_id, name, brand, category_name, categories, attributes
+        external_id, name, description, brand, category_name, categories, attributes
       )
     `)
     .eq('feed_id', id)
@@ -144,7 +228,7 @@ export async function GET(
     return NextResponse.json({ error: 'No active products' }, { status: 404 })
   }
 
-  // 3. MauDau categories (slug + portal_id + attributes)
+  // 3. MauDau categories
   const { data: maudauCats } = await supabase
     .from('maudau_categories')
     .select('slug, title, portal_id, attributes')
@@ -169,8 +253,16 @@ export async function GET(
     return slugToPortalId[raw] ?? ''
   }
 
-  // 4. Build per-category product rows
-  const categorySheets = new Map<string, { title: string; attrs: { name: string; values: string[] }[]; rows: Record<string, string>[] }>()
+  // 4. First pass: regex inference — group by category
+  type ProductEntry = {
+    id: string
+    name: string
+    description: string
+    params: Record<string, string>
+    catAttrs: { name: string; values: string[] }[]
+    catTitle: string
+  }
+  const categoryGroups = new Map<string, { portalId: string; catTitle: string; catAttrs: { name: string; values: string[] }[]; products: ProductEntry[] }>()
 
   for (const fp of feedProducts) {
     const p = fp.product as any
@@ -179,6 +271,7 @@ export async function GET(
     const cp: Record<string, string> = fp.custom_params ?? {}
     const cats: string[] = p.categories ?? []
     const name: string = p.name ?? ''
+    const description: string = p.description ?? ''
     const productId: string = p.external_id ?? ''
 
     const portalId = resolvePortalId(p.category_name ?? '')
@@ -189,104 +282,131 @@ export async function GET(
     const hasAttr = (n: string) => catAttrs.some(a => a.name === n)
     const attrValues = (n: string): string[] => catAttrs.find(a => a.name === n)?.values ?? []
 
-    // Build merged params (custom_params + inferred)
     const params: Record<string, string> = { ...cp }
 
-    // Тип — re-infer from name with allowed values (overrides any previously stored value)
+    // Regex inference
     if (hasAttr('Тип')) {
       const allowed = attrValues('Тип')
       const mType = inferType(name, allowed)
-      // Use inferred if valid; otherwise keep existing only if it's in allowed list
       if (mType) {
         params['Тип'] = mType
       } else if (params['Тип'] && allowed.length && !allowed.includes(params['Тип'])) {
         delete params['Тип']
       }
     }
-
-    // Сорт
     if (hasAttr('Сорт') && !params['Сорт']) {
       const mSort = inferSort(name, attrValues('Сорт'))
       if (mSort) params['Сорт'] = mSort
     }
-
-    // Добавки
     if (hasAttr('Добавки') && !params['Добавки']) {
       const mDob = inferDobavky(name, attrValues('Добавки'))
       if (mDob) params['Добавки'] = mDob
     }
-
-    // Основа
     if (hasAttr('Основа') && !params['Основа']) {
       const mBase = inferBase(name, cats)
       if (mBase) params['Основа'] = mBase
     }
-
-    // Спосіб приготування
     if (hasAttr('Спосіб приготування') && !params['Спосіб приготування']) {
       const mCook = inferCookingMethods(params['Тип'] ?? null)
       if (mCook) params['Спосіб приготування'] = mCook
     }
-
-    // Тип обробки — normalize
     if (hasAttr('Тип обробки')) {
       params['Тип обробки'] = fixTypObr(params['Тип обробки'] ?? 'Охолоджений')
     }
-
-    // Вага — from product attributes if missing
     if (hasAttr('Вага') && !params['Вага'] && !params['Вага упаковки']) {
       const pAttrs = p.attributes ?? {}
       const unit = pAttrs['Одиниця'] ?? 'шт'
-      const minVal = parseFloat(pAttrs['Мін'] ?? '0') || null
-      if (minVal && ['кг', 'г', 'мл', 'л'].includes(unit)) {
-        params['Вага'] = unit === 'кг' && minVal < 1
-          ? `${Math.round(minVal * 1000)} г`
-          : `${minVal} ${unit}`
+      const wAttr = pAttrs['Вага']
+      if (wAttr) {
+        params['Вага'] = wAttr
+      } else {
+        const minVal = parseFloat(pAttrs['Мін'] ?? '0') || null
+        if (minVal && ['кг', 'г', 'мл', 'л'].includes(unit)) {
+          params['Вага'] = unit === 'кг' && minVal < 1
+            ? `${Math.round(minVal * 1000)} г`
+            : `${minVal} ${unit}`
+        }
       }
     }
-
-    // Гарантія
     if (!params['Гарантія']) {
       params['Гарантія'] = 'Відповідно до законодавства України'
     }
 
-    // Build row: id + category attributes
-    const META_SKIP = new Set(['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад'])
-    const row: Record<string, string> = { id: productId }
-    for (const attr of catAttrs) {
-      if (META_SKIP.has(attr.name)) continue
-      // For Вага: fallback to Вага упаковки; for all other attrs: only use their own value
-      const v = attr.name === 'Вага'
-        ? (params['Вага'] ?? params['Вага упаковки'] ?? '')
-        : (params[attr.name] ?? '')
-      row[attr.name] = v
+    if (!categoryGroups.has(catTitle)) {
+      categoryGroups.set(catTitle, { portalId, catTitle, catAttrs, products: [] })
     }
-
-    if (!categorySheets.has(catTitle)) {
-      categorySheets.set(catTitle, { title: catTitle, attrs: catAttrs.filter(a =>
-        !['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад'].includes(a.name)
-      ), rows: [] })
-    }
-    categorySheets.get(catTitle)!.rows.push(row)
+    categoryGroups.get(catTitle)!.products.push({ id: productId, name, description, params, catAttrs, catTitle })
   }
 
-  if (categorySheets.size === 0) {
+  if (categoryGroups.size === 0) {
     return NextResponse.json({ error: 'No products with mapped categories' }, { status: 404 })
   }
 
-  // 5. Build xlsx workbook — one sheet per category
-  const wb = XLSX.utils.book_new()
-
-  for (const [, sheet] of categorySheets) {
-    const headers = ['id', ...sheet.attrs.map(a => a.name)]
-    const wsData = [headers, ...sheet.rows.map(row => headers.map(h => row[h] ?? ''))]
-    const ws = XLSX.utils.aoa_to_sheet(wsData)
-    // Trim sheet name to 31 chars (Excel limit)
-    const sheetName = sheet.title.slice(0, 31)
-    XLSX.utils.book_append_sheet(wb, ws, sheetName)
+  // 5. Claude AI pass — per category, batches of 15
+  const BATCH_SIZE = 15
+  for (const [, group] of categoryGroups) {
+    const { catTitle, catAttrs, products } = group
+    for (let i = 0; i < products.length; i += BATCH_SIZE) {
+      const batch = products.slice(i, i + BATCH_SIZE)
+      try {
+        const aiResults = await claudeInferBatch(anthropic, catTitle, catAttrs, batch)
+        for (const product of batch) {
+          const aiFields = aiResults[product.id] ?? {}
+          for (const [k, v] of Object.entries(aiFields)) {
+            if (!product.params[k] && v) {
+              product.params[k] = v
+            }
+          }
+        }
+      } catch {
+        // Claude error — skip this batch, continue with what we have
+      }
+    }
   }
 
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+  // 6. Build xlsx workbook with cell styling
+  const wb = XLSX.utils.book_new()
+  const YELLOW = { fgColor: { rgb: 'FFFF00' }, patternType: 'solid' }
+
+  for (const [, group] of categoryGroups) {
+    const { catTitle, catAttrs, products } = group
+    const sheetAttrs = catAttrs.filter(a => !['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад'].includes(a.name))
+    const headers = ['id', ...sheetAttrs.map(a => a.name)]
+
+    const wsData: (string | null)[][] = [headers]
+    for (const product of products) {
+      const row = headers.map(h => {
+        if (h === 'id') return product.id
+        if (h === 'Вага') return product.params['Вага'] ?? product.params['Вага упаковки'] ?? null
+        return product.params[h] ?? null
+      })
+      wsData.push(row)
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData)
+
+    // Yellow highlight for empty non-id cells
+    for (let R = 1; R < wsData.length; R++) {
+      for (let C = 1; C < headers.length; C++) {
+        if (headers[C] === 'Гарантія') continue
+        const cellAddr = XLSX.utils.encode_cell({ r: R, c: C })
+        const val = wsData[R][C]
+        if (!val) {
+          ws[cellAddr] = { v: '', t: 's', s: { fill: YELLOW } }
+        }
+      }
+    }
+
+    // Update worksheet range to include empty styled cells
+    const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1')
+    range.e.r = Math.max(range.e.r, wsData.length - 1)
+    range.e.c = Math.max(range.e.c, headers.length - 1)
+    ws['!ref'] = XLSX.utils.encode_range(range)
+
+    XLSX.utils.book_append_sheet(wb, ws, catTitle.slice(0, 31))
+  }
+
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true })
 
   const now = new Date()
   const pad = (n: number) => String(n).padStart(2, '0')
