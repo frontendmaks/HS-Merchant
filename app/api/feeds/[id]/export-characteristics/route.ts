@@ -239,13 +239,16 @@ ${productsJson}
 
 // ── Route ─────────────────────────────────────────────────────────────────────
 
+export const maxDuration = 120
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
   const supabase = createServiceClient()
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const anthropicKey = process.env.ANTHROPIC_API_KEY
+  const anthropic = anthropicKey ? new Anthropic({ apiKey: anthropicKey }) : null
 
   // 1. Feed + settings
   const { data: feed } = await supabase
@@ -264,7 +267,7 @@ export async function GET(
     .select(`
       custom_params,
       product:products (
-        external_id, name, description, brand, category_name, categories, attributes
+        id, sku, external_id, name, description, brand, category_name, categories, attributes
       )
     `)
     .eq('feed_id', id)
@@ -318,7 +321,7 @@ export async function GET(
     const cats: string[] = p.categories ?? []
     const name: string = p.name ?? ''
     const description: string = p.description ?? ''
-    const productId: string = p.external_id ?? ''
+    const productId: string = p.sku || String(p.external_id || p.id || '')
 
     const portalId = resolvePortalId(p.category_name ?? '')
     if (!portalId) continue
@@ -394,24 +397,26 @@ export async function GET(
     return NextResponse.json({ error: 'No products with mapped categories' }, { status: 404 })
   }
 
-  // 5. Claude AI pass — per category, batches of 15
-  const BATCH_SIZE = 15
-  for (const [, group] of categoryGroups) {
-    const { catTitle, catAttrs, products } = group
-    for (let i = 0; i < products.length; i += BATCH_SIZE) {
-      const batch = products.slice(i, i + BATCH_SIZE)
-      try {
-        const aiResults = await claudeInferBatch(anthropic, catTitle, catAttrs, batch)
-        for (const product of batch) {
-          const aiFields = aiResults[product.id] ?? {}
-          for (const [k, v] of Object.entries(aiFields)) {
-            if (!product.params[k] && v) {
-              product.params[k] = v
+  // 5. Claude AI pass — per category, batches of 15 (only if API key available)
+  if (anthropic) {
+    const BATCH_SIZE = 15
+    for (const [, group] of categoryGroups) {
+      const { catTitle, catAttrs, products } = group
+      for (let i = 0; i < products.length; i += BATCH_SIZE) {
+        const batch = products.slice(i, i + BATCH_SIZE)
+        try {
+          const aiResults = await claudeInferBatch(anthropic, catTitle, catAttrs, batch)
+          for (const product of batch) {
+            const aiFields = aiResults[product.id] ?? {}
+            for (const [k, v] of Object.entries(aiFields)) {
+              if (!product.params[k] && v) {
+                product.params[k] = v
+              }
             }
           }
+        } catch {
+          // Claude error — skip this batch, continue with what we have
         }
-      } catch {
-        // Claude error — skip this batch, continue with what we have
       }
     }
   }

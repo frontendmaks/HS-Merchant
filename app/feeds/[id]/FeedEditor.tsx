@@ -156,6 +156,8 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [maudauCatsSource, setMaudauCatsSource] = useState<'db' | 'api' | ''>('')
   const [xlsxUploading, setXlsxUploading] = useState(false)
   const [xlsxMsg, setXlsxMsg] = useState('')
+  const [charXlsxLoading, setCharXlsxLoading] = useState(false)
+  const [charXlsxMsg, setCharXlsxMsg] = useState('')
   const [syncingCats, setSyncingCats] = useState(false)
   const [syncCatsMsg, setSyncCatsMsg] = useState('')
   const [syncingWC, setSyncingWC] = useState(false)
@@ -1125,13 +1127,38 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     >
                       📥 Експорт XLSX
                     </a>
-                    <a
-                      href={`/api/feeds/${feed.id}/export-characteristics`}
-                      download
-                      className="text-xs px-3 py-1.5 rounded-lg border border-blue-800 text-blue-300 hover:bg-blue-900/20 transition-colors whitespace-nowrap"
+                    <button
+                      disabled={charXlsxLoading}
+                      onClick={async () => {
+                        setCharXlsxLoading(true)
+                        setCharXlsxMsg('')
+                        try {
+                          const res = await fetch(`/api/feeds/${feed.id}/export-characteristics`)
+                          if (!res.ok) {
+                            const err = await res.json().catch(() => ({ error: `Помилка ${res.status}` }))
+                            setCharXlsxMsg(err.error ?? `Помилка ${res.status}`)
+                            return
+                          }
+                          const blob = await res.blob()
+                          const url = URL.createObjectURL(blob)
+                          const a = document.createElement('a')
+                          const cd = res.headers.get('content-disposition') ?? ''
+                          const nameMatch = cd.match(/filename="([^"]+)"/)
+                          a.href = url
+                          a.download = nameMatch?.[1] ?? 'characteristics.xlsx'
+                          a.click()
+                          URL.revokeObjectURL(url)
+                        } catch (e: any) {
+                          setCharXlsxMsg(e.message ?? 'Помилка завантаження')
+                        } finally {
+                          setCharXlsxLoading(false)
+                        }
+                      }}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-blue-800 text-blue-300 hover:bg-blue-900/20 transition-colors whitespace-nowrap disabled:opacity-50"
                     >
-                      📊 Характеристики XLSX
-                    </a>
+                      {charXlsxLoading ? '⏳ Формую...' : '📊 Характеристики XLSX'}
+                    </button>
+                    {charXlsxMsg && <span className="text-xs text-red-400">{charXlsxMsg}</span>}
                   </>
                 )}
               </div>
