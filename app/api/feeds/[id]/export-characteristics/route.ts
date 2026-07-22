@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk'
 import { createServiceClient } from '@/lib/supabase/service'
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
@@ -155,91 +154,9 @@ function closestWeight(rawWeight: string, allowedValues: string[]): string {
   return bestDiff < grams * 0.3 ? best : ''
 }
 
-// ── Claude AI inference ───────────────────────────────────────────────────────
-
-const META_SKIP = new Set(['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад', 'Гарантія', 'Тип обробки'])
-
-async function claudeInferBatch(
-  anthropic: Anthropic,
-  categoryTitle: string,
-  catAttrs: { name: string; values: string[] }[],
-  products: { id: string; name: string; description: string; params: Record<string, string> }[],
-): Promise<Record<string, Record<string, string>>> {
-  const fillableAttrs = catAttrs.filter(a => !META_SKIP.has(a.name) && a.name !== 'Вага' && a.name !== 'Упаковка')
-
-  // Find products that have at least one empty fillable attribute
-  const needsFill = products.filter(p =>
-    fillableAttrs.some(a => !p.params[a.name])
-  )
-  if (!needsFill.length) return {}
-
-  const attrsDesc = fillableAttrs.map(a =>
-    a.values?.length
-      ? `- ${a.name}: [${a.values.join(', ')}]`
-      : `- ${a.name}: (довільний текст)`
-  ).join('\n')
-
-  const productsJson = JSON.stringify(needsFill.map(p => ({
-    id: p.id,
-    name: p.name,
-    description: p.description || null,
-    // Pass already-filled params so Claude can use them as context
-    already_filled: Object.fromEntries(
-      fillableAttrs.filter(a => p.params[a.name]).map(a => [a.name, p.params[a.name]])
-    ),
-    // List which fields still need filling
-    fill_these: fillableAttrs.filter(a => !p.params[a.name]).map(a => a.name),
-  })))
-
-  const prompt = `Ти заповнюєш характеристики товарів для українського маркетплейсу МауДау.
-Категорія: "${categoryTitle}"
-
-Атрибути та допустимі значення:
-${attrsDesc}
-
-Правила:
-1. Якщо є допустимі значення у дужках [] — використовуй ТІЛЬКИ їх. Якщо кілька підходять — вибери найточніше одне.
-2. Для полів з "довільний текст" — пиши коротко і конкретно українською.
-3. Основу (м'ясо) визначай з назви: свинина, яловичина, курка, індичка, качка, кролик, баранина.
-4. Якщо не можеш визначити — поверни null для цього поля.
-5. Заповнюй ТІЛЬКИ поля зі списку fill_these для кожного товару.
-
-Товари:
-${productsJson}
-
-Поверни ТІЛЬКИ валідний JSON масив без жодних пояснень:
-[{"id": "...", "поле": "значення або null", ...}]`
-
-  const response = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 4096,
-    messages: [{ role: 'user', content: prompt }],
-  })
-
-  const text = (response.content[0] as { type: string; text: string }).text.trim()
-  // Extract JSON array from response (may have markdown code block)
-  const jsonMatch = text.match(/\[[\s\S]*\]/)
-  if (!jsonMatch) return {}
-
-  const result: Record<string, Record<string, string>> = {}
-  try {
-    const arr = JSON.parse(jsonMatch[0]) as { id: string; [key: string]: string | null }[]
-    for (const item of arr) {
-      const { id, ...fields } = item
-      result[id] = {}
-      for (const [k, v] of Object.entries(fields)) {
-        if (v && v !== 'null') result[id][k] = v
-      }
-    }
-  } catch {
-    // ignore parse errors, return empty
-  }
-  return result
-}
-
 // ── Route ─────────────────────────────────────────────────────────────────────
 
-export const maxDuration = 120
+export const maxDuration = 30
 
 export async function GET(
   _req: NextRequest,
@@ -247,8 +164,6 @@ export async function GET(
 ) {
   const { id } = await params
   const supabase = createServiceClient()
-  const anthropicKey = process.env.ANTHROPIC_API_KEY
-  const anthropic = anthropicKey ? new Anthropic({ apiKey: anthropicKey }) : null
 
   // 1. Feed + settings
   const { data: feed } = await supabase
@@ -397,29 +312,7 @@ export async function GET(
     return NextResponse.json({ error: 'No products with mapped categories' }, { status: 404 })
   }
 
-  // 5. Claude AI pass — per category, batches of 15 (only if API key available)
-  if (anthropic) {
-    const BATCH_SIZE = 15
-    for (const [, group] of categoryGroups) {
-      const { catTitle, catAttrs, products } = group
-      for (let i = 0; i < products.length; i += BATCH_SIZE) {
-        const batch = products.slice(i, i + BATCH_SIZE)
-        try {
-          const aiResults = await claudeInferBatch(anthropic, catTitle, catAttrs, batch)
-          for (const product of batch) {
-            const aiFields = aiResults[product.id] ?? {}
-            for (const [k, v] of Object.entries(aiFields)) {
-              if (!product.params[k] && v) {
-                product.params[k] = v
-              }
-            }
-          }
-        } catch {
-          // Claude error — skip this batch, continue with what we have
-        }
-      }
-    }
-  }
+  // (Claude AI pass removed — caused Vercel timeout; regex inference handles most fields)
 
   // 6. Build xlsx workbook with cell styling
   const wb = XLSX.utils.book_new()
