@@ -348,35 +348,72 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   // ── MauDau smart inference ──────────────────────────────────────────────
 
   // Infer type only for meat/seafood products (by exact word boundaries)
-  function inferType(name: string): string | null {
+  // allowedValues: список допустимих значень з MauDau категорії — тільки вони будуть повернуті
+  function inferType(name: string, allowedValues: string[] = []): string | null {
     const n = name.toLowerCase()
-    if (/\bстейк/.test(n)) return 'Стейк'
-    if (/фрикадел/.test(n)) return 'Фрикадельки'
-    if (/тефтел/.test(n)) return 'Тефтелі'
-    if (/котлет/.test(n)) return 'Котлети'
-    if (/шашлик/.test(n)) return 'Шашлик'
-    if (/кебаб/.test(n)) return 'Кебаб'
-    if (/люля/.test(n)) return 'Люля-кебаб'
-    if (/відбивн/.test(n)) return 'Відбивні'
-    if (/шніцел/.test(n)) return 'Шніцель'
-    if (/медальйон/.test(n)) return 'Медальйони'
-    if (/\bрулет\b/.test(n)) return 'Рулет'
-    if (/буженин/.test(n)) return 'Буженина'
-    if (/гуляш/.test(n)) return 'Гуляш'
-    if (/\bпаштет/.test(n)) return 'Паштети'
-    if (/карбонад/.test(n)) return 'Карбонад'
-    if (/сосис|сарделк/.test(n)) return 'Сосиски для гриля'
-    if (/\bребр/.test(n)) return 'Ребра'
-    if (/фарш(?![а-яіїєьА-ЯІЇЄ])/.test(n)) return 'Фарш'  // не "фарширований" (за фарш не йде кирилична літера)
-    if (/нагетс/.test(n)) return 'Нагетси'
-    if (/стрипс/.test(n)) return 'Стрипси'
-    if (/\bрулька/.test(n)) return 'Рулька'
-    if (/\bфіле\b/.test(n)) return 'Філе'
-    if (/грудк/.test(n)) return 'Грудка'
-    if (/стегн/.test(n)) return 'Стегно'
-    if (/крильц|крило/.test(n)) return 'Крила'
-    if (/голінк/.test(n)) return 'Гомілка'
+    const allowed = new Set(allowedValues)
+    const pick = (v: string) => (!allowed.size || allowed.has(v)) ? v : null
+
+    // Ковбаси types
+    if (/сирокопчен/.test(n)) return pick('Сирокопчена')
+    if (/сиров.ял/.test(n)) return pick("Сиров'ялена")
+    if (/варено-копчен/.test(n)) return pick('Варено-копчена')
+    if (/напівкопчен/.test(n)) return pick('Напівкопчена')
+    if (/\bкопчен/.test(n)) return pick('Копчена')
+    if (/\bварен/.test(n)) return pick('Варена')
+    if (/смажен/.test(n)) return pick('Смажена')
+
+    // М'ясні напівфабрикати types
+    if (/\bстейк/.test(n)) return pick('Стейк')
+    if (/биточк/.test(n)) return pick('Биточки')
+    if (/фрикадел|мітбол/.test(n)) return pick('Фрикадельки') || pick('Мітболи')
+    if (/тефтел/.test(n)) return pick('Тефтелі')
+    if (/котлет/.test(n)) return pick('Котлети')
+    if (/шашлик/.test(n)) return pick('Шашлик')
+    if (/кебаб|люля/.test(n)) return pick('Кебаби')
+    if (/\bпаштет/.test(n)) return pick('Паштети')
+    if (/сосис|сарделк/.test(n)) return pick('Сосиски для гриля')
+    if (/\bребр/.test(n)) return pick('Ребра')
+    if (/фарш(?![а-яіїєьА-ЯІЇЄ])/.test(n)) return pick('Фарш')
+    if (/нагетс/.test(n)) return pick('Нагетси')
+    if (/крильц|крило/.test(n)) return pick('Крильця')
+    if (/голінк|гомілк/.test(n)) return pick('Гомілки')
+    if (/\bкаре\b/.test(n)) return pick('Каре')
+    if (/щічк/.test(n)) return pick('Щічки')
+    if (/біфстроганов/.test(n)) return pick('Біфстроганов')
+    if (/нарізк/.test(n)) return pick("М'ясна нарізка")
     return null
+  }
+
+  // Сорт: Салямі, Пепероні, Чорізо тощо (для Ковбаси)
+  function inferSort(name: string, allowedValues: string[]): string | null {
+    if (!allowedValues.length) return null
+    const n = name.toLowerCase()
+    const allowed = new Set(allowedValues)
+    if (/салям/.test(n) && allowed.has('Салямі')) return 'Салямі'
+    if (/пепероні/.test(n) && allowed.has('Пепероні')) return 'Пепероні'
+    if (/фует/.test(n) && allowed.has('Фует')) return 'Фует'
+    if (/сальчичон/.test(n) && allowed.has('Сальчичон')) return 'Сальчичон'
+    if (/чорізо/.test(n) && allowed.has('Чорізо')) return 'Чорізо'
+    return null
+  }
+
+  // Добавки: multiselect, значення через кому
+  function inferDobavky(name: string, allowedValues: string[]): string | null {
+    if (!allowedValues.length) return null
+    const n = name.toLowerCase()
+    const allowed = new Set(allowedValues)
+    const found: string[] = []
+    if (/горіх/.test(n) && allowed.has('Горіхи')) found.push('Горіхи')
+    if (/гриб/.test(n) && allowed.has('Гриби')) found.push('Гриби')
+    if (/зелен/.test(n) && allowed.has('Зелень')) found.push('Зелень')
+    if (/оливк/.test(n) && allowed.has('Оливки')) found.push('Оливки')
+    if (/паприк/.test(n) && allowed.has('Паприка')) found.push('Паприка')
+    if (/\bтрав/.test(n) && allowed.has('Трави')) found.push('Трави')
+    if (/сир(?!окопч|ов.ял)/.test(n) && allowed.has('Сир')) found.push('Сир')
+    if (/перц/.test(n) && allowed.has('Перець')) found.push('Перець')
+    if (/інжир/.test(n) && allowed.has('Інжир')) found.push('Інжир')
+    return found.length ? found.join(', ') : null
   }
 
   function inferBase(name: string, categories: string[]): string | null {
@@ -536,12 +573,31 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           auto['Тип обробки'] = inferProcessing(p.name, cats)
         }
 
-        // Тип — перераховуємо inference; якщо результат null або категорія не підтримує — видаляємо
+        // Тип — передаємо allowed values щоб inferType повернув тільки значення з категорії
         delete existing['Тип']
         if (hasAttr('Тип')) {
-          const mType = inferType(p.name)
+          const typeAttr = catAttrs.find((a: any) => a.name === 'Тип')
+          const allowedTypes: string[] = typeAttr?.values ?? []
+          const mType = inferType(p.name, allowedTypes)
           if (mType) auto['Тип'] = mType
-          // якщо mType === null — поле просто не буде додане (видалене з existing вище)
+        }
+
+        // Сорт (Салямі, Пепероні і т.д.) — перераховуємо
+        delete existing['Сорт']
+        if (hasAttr('Сорт')) {
+          const sortAttr = catAttrs.find((a: any) => a.name === 'Сорт')
+          const allowedSorts: string[] = sortAttr?.values ?? []
+          const mSort = inferSort(p.name, allowedSorts)
+          if (mSort) auto['Сорт'] = mSort
+        }
+
+        // Добавки (Горіхи, Сир і т.д.) — перераховуємо
+        delete existing['Добавки']
+        if (hasAttr('Добавки')) {
+          const dobAttr = catAttrs.find((a: any) => a.name === 'Добавки')
+          const allowedDob: string[] = dobAttr?.values ?? []
+          const mDob = inferDobavky(p.name, allowedDob)
+          if (mDob) auto['Добавки'] = mDob
         }
 
         // Основа — перераховуємо; якщо null або категорія не підтримує — видаляємо
@@ -1011,6 +1067,13 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                       className="text-xs px-3 py-1.5 rounded-lg border border-emerald-800 text-emerald-300 hover:bg-emerald-900/20 transition-colors whitespace-nowrap"
                     >
                       📥 Експорт XLSX
+                    </a>
+                    <a
+                      href={`/api/feeds/${feed.id}/export-characteristics`}
+                      download
+                      className="text-xs px-3 py-1.5 rounded-lg border border-blue-800 text-blue-300 hover:bg-blue-900/20 transition-colors whitespace-nowrap"
+                    >
+                      📊 Характеристики XLSX
                     </a>
                   </>
                 )}
