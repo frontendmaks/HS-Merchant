@@ -256,7 +256,8 @@ export async function GET(
     const cats: string[] = p.categories ?? []
     const name: string = p.name ?? ''
     const description: string = p.description ?? ''
-    const productId: string = p.sku || String(p.external_id || p.id || '')
+    // MauDau requires their own internal product ID (= our external_id from WooCommerce sync)
+    const productId: string = String(p.external_id || p.id || '')
 
     const portalId = resolvePortalId(p.category_name ?? '')
     if (!portalId) continue
@@ -316,10 +317,10 @@ export async function GET(
         if (matched) params['Вага'] = matched
       }
     }
-    // Гарантія — pick first allowed value from MauDau (e.g. '<p>24 міс</p>')
-    if (!params['Гарантія'] && hasAttr('Гарантія')) {
+    // Гарантія — always use first MauDau allowed value (strip HTML tags)
+    if (hasAttr('Гарантія')) {
       const firstVal = catAttrs.find(a => a.name === 'Гарантія')?.values?.[0]
-      if (firstVal) params['Гарантія'] = firstVal
+      if (firstVal) params['Гарантія'] = firstVal.replace(/<[^>]+>/g, '').trim()
     }
 
     if (!categoryGroups.has(catTitle)) {
@@ -341,29 +342,25 @@ export async function GET(
   for (const [, group] of categoryGroups) {
     const { catTitle, catAttrs, products } = group
     const sheetAttrs = catAttrs.filter(a => !['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад'].includes(a.name))
-    // Row 1: technical slug headers (MauDau format: s.{slug})
+    // Row 1: technical slug headers — first column 'id' = MauDau internal product ID
     const colKeys = sheetAttrs.map(a => a.name)
-    const headers = ['vendor_code', ...colKeys.map(attrColName)]
+    const headers = ['id', ...colKeys.map(attrColName)]
 
-    // Row 2: human-readable Ukrainian names
-    const displayRow = ['Артикул продавця', ...colKeys]
-
-    const wsData: (string | null)[][] = [headers, displayRow]
+    const wsData: (string | null)[][] = [headers]
     for (const product of products) {
-      const row = ['vendor_code' as string | null, ...colKeys.map(k => {
+      const row: (string | null)[] = [product.id, ...colKeys.map(k => {
         if (k === 'Вага') return product.params['Вага'] ?? product.params['Вага упаковки'] ?? null
         return product.params[k] ?? null
       })]
-      row[0] = product.id
       wsData.push(row)
     }
 
     const ws = XLSX.utils.aoa_to_sheet(wsData)
 
-    // Yellow highlight for empty cells in product rows (skip header rows 0 and 1)
-    for (let R = 2; R < wsData.length; R++) {
+    // Yellow highlight for empty cells in product rows (skip header row 0)
+    for (let R = 1; R < wsData.length; R++) {
       for (let C = 1; C < headers.length; C++) {
-        if (displayRow[C] === 'Гарантія') continue
+        if (colKeys[C - 1] === 'Гарантія') continue
         const cellAddr = XLSX.utils.encode_cell({ r: R, c: C })
         const val = wsData[R][C]
         if (!val) {
