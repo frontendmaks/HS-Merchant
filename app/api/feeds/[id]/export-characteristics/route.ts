@@ -108,6 +108,26 @@ function fixTypObr(v: string): string {
   return TYP_OBR_FIX[v] ?? (VALID_TYP_OBR.has(v) ? v : 'Охолоджені')
 }
 
+// ── MauDau column slug ────────────────────────────────────────────────────────
+
+const UA_TRANSLIT: Record<string, string> = {
+  'а':'a','б':'b','в':'v','г':'h','ґ':'g','д':'d','е':'e','є':'ye','ж':'zh','з':'z',
+  'и':'y','і':'i','ї':'yi','й':'y','к':'k','л':'l','м':'m','н':'n','о':'o',
+  'п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f','х':'kh','ц':'ts','ч':'ch',
+  'ш':'sh','щ':'shch','ь':'','ю':'yu','я':'ya',
+}
+function attrToSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .split('').map(c => UA_TRANSLIT[c] ?? c)
+    .join('')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+function attrColName(name: string): string {
+  return `s.${attrToSlug(name)}`
+}
+
 // ── Weight helpers ────────────────────────────────────────────────────────────
 
 function parseGrams(s: string): number | null {
@@ -321,24 +341,29 @@ export async function GET(
   for (const [, group] of categoryGroups) {
     const { catTitle, catAttrs, products } = group
     const sheetAttrs = catAttrs.filter(a => !['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад'].includes(a.name))
-    const headers = ['vendor_code', ...sheetAttrs.map(a => a.name)]
+    // Row 1: technical slug headers (MauDau format: s.{slug})
+    const colKeys = sheetAttrs.map(a => a.name)
+    const headers = ['vendor_code', ...colKeys.map(attrColName)]
 
-    const wsData: (string | null)[][] = [headers]
+    // Row 2: human-readable Ukrainian names
+    const displayRow = ['Артикул продавця', ...colKeys]
+
+    const wsData: (string | null)[][] = [headers, displayRow]
     for (const product of products) {
-      const row = headers.map(h => {
-        if (h === 'vendor_code') return product.id
-        if (h === 'Вага') return product.params['Вага'] ?? product.params['Вага упаковки'] ?? null
-        return product.params[h] ?? null
-      })
+      const row = ['vendor_code' as string | null, ...colKeys.map(k => {
+        if (k === 'Вага') return product.params['Вага'] ?? product.params['Вага упаковки'] ?? null
+        return product.params[k] ?? null
+      })]
+      row[0] = product.id
       wsData.push(row)
     }
 
     const ws = XLSX.utils.aoa_to_sheet(wsData)
 
-    // Yellow highlight for empty non-id cells
-    for (let R = 1; R < wsData.length; R++) {
+    // Yellow highlight for empty cells in product rows (skip header rows 0 and 1)
+    for (let R = 2; R < wsData.length; R++) {
       for (let C = 1; C < headers.length; C++) {
-        if (headers[C] === 'Гарантія') continue
+        if (displayRow[C] === 'Гарантія') continue
         const cellAddr = XLSX.utils.encode_cell({ r: R, c: C })
         const val = wsData[R][C]
         if (!val) {
