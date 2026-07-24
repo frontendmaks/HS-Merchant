@@ -1,5 +1,6 @@
 'use client'
-import { useState, useTransition, useMemo, useEffect } from 'react'
+import { useState, useTransition, useMemo, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 
 type Product = {
@@ -55,7 +56,119 @@ type Override = {
   custom_params?: Record<string, string>
 }
 
-/** Searchable MauDau category picker — inline expand (no absolute, works inside overflow containers) */
+/** Floating searchable select — renders panel via portal so it's never clipped by overflow containers */
+function SearchableSelect({
+  value, options, onChange, placeholder = '— Обрати —', emptyLabel, isEmpty, accentColor = 'zinc',
+}: {
+  value: string
+  options: { value: string; label: string }[]
+  onChange: (v: string) => void
+  placeholder?: string
+  emptyLabel?: string
+  isEmpty?: boolean
+  accentColor?: 'zinc' | 'purple' | 'amber'
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({})
+  const triggerRef = useRef<HTMLButtonElement>(null)
+
+  const selectedLabel = options.find(o => o.value === value)?.label ?? ''
+
+  const filtered = search.trim()
+    ? options.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))
+    : options
+
+  const openPanel = () => {
+    if (!triggerRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - rect.bottom
+    const panelH = Math.min(300, filtered.length * 28 + 56)
+    const showAbove = spaceBelow < panelH && rect.top > panelH
+    setPanelStyle({
+      position: 'fixed',
+      left: rect.left,
+      width: Math.max(rect.width, 220),
+      zIndex: 9999,
+      ...(showAbove ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }),
+    })
+    setSearch('')
+    setOpen(true)
+  }
+
+  const borderClass = isEmpty
+    ? 'border-amber-600 hover:border-amber-400'
+    : accentColor === 'purple'
+      ? 'border-zinc-700 hover:border-purple-500'
+      : 'border-zinc-700 hover:border-zinc-500'
+
+  const bgClass = isEmpty ? 'bg-amber-950/30' : 'bg-zinc-800'
+  const textClass = isEmpty ? 'text-amber-200' : 'text-zinc-200'
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={openPanel}
+        className={`w-full flex items-center justify-between gap-1 rounded px-2 py-1 text-[11px] text-left focus:outline-none transition-colors ${bgClass} border ${borderClass} ${textClass}`}
+      >
+        <span className="truncate flex-1">{selectedLabel || <span className="text-zinc-500">{placeholder}</span>}</span>
+        <span className="text-zinc-500 shrink-0 text-[9px]">▼</span>
+      </button>
+
+      {open && typeof document !== 'undefined' && createPortal(
+        <>
+          <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={() => setOpen(false)} />
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl overflow-hidden flex flex-col"
+            style={{ ...panelStyle, maxHeight: 300 }}
+          >
+            <div className="p-1.5 border-b border-zinc-800 shrink-0">
+              <input
+                autoFocus
+                type="text"
+                placeholder="Пошук..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape') setOpen(false) }}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-zinc-500"
+              />
+            </div>
+            <ul className="overflow-y-auto flex-1">
+              {emptyLabel && (
+                <li>
+                  <button type="button"
+                    className="w-full text-left px-2 py-1.5 text-[11px] text-zinc-500 hover:bg-zinc-800 transition-colors"
+                    onClick={() => { onChange(''); setOpen(false) }}
+                  >{emptyLabel}</button>
+                </li>
+              )}
+              {filtered.length === 0 && (
+                <li className="px-2 py-3 text-xs text-zinc-600 text-center">Нічого не знайдено</li>
+              )}
+              {filtered.map((o, i) => (
+                <li key={i}>
+                  <button type="button"
+                    onClick={() => { onChange(o.value); setOpen(false) }}
+                    className={`w-full text-left px-2 py-1.5 text-[11px] hover:bg-zinc-800 transition-colors ${
+                      o.value === value
+                        ? accentColor === 'purple' ? 'text-purple-400 font-medium' : 'text-emerald-400 font-medium'
+                        : 'text-zinc-200'
+                    }`}
+                  >{o.label}</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </>,
+        document.body
+      )}
+    </>
+  )
+}
+
+/** MauDau category picker — uses SearchableSelect */
 function MauDauCatDropdown({
   value, maudauCategories, onChange,
 }: {
@@ -63,72 +176,16 @@ function MauDauCatDropdown({
   maudauCategories: { slug: string; title: string; portal_id?: string }[]
   onChange: (v: string) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState('')
-
-  const selectedCat = maudauCategories.find(c => c.slug === value || c.portal_id === value)
-  const displayLabel = selectedCat ? selectedCat.title : '— оберіть —'
-
-  const filtered = search.trim()
-    ? maudauCategories.filter(c =>
-        c.title.toLowerCase().includes(search.toLowerCase()) ||
-        c.slug.toLowerCase().includes(search.toLowerCase())
-      )
-    : maudauCategories
-
+  const options = maudauCategories.map(c => ({ value: c.slug, label: c.title }))
   return (
-    <div className="w-full">
-      {/* Trigger button */}
-      <button
-        type="button"
-        onClick={() => { setOpen(o => !o); setSearch('') }}
-        className={`w-full bg-zinc-800 border rounded px-2 py-1 text-xs text-left focus:outline-none flex items-center justify-between gap-1 transition-colors ${
-          open ? 'border-purple-600 text-white' : 'border-zinc-700 text-zinc-200 hover:border-zinc-500'
-        }`}
-      >
-        <span className="truncate flex-1">{displayLabel}</span>
-        <span className="text-zinc-500 shrink-0 text-[10px]">{open ? '▲' : '▼'}</span>
-      </button>
-
-      {/* Inline panel */}
-      {open && (
-        <div className="mt-1 bg-zinc-900 border border-purple-800/60 rounded-lg overflow-hidden shadow-lg">
-          <div className="p-1.5 border-b border-zinc-800">
-            <input
-              autoFocus
-              type="text"
-              placeholder="Пошук категорії MauDau…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500"
-            />
-          </div>
-          <ul className="max-h-48 overflow-y-auto">
-            <li>
-              <button
-                type="button"
-                className="w-full text-left px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-800"
-                onClick={() => { onChange(''); setOpen(false) }}
-              >— прибрати вибір —</button>
-            </li>
-            {filtered.length === 0 && (
-              <li className="px-2 py-2 text-xs text-zinc-600 text-center">Нічого не знайдено</li>
-            )}
-            {filtered.map(mc => (
-              <li key={mc.slug}>
-                <button
-                  type="button"
-                  onClick={() => { onChange(mc.slug); setOpen(false); setSearch('') }}
-                  className={`w-full text-left px-2 py-1.5 text-xs hover:bg-zinc-800 ${
-                    (mc.slug === value || mc.portal_id === value) ? 'text-purple-400 font-medium' : 'text-zinc-200'
-                  }`}
-                >{mc.title}</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
+    <SearchableSelect
+      value={value}
+      options={options}
+      onChange={onChange}
+      placeholder="— оберіть —"
+      emptyLabel="— прибрати вибір —"
+      accentColor="purple"
+    />
   )
 }
 
@@ -1579,20 +1636,16 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                                     </span>
                                     <span className="text-zinc-600 text-xs shrink-0">:</span>
                                     {hasDropdown ? (
-                                      <select
-                                        value={val}
-                                        onChange={e => setParam(attr.name, e.target.value)}
-                                        className={`flex-1 min-w-0 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none cursor-pointer ${
-                                          isEmpty
-                                            ? 'bg-amber-950/30 border border-amber-600 focus:border-amber-400'
-                                            : 'bg-zinc-800 border border-zinc-700 focus:border-zinc-500'
-                                        }`}
-                                      >
-                                        <option value="">— Обрати —</option>
-                                        {rawValues.map((v: string, i: number) => (
-                                          <option key={i} value={v}>{stripHtml(v)}</option>
-                                        ))}
-                                      </select>
+                                      <div className="flex-1 min-w-0">
+                                        <SearchableSelect
+                                          value={val}
+                                          options={rawValues.map((rv: string) => ({ value: rv, label: stripHtml(rv) }))}
+                                          onChange={v => setParam(attr.name, v)}
+                                          placeholder="— Обрати —"
+                                          emptyLabel="— прибрати —"
+                                          isEmpty={isEmpty}
+                                        />
+                                      </div>
                                     ) : (
                                       <input
                                         type="text"
@@ -1827,16 +1880,16 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                                   <span className="w-36 shrink-0 text-[11px] text-zinc-400 truncate">{attr.name}</span>
                                   <span className="text-zinc-600 text-xs shrink-0">:</span>
                                   {hasDropdown ? (
-                                    <select
-                                      value={sampleVal}
-                                      onChange={e => setCatDefaultAndApply(cat, resolvedPortalId, attr.name, e.target.value)}
-                                      className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-purple-500"
-                                    >
-                                      <option value="">— Обрати —</option>
-                                      {attr.values.map((v, i) => (
-                                        <option key={i} value={v}>{v.replace(/<[^>]+>/g, '').trim()}</option>
-                                      ))}
-                                    </select>
+                                    <div className="flex-1">
+                                      <SearchableSelect
+                                        value={sampleVal}
+                                        options={attr.values.map((v: string) => ({ value: v, label: v.replace(/<[^>]+>/g, '').trim() }))}
+                                        onChange={v => setCatDefaultAndApply(cat, resolvedPortalId, attr.name, v)}
+                                        placeholder="— Обрати —"
+                                        emptyLabel="— прибрати —"
+                                        accentColor="purple"
+                                      />
+                                    </div>
                                   ) : (
                                     <input
                                       type="text"
