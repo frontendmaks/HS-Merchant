@@ -348,7 +348,7 @@ export async function GET(
       const body = await r.json()
       const items: any[] = Array.isArray(body) ? body : (body.products ?? body.data?.products ?? body.items ?? [])
       for (const item of items) {
-        const vc = item.vendor_code ?? item.article ?? item.vendorCode ?? ''
+        const vc = item.sku_main ?? item.vendor_code ?? item.article ?? item.vendorCode ?? ''
         const mid = String(item.id ?? item.product_id ?? '')
         if (vc && mid) vendorToMaudauId[vc] = mid
       }
