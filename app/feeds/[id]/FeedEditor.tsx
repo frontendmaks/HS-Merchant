@@ -1004,6 +1004,9 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         )}
       </div>
 
+      {/* Access stats — compact accordion row */}
+      <FeedAccessStats feedId={feed.id} />
+
       {/* === PRODUCTS TABLE (full width) === */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col">
 
@@ -1621,7 +1624,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
       {/* MauDau: Category portal_id mapping */}
       {isMaudau && (
-        <div className="bg-zinc-900 border border-purple-900/50 rounded-xl p-4">
+        <div className="bg-zinc-900 border border-purple-900/50 rounded-xl p-4 w-1/2 min-w-[320px]">
           {/* Header row */}
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
@@ -1778,8 +1781,6 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
       )}
 
 
-      {/* Access stats */}
-      <FeedAccessStats feedId={feed.id} />
     </div>
   )
 }
@@ -1787,6 +1788,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 function FeedAccessStats({ feedId }: { feedId: string }) {
   const [logs, setLogs] = useState<{ accessed_at: string; offers_count: number | null; errors_count: number | null; errors: string[] | null; auto_synced: boolean }[]>([])
   const [loading, setLoading] = useState(true)
+  const [open, setOpen] = useState(false)
   const [expandedLog, setExpandedLog] = useState<number | null>(null)
 
   useEffect(() => {
@@ -1798,12 +1800,6 @@ function FeedAccessStats({ feedId }: { feedId: string }) {
   }, [feedId])
 
   if (loading) return null
-  if (logs.length === 0) return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-      <h2 className="text-sm font-semibold text-white mb-1">📊 Статистика звернень</h2>
-      <p className="text-xs text-zinc-600">Фід ще не відкривався</p>
-    </div>
-  )
 
   const now = Date.now()
   const day = 24 * 60 * 60 * 1000
@@ -1818,59 +1814,65 @@ function FeedAccessStats({ feedId }: { feedId: string }) {
   }
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-      <h2 className="text-sm font-semibold text-white mb-4">📊 Статистика звернень</h2>
+    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+      {/* Compact header row — same height as settings bar */}
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex flex-wrap items-center gap-4 px-4 py-3 hover:bg-zinc-800/40 transition-colors text-left"
+      >
+        <span className="text-xs font-medium text-zinc-300 whitespace-nowrap">📊 Статистика звернень</span>
+        <div className="w-px h-4 bg-zinc-700 hidden sm:block" />
+        <span className="text-xs text-zinc-500 whitespace-nowrap">
+          За 24 год: <span className="text-white font-medium">{countDay}</span>
+        </span>
+        <span className="text-xs text-zinc-500 whitespace-nowrap">
+          За 7 днів: <span className="text-white font-medium">{countWeek}</span>
+        </span>
+        {totalErrors > 0 && (
+          <span className="text-xs text-red-400 whitespace-nowrap">⚠ {totalErrors} помилок</span>
+        )}
+        {logs.length === 0 && (
+          <span className="text-xs text-zinc-600">Фід ще не відкривався</span>
+        )}
+        <span className="ml-auto text-zinc-600 text-xs">{open ? '▲' : '▼'}</span>
+      </button>
 
-      {/* Summary */}
-      <div className="grid grid-cols-3 gap-4 mb-5">
-        <div className="bg-zinc-800 rounded-lg p-3 text-center">
-          <div className="text-xl font-bold text-white">{countDay}</div>
-          <div className="text-xs text-zinc-500 mt-0.5">за 24 год</div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-3 text-center">
-          <div className="text-xl font-bold text-white">{countWeek}</div>
-          <div className="text-xs text-zinc-500 mt-0.5">за 7 днів</div>
-        </div>
-        <div className="bg-zinc-800 rounded-lg p-3 text-center">
-          <div className={`text-xl font-bold ${totalErrors > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-            {totalErrors > 0 ? totalErrors : '0'}
-          </div>
-          <div className="text-xs text-zinc-500 mt-0.5">помилок</div>
-        </div>
-      </div>
-
-      {/* Recent log */}
-      <div className="text-xs text-zinc-500 mb-2">Останні 10 звернень</div>
-      <div className="space-y-1">
-        {logs.slice(0, 10).map((l, i) => (
-          <div key={i} className="border-b border-zinc-800 last:border-0">
-            <div className="flex items-center gap-3 text-xs py-1.5">
-              <span className="font-mono text-zinc-400 w-28 shrink-0">{fmt(l.accessed_at)}</span>
-              <span className="text-zinc-300">{l.offers_count ?? '?'} товарів</span>
-              {(l.errors_count ?? 0) > 0 ? (
-                <button
-                  onClick={() => setExpandedLog(expandedLog === i ? null : i)}
-                  className="text-red-400 hover:text-red-300 transition-colors"
-                >
-                  ⚠ {l.errors_count} помилок {expandedLog === i ? '▲' : '▼'}
-                </button>
-              ) : (
-                <span className="text-emerald-600 text-[10px]">✓ OK</span>
-              )}
-              {l.auto_synced && (
-                <span className="text-emerald-500 ml-auto">🔄 WC синк</span>
-              )}
-            </div>
-            {expandedLog === i && (l.errors ?? []).length > 0 && (
-              <div className="mb-2 ml-28 bg-red-950/30 border border-red-900/40 rounded p-2 space-y-0.5">
-                {(l.errors ?? []).map((e, j) => (
-                  <div key={j} className="text-[11px] text-red-300 font-mono">{e}</div>
-                ))}
+      {/* Dropdown: last 10 requests */}
+      {open && logs.length > 0 && (
+        <div className="border-t border-zinc-800 px-4 py-3">
+          <div className="text-[10px] text-zinc-600 uppercase tracking-wide mb-2">Останні 10 звернень</div>
+          <div className="space-y-0.5">
+            {logs.slice(0, 10).map((l, i) => (
+              <div key={i} className="border-b border-zinc-800/60 last:border-0">
+                <div className="flex items-center gap-3 text-xs py-1.5">
+                  <span className="font-mono text-zinc-400 w-28 shrink-0">{fmt(l.accessed_at)}</span>
+                  <span className="text-zinc-300">{l.offers_count ?? '?'} товарів</span>
+                  {(l.errors_count ?? 0) > 0 ? (
+                    <button
+                      onClick={e => { e.stopPropagation(); setExpandedLog(expandedLog === i ? null : i) }}
+                      className="text-red-400 hover:text-red-300 transition-colors"
+                    >
+                      ⚠ {l.errors_count} помилок {expandedLog === i ? '▲' : '▼'}
+                    </button>
+                  ) : (
+                    <span className="text-emerald-600 text-[10px]">✓ OK</span>
+                  )}
+                  {l.auto_synced && (
+                    <span className="text-emerald-500 ml-auto text-[10px]">🔄 WC синк</span>
+                  )}
+                </div>
+                {expandedLog === i && (l.errors ?? []).length > 0 && (
+                  <div className="mb-2 ml-28 bg-red-950/30 border border-red-900/40 rounded p-2 space-y-0.5">
+                    {(l.errors ?? []).map((e, j) => (
+                      <div key={j} className="text-[11px] text-red-300 font-mono">{e}</div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
