@@ -1469,11 +1469,15 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                                   >{translating[`${p.id}:description_ru`] ? '⏳' : '🔄'}</button>
                                 </div>
                                 <textarea
-                                  rows={2}
                                   placeholder="Опис рос. мовою..."
                                   value={ov.description_ru ?? ''}
-                                  onChange={e => setOverride(p.id, 'description_ru', e.target.value)}
-                                  className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600 resize-none"
+                                  onChange={e => {
+                                    e.target.style.height = 'auto'
+                                    e.target.style.height = e.target.scrollHeight + 'px'
+                                    setOverride(p.id, 'description_ru', e.target.value)
+                                  }}
+                                  ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' } }}
+                                  className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600 resize-none overflow-hidden"
                                 />
                               </div>
                             </div>
@@ -1495,28 +1499,67 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                           </div>
 
                           {/* Per-product MauDau category override */}
-                          {isMaudau && (
-                            <div className="flex items-center gap-2 mb-3">
-                              <span className="text-[11px] text-zinc-400 whitespace-nowrap shrink-0 w-28">MauDau кат.:</span>
-                              <select
-                                value={curParams['_maudau_category'] ?? ''}
-                                onChange={e => {
-                                  const v = e.target.value
-                                  if (v) setParam('_maudau_category', v)
-                                  else clearParam('_maudau_category')
-                                }}
-                                className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-purple-500"
-                              >
-                                <option value="">— авто: {p.category_name} —</option>
-                                {maudauCategories
-                                  .filter(c => c.portal_id)
-                                  .sort((a, b) => a.title.localeCompare(b.title, 'uk'))
-                                  .map(c => (
-                                    <option key={c.portal_id} value={c.portal_id!}>{c.title}</option>
-                                  ))}
-                              </select>
-                            </div>
-                          )}
+                          {isMaudau && (() => {
+                            const autoMauCat = maudauCategories.find(c => c.portal_id === catPortalId)
+                            const autoLabel = autoMauCat ? autoMauCat.title : p.category_name
+                            return (
+                              <div className="flex items-center gap-2 mb-3">
+                                <span className="text-[11px] text-zinc-400 whitespace-nowrap shrink-0 w-28">MauDau кат.:</span>
+                                <select
+                                  value={curParams['_maudau_category'] ?? ''}
+                                  onChange={e => {
+                                    const v = e.target.value
+                                    if (v) setParam('_maudau_category', v)
+                                    else clearParam('_maudau_category')
+                                  }}
+                                  className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-purple-500"
+                                >
+                                  <option value="">— авто: {autoLabel} —</option>
+                                  {maudauCategories
+                                    .filter(c => c.portal_id)
+                                    .sort((a, b) => a.title.localeCompare(b.title, 'uk'))
+                                    .map(c => (
+                                      <option key={c.portal_id} value={c.portal_id!}>{c.title}</option>
+                                    ))}
+                                </select>
+                              </div>
+                            )
+                          })()}
+
+                          {/* Ціна на маркетплейсі */}
+                          {isMaudau && (() => {
+                            const unit = (p.attributes as any)?.['Одиниця'] ?? ''
+                            const isVagova = ['кг', 'г', 'мл', 'л'].includes(unit.toLowerCase())
+                            const effectivePrice = ov.custom_price ? Number(ov.custom_price) : p.price
+                            const priceVal = curParams['Ціна на маркетплейсі'] ?? ''
+                            const PREFIX = 'Цена указана за 1 кг!\n'
+                            const ensurePrefix = () => {
+                              if (!isVagova) return
+                              const current = ov.description_ru ?? ''
+                              if (!current.startsWith(PREFIX)) {
+                                setOverride(p.id, 'description_ru', PREFIX + current)
+                              }
+                            }
+                            return (
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className="w-28 shrink-0 text-[11px] text-zinc-400 truncate">Ціна на маркетплейсі</span>
+                                <span className="text-zinc-600 text-xs shrink-0">:</span>
+                                <input
+                                  type="number"
+                                  value={priceVal || effectivePrice}
+                                  onChange={e => {
+                                    setParam('Ціна на маркетплейсі', e.target.value)
+                                    ensurePrefix()
+                                  }}
+                                  onFocus={ensurePrefix}
+                                  className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-zinc-500"
+                                />
+                                {isVagova && (
+                                  <span className="text-[10px] text-amber-400 shrink-0 whitespace-nowrap">за 1 кг</span>
+                                )}
+                              </div>
+                            )
+                          })()}
 
                           {/* Structured MauDau attrs */}
                           {catAttrsExp.length > 0 && (
