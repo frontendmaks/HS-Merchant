@@ -335,26 +335,19 @@ export async function GET(
     return NextResponse.json({ error: 'No products with mapped categories' }, { status: 404 })
   }
 
-  // 5. Fetch MauDau product IDs — map vendor_code → maudau_id
+  // 5. Load MauDau product IDs from Supabase (populated from MauDau export xlsx)
   const vendorToMaudauId: Record<string, string> = {}
   try {
-    const jwt = await getMaudauJwt()
-    const BASE = process.env.MAUDAU_BASE!
-    // Fetch up to 500 products from MauDau to get their internal IDs
-    const r = await fetch(`${BASE}/v1/merchant_public_api/products?page=1&per_page=500`, {
-      headers: { Authorization: `Bearer ${jwt}` },
-    })
-    if (r.ok) {
-      const body = await r.json()
-      const items: any[] = Array.isArray(body) ? body : (body.products ?? body.data?.products ?? body.items ?? [])
-      for (const item of items) {
-        const vc = item.sku_main ?? item.vendor_code ?? item.article ?? item.vendorCode ?? ''
-        const mid = String(item.id ?? item.product_id ?? '')
-        if (vc && mid) vendorToMaudauId[vc] = mid
+    const { data: idRows } = await supabase
+      .from('maudau_product_ids')
+      .select('sku, maudau_id')
+    if (idRows) {
+      for (const row of idRows) {
+        if (row.sku && row.maudau_id) vendorToMaudauId[row.sku] = row.maudau_id
       }
     }
   } catch {
-    // Non-fatal — fall back to vendor_code column if MauDau API unavailable
+    // Non-fatal — id column will be empty if table unavailable
   }
 
   // 6. Build xlsx workbook with cell styling
