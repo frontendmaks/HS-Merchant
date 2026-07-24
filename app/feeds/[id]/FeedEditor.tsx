@@ -292,6 +292,28 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const PAGE_SIZE = 50
   // Which product row is expanded
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
+  // MauDau category block: expand per category + search + category-level defaults
+  const [expandedCatBlocks, setExpandedCatBlocks] = useState<Set<string>>(new Set())
+  const [maudauBlockSearch, setMaudauBlockSearch] = useState('')
+
+  const setCatDefaultAndApply = (catName: string, portalId: string, attrName: string, value: string) => {
+    setOverrides(prev => {
+      const next = { ...prev }
+      allProducts.forEach(p => {
+        const pPortalId = p.category_name === catName
+          ? portalId
+          : (overrides[p.id]?.custom_params?.['_maudau_category'] || '')
+        if (p.category_name !== catName && pPortalId !== portalId) return
+        if (p.category_name !== catName) return
+        if (next[p.id]?.is_active !== true) return
+        next[p.id] = {
+          ...next[p.id],
+          custom_params: { ...(next[p.id]?.custom_params ?? {}), [attrName]: value }
+        }
+      })
+      return next
+    })
+  }
 
   // Auto-translate name_ru and description_ru when a row expands and fields are empty
   useEffect(() => {
@@ -754,7 +776,8 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         const missing = catAttrs
           .filter(a => !SKIP.has(a.name) && !allParams[a.name])
           .map(a => a.name)
-        if (missing.length > 0) {
+        const filledCount = Object.values(allParams).filter(v => v).length
+        if (missing.length > 0 && filledCount < 3) {
           issues.push({ type: 'warn', text: `Відсутні: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` +${missing.length - 3}` : ''}` })
         }
       }
@@ -971,6 +994,22 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         {/* Webhook hint */}
         {trigger === 'webhook' && (
           <span className="text-xs text-zinc-500 font-mono">POST /api/sync/woocommerce</span>
+        )}
+        {/* MauDau feed URL inline */}
+        {isMaudau && (
+          <>
+            <div className="w-px h-5 bg-zinc-700 hidden sm:block" />
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs text-zinc-500 whitespace-nowrap shrink-0">🟣 URL фіду:</span>
+              <code className="text-xs font-mono text-purple-300 bg-zinc-800 px-2 py-1 rounded flex-1 min-w-0 truncate select-all">
+                https://hs-merchant.vercel.app/api/feeds/{feedSlug}
+              </code>
+              <button
+                onClick={() => navigator.clipboard.writeText(`https://hs-merchant.vercel.app/api/feeds/${feedSlug}`)}
+                className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 rounded transition-colors whitespace-nowrap shrink-0"
+              >Копіювати</button>
+            </div>
+          </>
         )}
       </div>
 
@@ -1273,195 +1312,274 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     </div>
                   </div>
 
-                  {/* Expanded: characteristics + MauDau fields */}
+                  {/* Expanded: site fields + MauDau characteristics */}
                   {isExpanded && (
-                    <div className="px-4 pb-3 space-y-3 bg-zinc-800/20 border-t border-zinc-800/60">
-                      {/* Per-product MauDau category override */}
-                      {isMaudau && (
-                        <div className="pt-2 flex items-center gap-2">
-                          <span className="text-[11px] text-zinc-400 whitespace-nowrap shrink-0">MauDau категорія:</span>
-                          <select
-                            value={curParams['_maudau_category'] ?? ''}
-                            onChange={e => {
-                              const v = e.target.value
-                              if (v) setParam('_maudau_category', v)
-                              else clearParam('_maudau_category')
-                            }}
-                            className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-purple-500"
-                          >
-                            <option value="">— авто: {p.category_name} —</option>
-                            {maudauCategories
-                              .filter(c => c.portal_id)
-                              .sort((a, b) => a.title.localeCompare(b.title, 'uk'))
-                              .map(c => (
-                                <option key={c.portal_id} value={c.portal_id!}>{c.title}</option>
-                              ))}
-                          </select>
-                        </div>
-                      )}
-                      <div className="pt-2">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-[11px] text-zinc-400 font-medium">Характеристики</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const key = `Параметр ${Object.keys(curParams).length + 1}`
-                              setParam(key, '')
-                            }}
-                            className="text-[10px] px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded transition-colors"
-                          >+ Додати</button>
-                        </div>
+                    <div className="bg-zinc-800/20 border-t border-zinc-800/60">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-zinc-800/60">
 
-                        {/* MauDau: structured category attributes with dropdowns */}
-                        {catAttrsExp.length > 0 && (
-                          <div className="space-y-1.5">
-                            {catAttrsExp.map((attr: any) => {
-                              const val: string = attr.name === 'Вага'
-                                ? (curParams['Вага'] ?? curParams['Вага упаковки'] ?? '')
-                                : (curParams[attr.name] ?? '')
-                              const isEmpty = !val
-                              const rawValues: string[] = attr.values ?? []
-                              const hasDropdown = rawValues.length > 0
+                        {/* ── LEFT: Поля з сайту ── */}
+                        <div className="px-4 py-3 space-y-2">
+                          <p className="text-[10px] text-zinc-600 uppercase tracking-wider font-medium mb-2">З сайту</p>
 
-                              return (
-                                <div key={attr.name} className="flex items-center gap-1.5">
-                                  <span className={`w-36 shrink-0 text-[11px] truncate ${isEmpty ? 'text-amber-400' : 'text-zinc-400'}`}>
-                                    {attr.name}
-                                  </span>
-                                  <span className="text-zinc-600 text-xs shrink-0">:</span>
-                                  {hasDropdown ? (
-                                    <select
-                                      value={val}
-                                      onChange={e => setParam(attr.name, e.target.value)}
-                                      className={`flex-1 min-w-0 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none cursor-pointer ${
-                                        isEmpty
-                                          ? 'bg-amber-950/30 border border-amber-600 focus:border-amber-400'
-                                          : 'bg-zinc-800 border border-zinc-700 focus:border-zinc-500'
-                                      }`}
-                                    >
-                                      <option value="">— Обрати —</option>
-                                      {rawValues.map((v: string, i: number) => (
-                                        <option key={i} value={v}>{stripHtml(v)}</option>
-                                      ))}
-                                    </select>
-                                  ) : (
-                                    <input
-                                      type="text"
-                                      value={val}
-                                      onChange={e => setParam(attr.name, e.target.value)}
-                                      className={`flex-1 min-w-0 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none ${
-                                        isEmpty
-                                          ? 'bg-amber-950/30 border border-amber-600 focus:border-amber-400'
-                                          : 'bg-zinc-800 border border-zinc-700 focus:border-zinc-500'
-                                      }`}
-                                      placeholder="Значення"
-                                    />
-                                  )}
-                                  {val && (
-                                    <button
-                                      type="button"
-                                      onClick={() => clearParam(attr.name)}
-                                      className="text-zinc-600 hover:text-red-400 text-xs px-1 transition-colors shrink-0"
-                                    >✕</button>
-                                  )}
-                                </div>
-                              )
-                            })}
+                          {/* Name */}
+                          <div>
+                            <label className="text-[11px] text-zinc-500 block mb-0.5">Назва</label>
+                            <p className="text-xs text-zinc-300 leading-snug">{p.name}</p>
                           </div>
-                        )}
 
-                        {/* Extra params not in MauDau catAttrs (or non-MauDau flat list) */}
-                        {(catAttrsExp.length === 0 ? Object.entries(curParams) : extraParams).length > 0 && (
-                          <div className={`space-y-1.5 ${catAttrsExp.length > 0 ? 'mt-2 pt-2 border-t border-zinc-800/40' : ''}`}>
-                            {catAttrsExp.length > 0 && extraParams.length > 0 && (
-                              <p className="text-[10px] text-zinc-600 mb-1">Додаткові поля</p>
-                            )}
-                            {(catAttrsExp.length === 0 ? Object.entries(curParams) : extraParams).map(([key, val]) => (
-                              <div key={key} className="flex items-center gap-1.5">
-                                <input
-                                  type="text"
-                                  defaultValue={key}
-                                  onBlur={e => {
-                                    const newKey = e.target.value.trim()
-                                    if (!newKey || newKey === key) return
-                                    const next = { ...curParams }
-                                    const v = next[key]
-                                    delete next[key]
-                                    next[newKey] = v
-                                    setOverride(p.id, 'custom_params', next)
-                                  }}
-                                  className="w-32 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-zinc-300 focus:outline-none focus:border-zinc-500"
-                                  placeholder="Назва"
-                                />
-                                <span className="text-zinc-600 text-xs">:</span>
-                                <input
-                                  type="text"
-                                  value={val}
-                                  onChange={e => setParam(key, e.target.value)}
-                                  className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-zinc-500"
-                                  placeholder="Значення"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => clearParam(key)}
-                                  className="text-zinc-600 hover:text-red-400 text-xs px-1 transition-colors"
-                                >✕</button>
+                          {/* Category */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-zinc-500 w-20 shrink-0">Категорія:</span>
+                            <span className="text-xs text-zinc-300 truncate">{p.category_name ?? '—'}</span>
+                          </div>
+
+                          {/* Brand */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-zinc-500 w-20 shrink-0">Бренд:</span>
+                            <span className={`text-xs ${p.brand ? 'text-zinc-300' : 'text-red-400'}`}>{p.brand ?? 'відсутній'}</span>
+                          </div>
+
+                          {/* Price + stock */}
+                          <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-zinc-500 w-20 shrink-0">Ціна:</span>
+                              <span className="text-xs text-zinc-300">{p.price} ₴{p.price_old ? <span className="text-zinc-600 line-through ml-1">{p.price_old} ₴</span> : null}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-zinc-500 shrink-0">Залишок:</span>
+                              <span className={`text-xs ${p.stock == null ? 'text-zinc-500' : p.stock > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {p.stock == null ? '∞' : p.stock}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Site attributes */}
+                          {p.attributes && Object.keys(p.attributes).length > 0 && (
+                            <div>
+                              <p className="text-[10px] text-zinc-600 mb-1">Атрибути з WC:</p>
+                              <div className="space-y-1">
+                                {Object.entries(p.attributes).map(([k, v]) => (
+                                  <div key={k} className="flex items-start gap-2">
+                                    <span className="text-[11px] text-zinc-500 w-28 shrink-0 truncate">{k}:</span>
+                                    <span className="text-[11px] text-zinc-300 break-words">{String(v)}</span>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {catAttrsExp.length === 0 && Object.keys(curParams).length === 0 && (
-                          <p className="text-[11px] text-zinc-600">Немає характеристик. Натисніть "+ Додати".</p>
-                        )}
-                      </div>
-
-                      {/* MauDau-only: name_ru + description_ru */}
-                      {isMaudau && (
-                        <div className="space-y-2 border-t border-zinc-800/60 pt-2">
-                          <p className="text-[11px] text-zinc-600">Назва та опис рос. мовою (необов'язково)</p>
-                          <div>
-                            <div className="flex items-center justify-between mb-0.5">
-                              <label className="text-[11px] text-zinc-500">name_ru</label>
-                              <button
-                                type="button"
-                                disabled={translating[`${p.id}:name_ru`]}
-                                onClick={() => translateField(p.id, 'name_ru', p.name)}
-                                className="text-[10px] text-purple-400 hover:text-purple-300 disabled:opacity-40 transition-colors"
-                              >
-                                {translating[`${p.id}:name_ru`] ? '⏳' : '🔄 Перекласти'}
-                              </button>
                             </div>
-                            <input
-                              type="text"
-                              placeholder={p.name}
-                              value={ov.name_ru ?? ''}
-                              onChange={e => setOverride(p.id, 'name_ru', e.target.value)}
-                              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600"
-                            />
-                          </div>
-                          <div>
-                            <div className="flex items-center justify-between mb-0.5">
-                              <label className="text-[11px] text-zinc-500">description_ru</label>
-                              <button
-                                type="button"
-                                disabled={translating[`${p.id}:description_ru`] || !(ov.custom_params?.['Опис']?.trim() || p.description?.trim())}
-                                onClick={() => translateField(p.id, 'description_ru', ov.custom_params?.['Опис']?.trim() || p.description?.trim() || '')}
-                                className="text-[10px] text-purple-400 hover:text-purple-300 disabled:opacity-40 transition-colors"
-                              >
-                                {translating[`${p.id}:description_ru`] ? '⏳' : '🔄 Перекласти'}
-                              </button>
+                          )}
+
+                          {/* Custom price/stock overrides */}
+                          <div className="pt-1 space-y-1.5 border-t border-zinc-800/40">
+                            <p className="text-[10px] text-zinc-600">Перевизначення:</p>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-zinc-500 w-20 shrink-0">Ціна:</span>
+                              <input
+                                type="number"
+                                placeholder={String(p.price ?? '')}
+                                value={ov.custom_price ?? ''}
+                                onChange={e => setOverride(p.id, 'custom_price', e.target.value)}
+                                className="w-28 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-amber-500 placeholder:text-zinc-600"
+                              />
                             </div>
-                            <textarea
-                              rows={2}
-                              placeholder="Опис рос. мовою..."
-                              value={ov.description_ru ?? ''}
-                              onChange={e => setOverride(p.id, 'description_ru', e.target.value)}
-                              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600 resize-none"
-                            />
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-zinc-500 w-20 shrink-0">Залишок:</span>
+                              <input
+                                type="number"
+                                placeholder={String(p.stock ?? '')}
+                                value={ov.custom_stock ?? ''}
+                                onChange={e => setOverride(p.id, 'custom_stock', e.target.value)}
+                                className="w-28 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-amber-500 placeholder:text-zinc-600"
+                              />
+                            </div>
                           </div>
+
+                          {/* MauDau translations */}
+                          {isMaudau && (
+                            <div className="space-y-2 pt-1 border-t border-zinc-800/40">
+                              <p className="text-[10px] text-zinc-600">Переклад (рос.):</p>
+                              <div>
+                                <div className="flex items-center justify-between mb-0.5">
+                                  <label className="text-[11px] text-zinc-500">name_ru</label>
+                                  <button
+                                    type="button"
+                                    disabled={translating[`${p.id}:name_ru`]}
+                                    onClick={() => translateField(p.id, 'name_ru', p.name)}
+                                    className="text-[10px] text-purple-400 hover:text-purple-300 disabled:opacity-40 transition-colors"
+                                  >{translating[`${p.id}:name_ru`] ? '⏳' : '🔄'}</button>
+                                </div>
+                                <input
+                                  type="text"
+                                  placeholder={p.name}
+                                  value={ov.name_ru ?? ''}
+                                  onChange={e => setOverride(p.id, 'name_ru', e.target.value)}
+                                  className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600"
+                                />
+                              </div>
+                              <div>
+                                <div className="flex items-center justify-between mb-0.5">
+                                  <label className="text-[11px] text-zinc-500">description_ru</label>
+                                  <button
+                                    type="button"
+                                    disabled={translating[`${p.id}:description_ru`] || !(ov.custom_params?.['Опис']?.trim() || p.description?.trim())}
+                                    onClick={() => translateField(p.id, 'description_ru', ov.custom_params?.['Опис']?.trim() || p.description?.trim() || '')}
+                                    className="text-[10px] text-purple-400 hover:text-purple-300 disabled:opacity-40 transition-colors"
+                                  >{translating[`${p.id}:description_ru`] ? '⏳' : '🔄'}</button>
+                                </div>
+                                <textarea
+                                  rows={2}
+                                  placeholder="Опис рос. мовою..."
+                                  value={ov.description_ru ?? ''}
+                                  onChange={e => setOverride(p.id, 'description_ru', e.target.value)}
+                                  className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500 placeholder:text-zinc-600 resize-none"
+                                />
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      )}
+
+                        {/* ── RIGHT: Характеристики MauDau ── */}
+                        <div className="px-4 py-3 space-y-2">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] text-zinc-600 uppercase tracking-wider font-medium">Характеристики MauDau</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const key = `Параметр ${Object.keys(curParams).length + 1}`
+                                setParam(key, '')
+                              }}
+                              className="text-[10px] px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded transition-colors"
+                            >+ Додати</button>
+                          </div>
+
+                          {/* Per-product MauDau category override */}
+                          {isMaudau && (
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="text-[11px] text-zinc-400 whitespace-nowrap shrink-0 w-28">MauDau кат.:</span>
+                              <select
+                                value={curParams['_maudau_category'] ?? ''}
+                                onChange={e => {
+                                  const v = e.target.value
+                                  if (v) setParam('_maudau_category', v)
+                                  else clearParam('_maudau_category')
+                                }}
+                                className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-purple-500"
+                              >
+                                <option value="">— авто: {p.category_name} —</option>
+                                {maudauCategories
+                                  .filter(c => c.portal_id)
+                                  .sort((a, b) => a.title.localeCompare(b.title, 'uk'))
+                                  .map(c => (
+                                    <option key={c.portal_id} value={c.portal_id!}>{c.title}</option>
+                                  ))}
+                              </select>
+                            </div>
+                          )}
+
+                          {/* Structured MauDau attrs */}
+                          {catAttrsExp.length > 0 && (
+                            <div className="space-y-1.5">
+                              {catAttrsExp.map((attr: any) => {
+                                const val: string = attr.name === 'Вага'
+                                  ? (curParams['Вага'] ?? curParams['Вага упаковки'] ?? '')
+                                  : (curParams[attr.name] ?? '')
+                                const isEmpty = !val
+                                const rawValues: string[] = attr.values ?? []
+                                const hasDropdown = rawValues.length > 0
+
+                                return (
+                                  <div key={attr.name} className="flex items-center gap-1.5">
+                                    <span className={`w-28 shrink-0 text-[11px] truncate ${isEmpty ? 'text-amber-400' : 'text-zinc-400'}`}>
+                                      {attr.name}
+                                    </span>
+                                    <span className="text-zinc-600 text-xs shrink-0">:</span>
+                                    {hasDropdown ? (
+                                      <select
+                                        value={val}
+                                        onChange={e => setParam(attr.name, e.target.value)}
+                                        className={`flex-1 min-w-0 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none cursor-pointer ${
+                                          isEmpty
+                                            ? 'bg-amber-950/30 border border-amber-600 focus:border-amber-400'
+                                            : 'bg-zinc-800 border border-zinc-700 focus:border-zinc-500'
+                                        }`}
+                                      >
+                                        <option value="">— Обрати —</option>
+                                        {rawValues.map((v: string, i: number) => (
+                                          <option key={i} value={v}>{stripHtml(v)}</option>
+                                        ))}
+                                      </select>
+                                    ) : (
+                                      <input
+                                        type="text"
+                                        value={val}
+                                        onChange={e => setParam(attr.name, e.target.value)}
+                                        className={`flex-1 min-w-0 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none ${
+                                          isEmpty
+                                            ? 'bg-amber-950/30 border border-amber-600 focus:border-amber-400'
+                                            : 'bg-zinc-800 border border-zinc-700 focus:border-zinc-500'
+                                        }`}
+                                        placeholder="Значення"
+                                      />
+                                    )}
+                                    {val && (
+                                      <button
+                                        type="button"
+                                        onClick={() => clearParam(attr.name)}
+                                        className="text-zinc-600 hover:text-red-400 text-xs px-1 transition-colors shrink-0"
+                                      >✕</button>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+
+                          {/* Extra / custom params */}
+                          {(catAttrsExp.length === 0 ? Object.entries(curParams) : extraParams).length > 0 && (
+                            <div className={`space-y-1.5 ${catAttrsExp.length > 0 ? 'mt-2 pt-2 border-t border-zinc-800/40' : ''}`}>
+                              {catAttrsExp.length > 0 && extraParams.length > 0 && (
+                                <p className="text-[10px] text-zinc-600 mb-1">Додаткові поля</p>
+                              )}
+                              {(catAttrsExp.length === 0 ? Object.entries(curParams) : extraParams).map(([key, val]) => (
+                                <div key={key} className="flex items-center gap-1.5">
+                                  <input
+                                    type="text"
+                                    defaultValue={key}
+                                    onBlur={e => {
+                                      const newKey = e.target.value.trim()
+                                      if (!newKey || newKey === key) return
+                                      const next = { ...curParams }
+                                      const v = next[key]
+                                      delete next[key]
+                                      next[newKey] = v
+                                      setOverride(p.id, 'custom_params', next)
+                                    }}
+                                    className="w-28 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-zinc-300 focus:outline-none focus:border-zinc-500"
+                                    placeholder="Назва"
+                                  />
+                                  <span className="text-zinc-600 text-xs">:</span>
+                                  <input
+                                    type="text"
+                                    value={val}
+                                    onChange={e => setParam(key, e.target.value)}
+                                    className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-zinc-500"
+                                    placeholder="Значення"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => clearParam(key)}
+                                    className="text-zinc-600 hover:text-red-400 text-xs px-1 transition-colors"
+                                  >✕</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {catAttrsExp.length === 0 && Object.keys(curParams).filter(k => k !== '_maudau_category').length === 0 && (
+                            <p className="text-[11px] text-zinc-600">Немає характеристик. Натисніть "+ Додати".</p>
+                          )}
+                        </div>
+
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1512,81 +1630,167 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
       {/* MauDau: Category portal_id mapping */}
       {isMaudau && (
-        <div className="bg-zinc-900 border border-purple-900/50 rounded-xl p-5">
-          <div className="flex items-start justify-between gap-2 mb-1">
-            <h2 className="text-sm font-semibold text-white">🟣 MauDau — категорії</h2>
-            {maudauCatsLoading && <span className="text-xs text-zinc-500">Завантаження...</span>}
-          </div>
-          <p className="text-xs text-zinc-500 mb-3">
-            Зіставте свої категорії з категоріями MauDau.
-            {maudauCategories.length > 0 && (
-              <span className={maudauCatsSource === 'db' ? 'text-emerald-500' : 'text-amber-500'}>
-                {' '}• {maudauCategories.length} категорій
-              </span>
-            )}
-          </p>
-
-          {/* Sync all categories button */}
-          <div className="mb-4 flex items-center gap-3">
-            <button
-              onClick={handleSyncAllCategories}
-              disabled={syncingCats}
-              className="text-xs px-3 py-1.5 rounded-lg border border-purple-700 text-purple-300 hover:bg-purple-900/20 transition-colors disabled:opacity-50 whitespace-nowrap"
-            >
-              {syncingCats ? '⏳ Синхронізація...' : '🔄 Завантажити всі категорії MauDau'}
-            </button>
-            {syncCatsMsg && <span className="text-xs text-zinc-400">{syncCatsMsg}</span>}
-            {syncingCats && <span className="text-xs text-zinc-500">~1-2 хв, зачекайте...</span>}
-          </div>
-
-          {maudauCatsError && (
-            <p className="text-xs text-red-400 mb-3">{maudauCatsError}</p>
-          )}
-          {activeCategories.length === 0 ? (
-            <p className="text-xs text-zinc-600">Спочатку виберіть товари праворуч.</p>
-          ) : (
-            <div className="space-y-2">
-              {activeCategories.map(cat => (
-                <CategoryPortalRow
-                  key={cat}
-                  catName={cat}
-                  value={categoryPortalIds[cat] ?? ''}
-                  maudauCategories={maudauCategories}
-                  onChange={v => setCategoryPortalIds(prev => ({ ...prev, [cat]: v }))}
-                />
-              ))}
+        <div className="bg-zinc-900 border border-purple-900/50 rounded-xl p-4">
+          {/* Header row */}
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-white">🟣 MauDau — категорії</h2>
+              {maudauCatsLoading && <span className="text-xs text-zinc-500">Завантаження...</span>}
+              {maudauCategories.length > 0 && (
+                <span className="text-xs text-zinc-600">• {maudauCategories.length} кат.</span>
+              )}
             </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSyncAllCategories}
+                disabled={syncingCats}
+                className="text-xs px-2.5 py-1 rounded-lg border border-purple-800 text-purple-400 hover:bg-purple-900/20 transition-colors disabled:opacity-50 whitespace-nowrap"
+              >
+                {syncingCats ? '⏳...' : '🔄 Завантажити всі категорії MauDau'}
+              </button>
+              {syncCatsMsg && <span className="text-xs text-zinc-400">{syncCatsMsg}</span>}
+            </div>
+          </div>
+
+          {maudauCatsError && <p className="text-xs text-red-400 mb-3">{maudauCatsError}</p>}
+
+          {activeCategories.length === 0 ? (
+            <p className="text-xs text-zinc-600">Спочатку виберіть товари у фіді.</p>
+          ) : (
+            <>
+              {/* Search */}
+              <input
+                type="text"
+                placeholder="🔍 Пошук по своїх категоріях..."
+                value={maudauBlockSearch}
+                onChange={e => setMaudauBlockSearch(e.target.value)}
+                className="w-full mb-3 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-purple-500"
+              />
+
+              {/* Column headers */}
+              <div className="grid grid-cols-[1fr_1fr_auto] gap-2 px-3 py-1.5 mb-1 bg-zinc-800/50 rounded-lg">
+                <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Категорія на сайті</span>
+                <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Категорія на MauDau</span>
+                <span className="text-[10px] text-zinc-500 uppercase tracking-wide w-16 text-center">Атрибути</span>
+              </div>
+
+              <div className="space-y-1">
+                {activeCategories
+                  .filter(cat => !maudauBlockSearch || cat.toLowerCase().includes(maudauBlockSearch.toLowerCase()))
+                  .map(cat => {
+                    const mapping = categoryPortalIds[cat] ?? ''
+                    const resolvedPortalId = /^\d+$/.test(mapping) ? mapping : (slugToPortalIdClient[mapping] ?? '')
+                    const catAttrsForBlock = resolvedPortalId ? (portalIdAttrsMap[resolvedPortalId] ?? []) : []
+                    const isBlockExpanded = expandedCatBlocks.has(cat)
+                    const selectedMauCat = maudauCategories.find(c => c.slug === mapping || c.portal_id === mapping)
+                    const displayLabel = selectedMauCat ? selectedMauCat.title : mapping || '— оберіть —'
+
+                    return (
+                      <div key={cat} className="border border-zinc-800 rounded-lg overflow-hidden">
+                        {/* Category row */}
+                        <div className="grid grid-cols-[1fr_1fr_auto] gap-2 px-3 py-2 items-center bg-zinc-900 hover:bg-zinc-800/30 transition-colors">
+                          {/* Site category */}
+                          <span className="text-xs text-zinc-200 truncate font-medium">{cat}</span>
+
+                          {/* MauDau category dropdown */}
+                          <div className="relative">
+                            <CategoryPortalRow
+                              catName={cat}
+                              value={mapping}
+                              maudauCategories={maudauCategories}
+                              onChange={v => setCategoryPortalIds(prev => ({ ...prev, [cat]: v }))}
+                            />
+                          </div>
+
+                          {/* Expand attrs button */}
+                          <button
+                            type="button"
+                            disabled={catAttrsForBlock.length === 0}
+                            onClick={() => setExpandedCatBlocks(prev => {
+                              const next = new Set(prev)
+                              next.has(cat) ? next.delete(cat) : next.add(cat)
+                              return next
+                            })}
+                            className={`w-16 text-center text-[10px] px-2 py-1 rounded border transition-colors ${
+                              catAttrsForBlock.length === 0
+                                ? 'border-zinc-800 text-zinc-700 cursor-not-allowed'
+                                : isBlockExpanded
+                                  ? 'bg-purple-900/40 border-purple-700 text-purple-300'
+                                  : 'border-zinc-700 text-zinc-400 hover:border-purple-600 hover:text-purple-400'
+                            }`}
+                            title={catAttrsForBlock.length === 0 ? 'Виберіть категорію MauDau' : `${catAttrsForBlock.length} атрибутів`}
+                          >
+                            {catAttrsForBlock.length > 0
+                              ? (isBlockExpanded ? `▲ ${catAttrsForBlock.length}` : `▼ ${catAttrsForBlock.length}`)
+                              : '—'}
+                          </button>
+                        </div>
+
+                        {/* Expanded: attributes for this category (mass-fill) */}
+                        {isBlockExpanded && catAttrsForBlock.length > 0 && (
+                          <div className="px-3 py-3 bg-zinc-800/30 border-t border-zinc-800 space-y-2">
+                            <p className="text-[10px] text-zinc-500 mb-2">
+                              Заповнені значення застосуються до всіх активних товарів у категорії «{cat}»
+                            </p>
+                            {catAttrsForBlock.map(attr => {
+                              const productWithCat = allProducts.find(p =>
+                                p.category_name === cat && overrides[p.id]?.is_active
+                              )
+                              const sampleVal = productWithCat
+                                ? (overrides[productWithCat.id]?.custom_params?.[attr.name] ?? '')
+                                : ''
+                              const hasDropdown = (attr.values ?? []).length > 0
+
+                              return (
+                                <div key={attr.name} className="flex items-center gap-2">
+                                  <span className="w-36 shrink-0 text-[11px] text-zinc-400 truncate">{attr.name}</span>
+                                  <span className="text-zinc-600 text-xs shrink-0">:</span>
+                                  {hasDropdown ? (
+                                    <select
+                                      value={sampleVal}
+                                      onChange={e => setCatDefaultAndApply(cat, resolvedPortalId, attr.name, e.target.value)}
+                                      className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-purple-500"
+                                    >
+                                      <option value="">— Обрати —</option>
+                                      {attr.values.map((v, i) => (
+                                        <option key={i} value={v}>{v.replace(/<[^>]+>/g, '').trim()}</option>
+                                      ))}
+                                    </select>
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      defaultValue={sampleVal}
+                                      onBlur={e => {
+                                        if (e.target.value !== sampleVal) {
+                                          setCatDefaultAndApply(cat, resolvedPortalId, attr.name, e.target.value)
+                                        }
+                                      }}
+                                      className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-purple-500"
+                                      placeholder="Значення для всіх товарів..."
+                                    />
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                {activeCategories.filter(cat => !maudauBlockSearch || cat.toLowerCase().includes(maudauBlockSearch.toLowerCase())).length === 0 && (
+                  <p className="text-xs text-zinc-600 py-2">Нічого не знайдено</p>
+                )}
+              </div>
+            </>
           )}
           {maudauCategories.length === 0 && !maudauCatsLoading && !maudauCatsError && (
             <p className="text-xs text-zinc-600 mt-3">
-              Категорії не знайдено — переконайтеся що є активні товари в кабінеті MauDau,
-              або введіть slug вручну.
+              Категорії не знайдено — натисніть «Завантажити всі категорії MauDau».
             </p>
           )}
         </div>
       )}
 
-      {/* MauDau: feed URL info */}
-      {isMaudau && (
-        <div className="bg-zinc-900 border border-purple-900/40 rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-white mb-2">🟣 URL фіду для MauDau</h2>
-          <p className="text-xs text-zinc-500 mb-3">
-            Вкажіть цей URL у особистому кабінеті MauDau для автоматичного імпорту товарів.
-            Фід оновлюється відповідно до налаштованого тригеру (рекомендовано: щодня о 6:00).
-          </p>
-          <div className="flex items-center gap-3">
-            <code className="text-xs font-mono text-purple-300 bg-zinc-800 px-3 py-2 rounded-lg flex-1 select-all">
-              https://hs-merchant.vercel.app/api/feeds/{feedSlug}
-            </code>
-            <button
-              onClick={() => navigator.clipboard.writeText(`https://hs-merchant.vercel.app/api/feeds/${feedSlug}`)}
-              className="text-xs px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 rounded-lg transition-colors whitespace-nowrap"
-            >
-              Копіювати
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Access stats */}
       <FeedAccessStats feedId={feed.id} />
