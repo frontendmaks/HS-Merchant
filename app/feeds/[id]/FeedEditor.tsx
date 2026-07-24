@@ -55,19 +55,18 @@ type Override = {
   custom_params?: Record<string, string>
 }
 
-/** Searchable category dropdown for MauDau portal_id mapping */
-function CategoryPortalRow({
-  catName, value, maudauCategories, onChange,
+/** Searchable MauDau category dropdown (no catName label — use in grid context) */
+function MauDauCatDropdown({
+  value, maudauCategories, onChange,
 }: {
-  catName: string
   value: string
-  maudauCategories: { slug: string; title: string }[]
+  maudauCategories: { slug: string; title: string; portal_id?: string }[]
   onChange: (v: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
 
-  const selectedCat = maudauCategories.find(c => c.slug === value)
+  const selectedCat = maudauCategories.find(c => c.slug === value || c.portal_id === value)
   const displayLabel = selectedCat ? selectedCat.title : value || '— оберіть —'
 
   const filtered = search.trim()
@@ -78,65 +77,53 @@ function CategoryPortalRow({
     : maudauCategories
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-zinc-300 flex-1 min-w-0 truncate">{catName}</span>
-      <span className="text-zinc-600 text-xs shrink-0">→</span>
+    <div className="relative w-full">
+      <button
+        type="button"
+        onClick={() => { setOpen(o => !o); setSearch('') }}
+        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-left text-white focus:outline-none focus:border-purple-500 flex items-center justify-between gap-1"
+      >
+        <span className="truncate flex-1">{displayLabel}</span>
+        <span className="text-zinc-500 shrink-0 text-[10px]">{open ? '▲' : '▼'}</span>
+      </button>
 
-      <div className="relative w-48">
-        <button
-          type="button"
-          onClick={() => { setOpen(o => !o); setSearch('') }}
-          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-left text-white focus:outline-none focus:border-purple-500 flex items-center justify-between gap-1"
-        >
-          <span className="truncate flex-1">{displayLabel}</span>
-          <span className="text-zinc-500 shrink-0">{open ? '▲' : '▼'}</span>
-        </button>
-
-        {open && (
-          <div className="absolute z-50 top-full left-0 mt-1 w-64 bg-zinc-900 border border-zinc-700 rounded shadow-xl">
-            {/* Search input */}
-            <div className="p-1.5 border-b border-zinc-700">
-              <input
-                autoFocus
-                type="text"
-                placeholder="Пошук категорії…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500"
-              />
-            </div>
-
-            {/* Options list */}
-            <ul className="max-h-48 overflow-y-auto">
-              <li>
+      {open && (
+        <div className="absolute z-50 top-full left-0 mt-1 w-72 bg-zinc-900 border border-zinc-700 rounded shadow-xl">
+          <div className="p-1.5 border-b border-zinc-700">
+            <input
+              autoFocus
+              type="text"
+              placeholder="Пошук категорії MauDau…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500"
+            />
+          </div>
+          <ul className="max-h-52 overflow-y-auto">
+            <li>
+              <button
+                type="button"
+                className="w-full text-left px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-700"
+                onClick={() => { onChange(''); setOpen(false) }}
+              >— оберіть —</button>
+            </li>
+            {filtered.length === 0 && (
+              <li className="px-2 py-2 text-xs text-zinc-500 text-center">Нічого не знайдено</li>
+            )}
+            {filtered.map(mc => (
+              <li key={mc.slug}>
                 <button
                   type="button"
-                  className="w-full text-left px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-700"
-                  onClick={() => { onChange(''); setOpen(false) }}
-                >
-                  — оберіть —
-                </button>
+                  onClick={() => { onChange(mc.slug); setOpen(false); setSearch('') }}
+                  className={`w-full text-left px-2 py-1 text-xs hover:bg-zinc-700 ${
+                    (mc.slug === value || mc.portal_id === value) ? 'text-purple-400 bg-zinc-800' : 'text-white'
+                  }`}
+                >{mc.title}</button>
               </li>
-              {filtered.length === 0 && (
-                <li className="px-2 py-2 text-xs text-zinc-500 text-center">Нічого не знайдено</li>
-              )}
-              {filtered.map(mc => (
-                <li key={mc.slug}>
-                  <button
-                    type="button"
-                    onClick={() => { onChange(mc.slug); setOpen(false); setSearch('') }}
-                    className={`w-full text-left px-2 py-1 text-xs hover:bg-zinc-700 ${
-                      mc.slug === value ? 'text-purple-400 bg-zinc-800' : 'text-white'
-                    }`}
-                  >
-                    {mc.title}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
@@ -1668,13 +1655,13 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               />
 
               {/* Column headers */}
-              <div className="grid grid-cols-[1fr_1fr_auto] gap-2 px-3 py-1.5 mb-1 bg-zinc-800/50 rounded-lg">
-                <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Категорія на сайті</span>
-                <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Категорія на MauDau</span>
-                <span className="text-[10px] text-zinc-500 uppercase tracking-wide w-16 text-center">Атрибути</span>
+              <div className="grid grid-cols-[1fr_1fr_56px] gap-2 px-2 py-1 mb-1">
+                <span className="text-[10px] text-zinc-600 uppercase tracking-wide">Категорія на сайті</span>
+                <span className="text-[10px] text-zinc-600 uppercase tracking-wide">Категорія на MauDau</span>
+                <span className="text-[10px] text-zinc-600 uppercase tracking-wide text-center">Атр.</span>
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {activeCategories
                   .filter(cat => !maudauBlockSearch || cat.toLowerCase().includes(maudauBlockSearch.toLowerCase()))
                   .map(cat => {
@@ -1682,25 +1669,20 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     const resolvedPortalId = /^\d+$/.test(mapping) ? mapping : (slugToPortalIdClient[mapping] ?? '')
                     const catAttrsForBlock = resolvedPortalId ? (portalIdAttrsMap[resolvedPortalId] ?? []) : []
                     const isBlockExpanded = expandedCatBlocks.has(cat)
-                    const selectedMauCat = maudauCategories.find(c => c.slug === mapping || c.portal_id === mapping)
-                    const displayLabel = selectedMauCat ? selectedMauCat.title : mapping || '— оберіть —'
 
                     return (
-                      <div key={cat} className="border border-zinc-800 rounded-lg overflow-hidden">
+                      <div key={cat} className="border border-zinc-800/60 rounded-lg overflow-hidden">
                         {/* Category row */}
-                        <div className="grid grid-cols-[1fr_1fr_auto] gap-2 px-3 py-2 items-center bg-zinc-900 hover:bg-zinc-800/30 transition-colors">
+                        <div className="grid grid-cols-[1fr_1fr_56px] gap-2 px-2 py-1.5 items-center bg-zinc-900">
                           {/* Site category */}
-                          <span className="text-xs text-zinc-200 truncate font-medium">{cat}</span>
+                          <span className="text-xs text-zinc-300 truncate">{cat}</span>
 
                           {/* MauDau category dropdown */}
-                          <div className="relative">
-                            <CategoryPortalRow
-                              catName={cat}
-                              value={mapping}
-                              maudauCategories={maudauCategories}
-                              onChange={v => setCategoryPortalIds(prev => ({ ...prev, [cat]: v }))}
-                            />
-                          </div>
+                          <MauDauCatDropdown
+                            value={mapping}
+                            maudauCategories={maudauCategories}
+                            onChange={v => setCategoryPortalIds(prev => ({ ...prev, [cat]: v }))}
+                          />
 
                           {/* Expand attrs button */}
                           <button
@@ -1711,17 +1693,17 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                               next.has(cat) ? next.delete(cat) : next.add(cat)
                               return next
                             })}
-                            className={`w-16 text-center text-[10px] px-2 py-1 rounded border transition-colors ${
+                            className={`text-center text-[10px] px-1.5 py-1 rounded border transition-colors ${
                               catAttrsForBlock.length === 0
                                 ? 'border-zinc-800 text-zinc-700 cursor-not-allowed'
                                 : isBlockExpanded
                                   ? 'bg-purple-900/40 border-purple-700 text-purple-300'
-                                  : 'border-zinc-700 text-zinc-400 hover:border-purple-600 hover:text-purple-400'
+                                  : 'border-zinc-700 text-zinc-500 hover:border-purple-600 hover:text-purple-400'
                             }`}
                             title={catAttrsForBlock.length === 0 ? 'Виберіть категорію MauDau' : `${catAttrsForBlock.length} атрибутів`}
                           >
                             {catAttrsForBlock.length > 0
-                              ? (isBlockExpanded ? `▲ ${catAttrsForBlock.length}` : `▼ ${catAttrsForBlock.length}`)
+                              ? (isBlockExpanded ? `▲${catAttrsForBlock.length}` : `▼${catAttrsForBlock.length}`)
                               : '—'}
                           </button>
                         </div>
