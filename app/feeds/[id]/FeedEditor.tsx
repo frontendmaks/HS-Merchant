@@ -925,150 +925,57 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
-        {/* === SETTINGS === */}
-        <div className="space-y-4">
-          {/* Status */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-            <h2 className="text-sm font-semibold text-white mb-4">Налаштування фіду</h2>
-            <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Статус</label>
-              <select
-                value={status}
-                onChange={e => setStatus(e.target.value)}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-500"
-              >
-                <option value="active">Активний</option>
-                <option value="draft">Чернетка</option>
-                <option value="inactive">Вимкнений</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Trigger */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-            <h2 className="text-sm font-semibold text-white mb-4">⏱ Тригер оновлення</h2>
-            <div className="space-y-3">
-              {[
-                { value: 'manual', label: '🖱 Вручну', desc: 'Оновлення тільки при відкритті URL' },
-                { value: 'scheduled', label: '⏱ За розкладом', desc: 'Кешується автоматично по cron' },
-                { value: 'webhook', label: '🔗 Вебхук', desc: 'Тригер при зміні товарів у WC' },
-              ].map(opt => (
-                <label key={opt.value} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                  trigger === opt.value ? 'border-red-600 bg-red-950/30' : 'border-zinc-800 hover:border-zinc-600'
-                }`}>
-                  <input
-                    type="radio"
-                    name="trigger"
-                    value={opt.value}
-                    checked={trigger === opt.value}
-                    onChange={() => setTrigger(opt.value)}
-                    className="mt-0.5 accent-red-500"
-                  />
-                  <div>
-                    <div className="text-sm text-white">{opt.label}</div>
-                    <div className="text-xs text-zinc-500">{opt.desc}</div>
-                  </div>
-                </label>
-              ))}
-
-              {trigger === 'scheduled' && (
-                <div className="mt-2">
-                  <label className="text-xs text-zinc-500 mb-1 block">Cron вираз</label>
-                  <input
-                    value={cronExpr}
-                    onChange={e => setCronExpr(e.target.value)}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-red-500"
-                    placeholder="0 * * * *"
-                  />
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {[
-                      ['Щогодини', '0 * * * *'],
-                      ['Кожні 6год', '0 */6 * * *'],
-                      ['Щодня о 6:00', '0 6 * * *'],
-                      ['Щодня о 00:00', '0 0 * * *'],
-                    ].map(([label, cron]) => (
-                      <button
-                        key={cron}
-                        onClick={() => setCronExpr(cron)}
-                        className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded transition-colors"
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {trigger === 'webhook' && (
-                <div className="text-xs text-zinc-500 bg-zinc-800 rounded-lg p-3 mt-2 leading-relaxed">
-                  WooCommerce → Налаштування → Вебхуки → Додати:<br />
-                  <span className="font-mono text-zinc-300 text-[11px]">POST https://hs-merchant.vercel.app/api/sync/woocommerce</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-
-          {/* MauDau: Category portal_id mapping */}
-          {isMaudau && (
-            <div className="bg-zinc-900 border border-purple-900/50 rounded-xl p-5">
-              <div className="flex items-start justify-between gap-2 mb-1">
-                <h2 className="text-sm font-semibold text-white">🟣 MauDau — категорії</h2>
-                {maudauCatsLoading && <span className="text-xs text-zinc-500">Завантаження...</span>}
-              </div>
-              <p className="text-xs text-zinc-500 mb-3">
-                Зіставте свої категорії з категоріями MauDau.
-                {maudauCategories.length > 0 && (
-                  <span className={maudauCatsSource === 'db' ? 'text-emerald-500' : 'text-amber-500'}>
-                    {' '}• {maudauCategories.length} категорій
-                  </span>
-                )}
-              </p>
-
-              {/* Sync all categories button */}
-              <div className="mb-4 flex items-center gap-3">
-                <button
-                  onClick={handleSyncAllCategories}
-                  disabled={syncingCats}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-purple-700 text-purple-300 hover:bg-purple-900/20 transition-colors disabled:opacity-50 whitespace-nowrap"
-                >
-                  {syncingCats ? '⏳ Синхронізація...' : '🔄 Завантажити всі категорії MauDau'}
-                </button>
-                {syncCatsMsg && <span className="text-xs text-zinc-400">{syncCatsMsg}</span>}
-                {syncingCats && <span className="text-xs text-zinc-500">~1-2 хв, зачекайте...</span>}
-              </div>
-
-              {maudauCatsError && (
-                <p className="text-xs text-red-400 mb-3">{maudauCatsError}</p>
-              )}
-              {activeCategories.length === 0 ? (
-                <p className="text-xs text-zinc-600">Спочатку виберіть товари праворуч.</p>
-              ) : (
-                <div className="space-y-2">
-                  {activeCategories.map(cat => (
-                    <CategoryPortalRow
-                      key={cat}
-                      catName={cat}
-                      value={categoryPortalIds[cat] ?? ''}
-                      maudauCategories={maudauCategories}
-                      onChange={v => setCategoryPortalIds(prev => ({ ...prev, [cat]: v }))}
-                    />
-                  ))}
-                </div>
-              )}
-              {maudauCategories.length === 0 && !maudauCatsLoading && !maudauCatsError && (
-                <p className="text-xs text-zinc-600 mt-3">
-                  Категорії не знайдено — переконайтеся що є активні товари в кабінеті MauDau,
-                  або введіть slug вручну.
-                </p>
-              )}
-            </div>
-          )}
+      {/* Compact settings bar */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex flex-wrap items-center gap-4">
+        {/* Status */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-zinc-500 whitespace-nowrap">Статус:</span>
+          <select value={status} onChange={e => setStatus(e.target.value)}
+            className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-red-500">
+            <option value="active">Активний</option>
+            <option value="draft">Чернетка</option>
+            <option value="inactive">Вимкнений</option>
+          </select>
         </div>
+        <div className="w-px h-5 bg-zinc-700 hidden sm:block" />
+        {/* Trigger tabs */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-zinc-500 mr-1 whitespace-nowrap">Тригер:</span>
+          {[
+            { value: 'manual', label: '🖱 Вручну' },
+            { value: 'scheduled', label: '⏱ Розклад' },
+            { value: 'webhook', label: '🔗 Вебхук' },
+          ].map(opt => (
+            <button key={opt.value} onClick={() => setTrigger(opt.value)}
+              className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+                trigger === opt.value ? 'bg-red-700 border-red-700 text-white' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'
+              }`}>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {/* Cron inline (only when scheduled) */}
+        {trigger === 'scheduled' && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <input value={cronExpr} onChange={e => setCronExpr(e.target.value)}
+              className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white font-mono w-28 focus:outline-none focus:border-red-500"
+              placeholder="0 6 * * *" />
+            <div className="flex gap-1">
+              {[['6год','0 */6 * * *'],['День','0 6 * * *'],['Ніч','0 0 * * *']].map(([l,c]) => (
+                <button key={c} onClick={() => setCronExpr(c)}
+                  className="text-[10px] px-1.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded border border-zinc-700 transition-colors">{l}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        {/* Webhook hint */}
+        {trigger === 'webhook' && (
+          <span className="text-xs text-zinc-500 font-mono">POST /api/sync/woocommerce</span>
+        )}
+      </div>
 
-        {/* === PRODUCTS TABLE === */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col">
+      {/* === PRODUCTS TABLE (full width) === */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col">
 
           {/* Header: search + counters */}
           <div className="px-4 pt-4 pb-3 border-b border-zinc-800 space-y-3">
@@ -1274,10 +1181,10 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
               // MauDau structured attrs for expanded view
               const curParams = ov.custom_params ?? {}
-              const catPortalId = isMaudau ? getCatPortalId(p.category_name ?? '') : ''
+              const catPortalId = isMaudau ? (curParams['_maudau_category'] || getCatPortalId(p.category_name ?? '')) : ''
               const catAttrsExp: { name: string; type: string; values: string[] }[] = catPortalId ? (portalIdAttrsMap[catPortalId] ?? []) : []
               const catAttrNames = new Set(catAttrsExp.map(a => a.name))
-              const extraParams = Object.entries(curParams).filter(([k]) => !catAttrNames.has(k))
+              const extraParams = Object.entries(curParams).filter(([k]) => !catAttrNames.has(k) && k !== '_maudau_category')
               const setParam = (key: string, value: string) =>
                 setOverride(p.id, 'custom_params', { ...curParams, [key]: value })
               const clearParam = (key: string) => {
@@ -1369,6 +1276,29 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                   {/* Expanded: characteristics + MauDau fields */}
                   {isExpanded && (
                     <div className="px-4 pb-3 space-y-3 bg-zinc-800/20 border-t border-zinc-800/60">
+                      {/* Per-product MauDau category override */}
+                      {isMaudau && (
+                        <div className="pt-2 flex items-center gap-2">
+                          <span className="text-[11px] text-zinc-400 whitespace-nowrap shrink-0">MauDau категорія:</span>
+                          <select
+                            value={curParams['_maudau_category'] ?? ''}
+                            onChange={e => {
+                              const v = e.target.value
+                              if (v) setParam('_maudau_category', v)
+                              else clearParam('_maudau_category')
+                            }}
+                            className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-purple-500"
+                          >
+                            <option value="">— авто: {p.category_name} —</option>
+                            {maudauCategories
+                              .filter(c => c.portal_id)
+                              .sort((a, b) => a.title.localeCompare(b.title, 'uk'))
+                              .map(c => (
+                                <option key={c.portal_id} value={c.portal_id!}>{c.title}</option>
+                              ))}
+                          </select>
+                        </div>
+                      )}
                       <div className="pt-2">
                         <div className="flex items-center justify-between mb-1.5">
                           <span className="text-[11px] text-zinc-400 font-medium">Характеристики</span>
@@ -1578,8 +1508,63 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               </div>
             </div>
           )}
-        </div>
       </div>
+
+      {/* MauDau: Category portal_id mapping */}
+      {isMaudau && (
+        <div className="bg-zinc-900 border border-purple-900/50 rounded-xl p-5">
+          <div className="flex items-start justify-between gap-2 mb-1">
+            <h2 className="text-sm font-semibold text-white">🟣 MauDau — категорії</h2>
+            {maudauCatsLoading && <span className="text-xs text-zinc-500">Завантаження...</span>}
+          </div>
+          <p className="text-xs text-zinc-500 mb-3">
+            Зіставте свої категорії з категоріями MauDau.
+            {maudauCategories.length > 0 && (
+              <span className={maudauCatsSource === 'db' ? 'text-emerald-500' : 'text-amber-500'}>
+                {' '}• {maudauCategories.length} категорій
+              </span>
+            )}
+          </p>
+
+          {/* Sync all categories button */}
+          <div className="mb-4 flex items-center gap-3">
+            <button
+              onClick={handleSyncAllCategories}
+              disabled={syncingCats}
+              className="text-xs px-3 py-1.5 rounded-lg border border-purple-700 text-purple-300 hover:bg-purple-900/20 transition-colors disabled:opacity-50 whitespace-nowrap"
+            >
+              {syncingCats ? '⏳ Синхронізація...' : '🔄 Завантажити всі категорії MauDau'}
+            </button>
+            {syncCatsMsg && <span className="text-xs text-zinc-400">{syncCatsMsg}</span>}
+            {syncingCats && <span className="text-xs text-zinc-500">~1-2 хв, зачекайте...</span>}
+          </div>
+
+          {maudauCatsError && (
+            <p className="text-xs text-red-400 mb-3">{maudauCatsError}</p>
+          )}
+          {activeCategories.length === 0 ? (
+            <p className="text-xs text-zinc-600">Спочатку виберіть товари праворуч.</p>
+          ) : (
+            <div className="space-y-2">
+              {activeCategories.map(cat => (
+                <CategoryPortalRow
+                  key={cat}
+                  catName={cat}
+                  value={categoryPortalIds[cat] ?? ''}
+                  maudauCategories={maudauCategories}
+                  onChange={v => setCategoryPortalIds(prev => ({ ...prev, [cat]: v }))}
+                />
+              ))}
+            </div>
+          )}
+          {maudauCategories.length === 0 && !maudauCatsLoading && !maudauCatsError && (
+            <p className="text-xs text-zinc-600 mt-3">
+              Категорії не знайдено — переконайтеся що є активні товари в кабінеті MauDau,
+              або введіть slug вручну.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* MauDau: feed URL info */}
       {isMaudau && (
