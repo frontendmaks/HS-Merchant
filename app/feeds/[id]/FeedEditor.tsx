@@ -275,11 +275,19 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     }
   }
 
+  // Stable snapshot of products saved in the feed (from DB, doesn't change until save)
+  const savedFeedIds = useMemo(
+    () => new Set(feedProducts.filter(fp => fp.is_active).map(fp => fp.product_id)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [] // intentionally computed once from initial props
+  )
+
   const [productSearch, setProductSearch] = useState('')
   const [categorySearch, setCategorySearch] = useState('')
   const [catBlockOpen, setCatBlockOpen] = useState(true)
   const [showOnlySelected, setShowOnlySelected] = useState(false)
   const [showOnlyWithIssues, setShowOnlyWithIssues] = useState(false)
+  const [showOnlyInFeed, setShowOnlyInFeed] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const PAGE_SIZE = 50
   // Which product row is expanded
@@ -712,6 +720,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const filteredProducts = useMemo(() => {
     return allProducts.filter(p => {
       const ov = overrides[p.id] ?? {}
+      if (showOnlyInFeed && !savedFeedIds.has(p.id)) return false
       if (showOnlySelected && ov.is_active !== true) return false
       if (selectedCategories.length > 0) {
         if (!p.category_name || !selectedCategories.includes(p.category_name)) return false
@@ -725,19 +734,19 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
       }
       return true
     })
-  }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues, overrides, portalIdAttrsMap, slugToPortalIdClient, categoryPortalIds, isMaudau])
+  }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues, showOnlyInFeed, savedFeedIds, overrides, portalIdAttrsMap, slugToPortalIdClient, categoryPortalIds, isMaudau])
 
   // Reset to page 1 whenever filters change
   useEffect(() => {
     setCurrentPage(1)
-  }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues])
+  }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues, showOnlyInFeed])
 
   // Categories: when a context filter is active, show only categories in filtered products
   const contextActiveCategories = useMemo(() => {
-    if (!showOnlySelected && !showOnlyWithIssues && !productSearch) return null
+    if (!showOnlySelected && !showOnlyWithIssues && !showOnlyInFeed && !productSearch) return null
     const cats = new Set(filteredProducts.map(p => p.category_name).filter(Boolean) as string[])
     return cats
-  }, [filteredProducts, showOnlySelected, showOnlyWithIssues, productSearch])
+  }, [filteredProducts, showOnlySelected, showOnlyWithIssues, showOnlyInFeed, productSearch])
 
   const filteredCategories = useMemo(() => {
     const base = contextActiveCategories
@@ -1036,7 +1045,17 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => { setShowOnlySelected(v => !v); setShowOnlyWithIssues(false) }}
+                  onClick={() => { setShowOnlyInFeed(v => !v); setShowOnlySelected(false); setShowOnlyWithIssues(false) }}
+                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
+                    showOnlyInFeed
+                      ? 'bg-blue-700 border-blue-700 text-white'
+                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-blue-700'
+                  }`}
+                >
+                  📋 Товари у фіді ({savedFeedIds.size})
+                </button>
+                <button
+                  onClick={() => { setShowOnlySelected(v => !v); setShowOnlyWithIssues(false); setShowOnlyInFeed(false) }}
                   className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
                     showOnlySelected
                       ? 'bg-emerald-600 border-emerald-600 text-white'
@@ -1046,7 +1065,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                   {showOnlySelected ? '✓ Вибрані' : 'Вибрані'}
                 </button>
                 <button
-                  onClick={() => { setShowOnlyWithIssues(v => !v); setShowOnlySelected(false) }}
+                  onClick={() => { setShowOnlyWithIssues(v => !v); setShowOnlySelected(false); setShowOnlyInFeed(false) }}
                   className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
                     showOnlyWithIssues
                       ? 'bg-red-700 border-red-700 text-white'
@@ -1225,6 +1244,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             {filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map(p => {
               const ov = overrides[p.id] ?? {}
               const isActive = ov.is_active === true
+              const inSavedFeed = savedFeedIds.has(p.id)
               const isExpanded = expandedProduct === p.id
               const thumb = p.images?.[0]
               const issues = getProductIssues(p, ov)
@@ -1254,9 +1274,10 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                 <div key={p.id} className={`transition-colors border-l-2 ${
                   isActive && hasErrors ? 'border-red-600' :
                   isActive && hasWarns ? 'border-amber-600' :
+                  inSavedFeed && !isActive ? 'border-orange-700' :
                   'border-transparent'
                 } ${isActive ? 'hover:bg-zinc-800/30' : 'opacity-35 hover:opacity-60'}`}>
-                  <div className="grid grid-cols-[20px_36px_1fr_70px_70px_56px] gap-2 px-4 py-2 items-center">
+                  <div className="grid grid-cols-[20px_10px_36px_1fr_70px_70px_56px] gap-2 px-4 py-2 items-center">
                     {/* Checkbox */}
                     <input
                       type="checkbox"
@@ -1264,6 +1285,10 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                       onChange={e => setOverride(p.id, 'is_active', e.target.checked)}
                       className="accent-red-500 cursor-pointer"
                     />
+                    {/* Feed membership indicator */}
+                    <div title={inSavedFeed ? 'У збереженому фіді' : 'Не у фіді'}>
+                      <div className={`w-1.5 h-1.5 rounded-full ${inSavedFeed ? 'bg-blue-500' : 'bg-zinc-700'}`} />
+                    </div>
 
                     {/* Thumbnail */}
                     <div className={`w-8 h-8 rounded overflow-hidden shrink-0 flex items-center justify-center ${!thumb ? 'bg-red-950 border border-red-800' : 'bg-zinc-800'}`}>
