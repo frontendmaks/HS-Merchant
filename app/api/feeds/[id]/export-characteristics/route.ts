@@ -1,7 +1,7 @@
-import { getMaudauJwt } from '@/lib/maudau'
 import { createServiceClient } from '@/lib/supabase/service'
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
+import { zipSync } from 'fflate'
 
 // ── Regex inference helpers ───────────────────────────────────────────────────
 
@@ -350,9 +350,13 @@ export async function GET(
     // Non-fatal — id column will be empty if table unavailable
   }
 
-  // 6. Build xlsx workbook with cell styling
-  const wb = XLSX.utils.book_new()
+  // 6. Build one xlsx per category, pack into zip
   const YELLOW = { fgColor: { rgb: 'FFFF00' }, patternType: 'solid' }
+  const zipEntries: Record<string, Uint8Array> = {}
+
+  // Sanitize a category title for use as a filename
+  const safeFilename = (title: string) =>
+    title.replace(/[/\\:*?"<>|]/g, '_').replace(/\s+/g, '_').slice(0, 60)
 
   for (const [, group] of categoryGroups) {
     const { catTitle, catAttrs, products } = group
@@ -361,10 +365,9 @@ export async function GET(
 
     // Build raw data rows (before filtering empty columns)
     const rawRows: (string | null)[][] = products.map(product => {
-      // Resolve MauDau product ID: prefer lookup by vendor_code, fall back to vendor_code itself
       const maudauId = vendorToMaudauId[product.id] ?? ''
       return [
-        maudauId || product.id, // id column = MauDau internal ID when available
+        maudauId || product.id,
         ...colKeys.map(k => {
           if (k === 'Вага') return product.params['Вага'] ?? product.params['Вага упаковки'] ?? null
           return product.params[k] ?? null
@@ -372,11 +375,10 @@ export async function GET(
       ]
     })
 
-    // Remove columns where ALL product rows are empty (skip id column at index 0)
-    const keepColIndices: number[] = [0] // always keep id
+    // Remove columns where ALL rows are empty
+    const keepColIndices: number[] = [0]
     for (let C = 1; C <= colKeys.length; C++) {
-      const hasValue = rawRows.some(row => row[C] !== null && row[C] !== '')
-      if (hasValue) keepColIndices.push(C)
+      if (rawRows.some(row => row[C] !== null && row[C] !== '')) keepColIndices.push(C)
     }
 
     const filteredColKeys = keepColIndices.slice(1).map(i => colKeys[i - 1])
@@ -386,6 +388,7 @@ export async function GET(
       ...rawRows.map(row => keepColIndices.map(i => row[i])),
     ]
 
+    const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.aoa_to_sheet(wsData)
 
     // Yellow highlight for empty non-id cells
@@ -399,25 +402,29 @@ export async function GET(
       }
     }
 
-    // Extend worksheet range to include empty styled cells
     const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1')
     range.e.r = Math.max(range.e.r, wsData.length - 1)
     range.e.c = Math.max(range.e.c, headers.length - 1)
     ws['!ref'] = XLSX.utils.encode_range(range)
 
-    XLSX.utils.book_append_sheet(wb, ws, catTitle.slice(0, 31))
-  }
+    XLSX.utils.book_append_sheet(wb, ws, 'characteristics')
 
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true })
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true }) as Buffer
+    const fname = `${safeFilename(catTitle)}.xlsx`
+    zipEntries[fname] = new Uint8Array(buf)
+  }
 
   const now = new Date()
   const pad = (n: number) => String(n).padStart(2, '0')
-  const filename = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}_characteristics.xlsx`
+  const dateStr = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`
+  const zipFilename = `${dateStr}_characteristics.zip`
 
-  return new NextResponse(buf, {
+  const zipped = zipSync(zipEntries, { level: 6 })
+
+  return new NextResponse(zipped, {
     headers: {
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${zipFilename}"`,
     },
   })
 }
