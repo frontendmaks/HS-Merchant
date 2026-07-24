@@ -55,7 +55,7 @@ type Override = {
   custom_params?: Record<string, string>
 }
 
-/** Searchable MauDau category dropdown (no catName label — use in grid context) */
+/** Searchable MauDau category picker — inline expand (no absolute, works inside overflow containers) */
 function MauDauCatDropdown({
   value, maudauCategories, onChange,
 }: {
@@ -67,7 +67,7 @@ function MauDauCatDropdown({
   const [search, setSearch] = useState('')
 
   const selectedCat = maudauCategories.find(c => c.slug === value || c.portal_id === value)
-  const displayLabel = selectedCat ? selectedCat.title : value || '— оберіть —'
+  const displayLabel = selectedCat ? selectedCat.title : '— оберіть —'
 
   const filtered = search.trim()
     ? maudauCategories.filter(c =>
@@ -77,19 +77,23 @@ function MauDauCatDropdown({
     : maudauCategories
 
   return (
-    <div className="relative w-full">
+    <div className="w-full">
+      {/* Trigger button */}
       <button
         type="button"
         onClick={() => { setOpen(o => !o); setSearch('') }}
-        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-left text-white focus:outline-none focus:border-purple-500 flex items-center justify-between gap-1"
+        className={`w-full bg-zinc-800 border rounded px-2 py-1 text-xs text-left focus:outline-none flex items-center justify-between gap-1 transition-colors ${
+          open ? 'border-purple-600 text-white' : 'border-zinc-700 text-zinc-200 hover:border-zinc-500'
+        }`}
       >
         <span className="truncate flex-1">{displayLabel}</span>
         <span className="text-zinc-500 shrink-0 text-[10px]">{open ? '▲' : '▼'}</span>
       </button>
 
+      {/* Inline panel */}
       {open && (
-        <div className="absolute z-50 top-full left-0 mt-1 w-72 bg-zinc-900 border border-zinc-700 rounded shadow-xl">
-          <div className="p-1.5 border-b border-zinc-700">
+        <div className="mt-1 bg-zinc-900 border border-purple-800/60 rounded-lg overflow-hidden shadow-lg">
+          <div className="p-1.5 border-b border-zinc-800">
             <input
               autoFocus
               type="text"
@@ -99,24 +103,24 @@ function MauDauCatDropdown({
               className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-purple-500"
             />
           </div>
-          <ul className="max-h-52 overflow-y-auto">
+          <ul className="max-h-48 overflow-y-auto">
             <li>
               <button
                 type="button"
-                className="w-full text-left px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-700"
+                className="w-full text-left px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-800"
                 onClick={() => { onChange(''); setOpen(false) }}
-              >— оберіть —</button>
+              >— прибрати вибір —</button>
             </li>
             {filtered.length === 0 && (
-              <li className="px-2 py-2 text-xs text-zinc-500 text-center">Нічого не знайдено</li>
+              <li className="px-2 py-2 text-xs text-zinc-600 text-center">Нічого не знайдено</li>
             )}
             {filtered.map(mc => (
               <li key={mc.slug}>
                 <button
                   type="button"
                   onClick={() => { onChange(mc.slug); setOpen(false); setSearch('') }}
-                  className={`w-full text-left px-2 py-1 text-xs hover:bg-zinc-700 ${
-                    (mc.slug === value || mc.portal_id === value) ? 'text-purple-400 bg-zinc-800' : 'text-white'
+                  className={`w-full text-left px-2 py-1.5 text-xs hover:bg-zinc-800 ${
+                    (mc.slug === value || mc.portal_id === value) ? 'text-purple-400 font-medium' : 'text-zinc-200'
                   }`}
                 >{mc.title}</button>
               </li>
