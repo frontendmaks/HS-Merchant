@@ -1779,14 +1779,39 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                 <span className="text-xs text-zinc-600">• {maudauCategories.length} кат.</span>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={handleSyncAllCategories}
                 disabled={syncingCats}
                 className="text-xs px-2.5 py-1 rounded-lg border border-purple-800 text-purple-400 hover:bg-purple-900/20 transition-colors disabled:opacity-50 whitespace-nowrap"
               >
-                {syncingCats ? '⏳...' : '🔄 Завантажити всі категорії MauDau'}
+                {syncingCats ? '⏳...' : '🔄 Категорії'}
               </button>
+              {/* Upload MauDau export to refresh sku→id mapping */}
+              <label className="text-xs px-2.5 py-1 rounded-lg border border-zinc-700 text-zinc-400 hover:border-purple-700 hover:text-purple-400 transition-colors cursor-pointer whitespace-nowrap">
+                📥 Оновити ID товарів
+                <input
+                  type="file"
+                  accept=".xlsx"
+                  className="hidden"
+                  onChange={async e => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    e.target.value = ''
+                    setSyncCatsMsg('⏳ Завантаження...')
+                    const fd = new FormData()
+                    fd.append('file', file)
+                    try {
+                      const res = await fetch('/api/maudau/upload-product-ids', { method: 'POST', body: fd })
+                      const d = await res.json()
+                      if (!res.ok) setSyncCatsMsg(`❌ ${d.error}`)
+                      else setSyncCatsMsg(`✅ Оновлено ${d.count} ID`)
+                    } catch {
+                      setSyncCatsMsg('❌ Помилка завантаження')
+                    }
+                  }}
+                />
+              </label>
               {syncCatsMsg && <span className="text-xs text-zinc-400">{syncCatsMsg}</span>}
             </div>
           </div>
