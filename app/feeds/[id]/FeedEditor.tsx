@@ -277,6 +277,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
   const [productSearch, setProductSearch] = useState('')
   const [categorySearch, setCategorySearch] = useState('')
+  const [catBlockOpen, setCatBlockOpen] = useState(true)
   const [showOnlySelected, setShowOnlySelected] = useState(false)
   const [showOnlyWithIssues, setShowOnlyWithIssues] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
@@ -696,11 +697,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     })
   }
 
-  // Categories filtered by search
-  const filteredCategories = useMemo(() =>
-    categories.filter(c => !categorySearch || c.toLowerCase().includes(categorySearch.toLowerCase())),
-    [categories, categorySearch]
-  )
+  // filteredCategories — declared after filteredProducts (see below)
 
   // portal_id → attributes map for quick lookup
   const portalIdAttrsMap = useMemo(() => {
@@ -734,6 +731,20 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   useEffect(() => {
     setCurrentPage(1)
   }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues])
+
+  // Categories: when a context filter is active, show only categories in filtered products
+  const contextActiveCategories = useMemo(() => {
+    if (!showOnlySelected && !showOnlyWithIssues && !productSearch) return null
+    const cats = new Set(filteredProducts.map(p => p.category_name).filter(Boolean) as string[])
+    return cats
+  }, [filteredProducts, showOnlySelected, showOnlyWithIssues, productSearch])
+
+  const filteredCategories = useMemo(() => {
+    const base = contextActiveCategories
+      ? categories.filter(c => contextActiveCategories.has(c))
+      : categories
+    return base.filter(c => !categorySearch || c.toLowerCase().includes(categorySearch.toLowerCase()))
+  }, [categories, categorySearch, contextActiveCategories])
 
   // Count actually selected (active) products across ALL products
   const selectedCount = useMemo(() =>
@@ -1114,30 +1125,43 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     className="text-xs text-zinc-500 hover:text-red-400 transition-colors"
                   >✕ скинути</button>
                 )}
-              </div>
-              <input
-                type="text"
-                placeholder="Пошук категорії..."
-                value={categorySearch}
-                onChange={e => setCategorySearch(e.target.value)}
-                className="w-full mb-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-red-500"
-              />
-              <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                {filteredCategories.map(cat => (
-                  <button
-                    key={cat}
-                    onClick={() => toggleCategory(cat)}
-                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors whitespace-nowrap ${
-                      selectedCategories.includes(cat)
-                        ? 'bg-red-600 border-red-600 text-white'
-                        : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'
-                    }`}
-                  >{cat}</button>
-                ))}
-                {filteredCategories.length === 0 && (
-                  <span className="text-xs text-zinc-600">Нічого не знайдено</span>
+                {contextActiveCategories && (
+                  <span className="text-xs text-zinc-600">• {filteredCategories.length} у фільтрі</span>
                 )}
+                <button
+                  onClick={() => setCatBlockOpen(v => !v)}
+                  className="ml-auto text-[10px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-500 hover:border-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  {catBlockOpen ? '▲ Згорнути' : '▼ Розгорнути'}
+                </button>
               </div>
+              {catBlockOpen && (
+                <>
+                  <input
+                    type="text"
+                    placeholder="Пошук категорії..."
+                    value={categorySearch}
+                    onChange={e => setCategorySearch(e.target.value)}
+                    className="w-full mb-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-red-500"
+                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    {filteredCategories.map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => toggleCategory(cat)}
+                        className={`text-xs px-2.5 py-1 rounded-full border transition-colors whitespace-nowrap ${
+                          selectedCategories.includes(cat)
+                            ? 'bg-red-600 border-red-600 text-white'
+                            : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'
+                        }`}
+                      >{cat}</button>
+                    ))}
+                    {filteredCategories.length === 0 && (
+                      <span className="text-xs text-zinc-600">Нічого не знайдено</span>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Bulk actions */}
