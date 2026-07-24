@@ -269,6 +269,8 @@ export async function GET(
     const attrValues = (n: string): string[] => catAttrs.find(a => a.name === n)?.values ?? []
 
     const params: Record<string, string> = { ...cp }
+    // Гарантія must not be carried over from DB (wrong auto-fill value); leave empty
+    delete params['Гарантія']
 
     // Regex inference
     if (hasAttr('Тип')) {
@@ -299,11 +301,12 @@ export async function GET(
     if (hasAttr('Тип обробки')) {
       params['Тип обробки'] = fixTypObr(params['Тип обробки'] ?? 'Охолоджений')
     }
-    if (hasAttr('Вага') && !params['Вага'] && !params['Вага упаковки']) {
+    if (hasAttr('Вага')) {
+      const allowedWeights = attrValues('Вага')
+      const existingVaha = params['Вага'] ?? params['Вага упаковки'] ?? ''
       const pAttrs = p.attributes ?? {}
       const unit = pAttrs['Одиниця'] ?? 'шт'
-      const wAttr = pAttrs['Вага']
-      let rawWeight = wAttr ?? ''
+      let rawWeight = existingVaha || pAttrs['Вага'] || ''
       if (!rawWeight) {
         const minVal = parseFloat(pAttrs['Мін'] ?? '0') || null
         if (minVal && ['кг', 'г', 'мл', 'л'].includes(unit)) {
@@ -313,9 +316,11 @@ export async function GET(
         }
       }
       if (rawWeight) {
-        const allowedWeights = attrValues('Вага')
-        const matched = closestWeight(rawWeight, allowedWeights)
+        const matched = closestWeight(rawWeight.trim(), allowedWeights)
         if (matched) params['Вага'] = matched
+        else delete params['Вага'] // clear non-standard value
+      } else {
+        delete params['Вага']
       }
     }
     // Гарантія — do not auto-fill; leave empty so user sets it manually
