@@ -1,3 +1,4 @@
+import { getMaudauJwt } from '@/lib/maudau'
 import { createServiceClient } from '@/lib/supabase/service'
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
@@ -317,11 +318,7 @@ export async function GET(
         if (matched) params['Вага'] = matched
       }
     }
-    // Гарантія — always use first MauDau allowed value (strip HTML tags)
-    if (hasAttr('Гарантія')) {
-      const firstVal = catAttrs.find(a => a.name === 'Гарантія')?.values?.[0]
-      if (firstVal) params['Гарантія'] = firstVal.replace(/<[^>]+>/g, '').trim()
-    }
+    // Гарантія — do not auto-fill; leave empty so user sets it manually
 
     if (!categoryGroups.has(catTitle)) {
       categoryGroups.set(catTitle, { portalId, catTitle, catAttrs, products: [] })
@@ -333,7 +330,27 @@ export async function GET(
     return NextResponse.json({ error: 'No products with mapped categories' }, { status: 404 })
   }
 
-  // (Claude AI pass removed — caused Vercel timeout; regex inference handles most fields)
+  // 5. Fetch MauDau product IDs — map vendor_code → maudau_id
+  const vendorToMaudauId: Record<string, string> = {}
+  try {
+    const jwt = await getMaudauJwt()
+    const BASE = process.env.MAUDAU_BASE!
+    // Fetch up to 500 products from MauDau to get their internal IDs
+    const r = await fetch(`${BASE}/v1/merchant_public_api/products?page=1&per_page=500`, {
+      headers: { Authorization: `Bearer ${jwt}` },
+    })
+    if (r.ok) {
+      const body = await r.json()
+      const items: any[] = Array.isArray(body) ? body : (body.products ?? body.data?.products ?? body.items ?? [])
+      for (const item of items) {
+        const vc = item.vendor_code ?? item.article ?? item.vendorCode ?? ''
+        const mid = String(item.id ?? item.product_id ?? '')
+        if (vc && mid) vendorToMaudauId[vc] = mid
+      }
+    }
+  } catch {
+    // Non-fatal — fall back to vendor_code column if MauDau API unavailable
+  }
 
   // 6. Build xlsx workbook with cell styling
   const wb = XLSX.utils.book_new()
@@ -342,34 +359,49 @@ export async function GET(
   for (const [, group] of categoryGroups) {
     const { catTitle, catAttrs, products } = group
     const sheetAttrs = catAttrs.filter(a => !['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад'].includes(a.name))
-    // Row 1: technical slug headers — first column 'id' = MauDau internal product ID
     const colKeys = sheetAttrs.map(a => a.name)
-    const headers = ['id', ...colKeys.map(attrColName)]
 
-    const wsData: (string | null)[][] = [headers]
-    for (const product of products) {
-      const row: (string | null)[] = [product.id, ...colKeys.map(k => {
-        if (k === 'Вага') return product.params['Вага'] ?? product.params['Вага упаковки'] ?? null
-        return product.params[k] ?? null
-      })]
-      wsData.push(row)
+    // Build raw data rows (before filtering empty columns)
+    const rawRows: (string | null)[][] = products.map(product => {
+      // Resolve MauDau product ID: prefer lookup by vendor_code, fall back to vendor_code itself
+      const maudauId = vendorToMaudauId[product.id] ?? ''
+      return [
+        maudauId || product.id, // id column = MauDau internal ID when available
+        ...colKeys.map(k => {
+          if (k === 'Вага') return product.params['Вага'] ?? product.params['Вага упаковки'] ?? null
+          return product.params[k] ?? null
+        }),
+      ]
+    })
+
+    // Remove columns where ALL product rows are empty (skip id column at index 0)
+    const keepColIndices: number[] = [0] // always keep id
+    for (let C = 1; C <= colKeys.length; C++) {
+      const hasValue = rawRows.some(row => row[C] !== null && row[C] !== '')
+      if (hasValue) keepColIndices.push(C)
     }
+
+    const filteredColKeys = keepColIndices.slice(1).map(i => colKeys[i - 1])
+    const headers = ['id', ...filteredColKeys.map(attrColName)]
+    const wsData: (string | null)[][] = [
+      headers,
+      ...rawRows.map(row => keepColIndices.map(i => row[i])),
+    ]
 
     const ws = XLSX.utils.aoa_to_sheet(wsData)
 
-    // Yellow highlight for empty cells in product rows (skip header row 0)
+    // Yellow highlight for empty non-id cells
     for (let R = 1; R < wsData.length; R++) {
       for (let C = 1; C < headers.length; C++) {
-        if (colKeys[C - 1] === 'Гарантія') continue
+        if (filteredColKeys[C - 1] === 'Гарантія') continue
         const cellAddr = XLSX.utils.encode_cell({ r: R, c: C })
-        const val = wsData[R][C]
-        if (!val) {
+        if (!wsData[R][C]) {
           ws[cellAddr] = { v: '', t: 's', s: { fill: YELLOW } }
         }
       }
     }
 
-    // Update worksheet range to include empty styled cells
+    // Extend worksheet range to include empty styled cells
     const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1')
     range.e.r = Math.max(range.e.r, wsData.length - 1)
     range.e.c = Math.max(range.e.c, headers.length - 1)
