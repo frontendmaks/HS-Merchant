@@ -125,8 +125,8 @@ function attrToSlug(name: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
 }
-function attrColName(name: string): string {
-  return `s.${attrToSlug(name)}`
+function attrColName(name: string, slug?: string): string {
+  return `s.${slug ?? attrToSlug(name)}`
 }
 
 // ── Weight helpers ────────────────────────────────────────────────────────────
@@ -220,7 +220,7 @@ export async function GET(
     .not('portal_id', 'is', null)
 
   const slugToPortalId: Record<string, string> = {}
-  const portalIdToAttrs: Record<string, { name: string; values: string[] }[]> = {}
+  const portalIdToAttrs: Record<string, { name: string; type?: string; values: string[]; slug?: string }[]> = {}
   const portalIdToTitle: Record<string, string> = {}
 
   for (const cat of maudauCats ?? []) {
@@ -239,15 +239,16 @@ export async function GET(
   }
 
   // 4. First pass: regex inference — group by category
+  type AttrDef = { name: string; type?: string; values: string[]; slug?: string }
   type ProductEntry = {
     id: string
     name: string
     description: string
     params: Record<string, string>
-    catAttrs: { name: string; values: string[] }[]
+    catAttrs: AttrDef[]
     catTitle: string
   }
-  const categoryGroups = new Map<string, { portalId: string; catTitle: string; catAttrs: { name: string; values: string[] }[]; products: ProductEntry[] }>()
+  const categoryGroups = new Map<string, { portalId: string; catTitle: string; catAttrs: AttrDef[]; products: ProductEntry[] }>()
 
   for (const fp of feedProducts) {
     const p = fp.product as any
@@ -382,7 +383,8 @@ export async function GET(
     }
 
     const filteredColKeys = keepColIndices.slice(1).map(i => colKeys[i - 1])
-    const headers = ['id', ...filteredColKeys.map(attrColName)]
+    const attrByName = new Map(sheetAttrs.map(a => [a.name, a]))
+    const headers = ['id', ...filteredColKeys.map(k => attrColName(k, attrByName.get(k)?.slug))]
     const wsData: (string | null)[][] = [
       headers,
       ...rawRows.map(row => keepColIndices.map(i => row[i])),

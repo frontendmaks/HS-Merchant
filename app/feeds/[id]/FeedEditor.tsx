@@ -352,6 +352,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   // MauDau category block: expand per category + search + category-level defaults
   const [expandedCatBlocks, setExpandedCatBlocks] = useState<Set<string>>(new Set())
   const [maudauBlockSearch, setMaudauBlockSearch] = useState('')
+  const [attrTemplateStatus, setAttrTemplateStatus] = useState<Record<string, string>>({}) // portalId → 'ok'|'err'|msg
 
   const setCatDefaultAndApply = (catName: string, portalId: string, attrName: string, value: string) => {
     setOverrides(prev => {
@@ -1888,9 +1889,44 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                         {/* Expanded: attributes for this category (mass-fill) */}
                         {isBlockExpanded && catAttrsForBlock.length > 0 && (
                           <div className="px-3 py-3 bg-zinc-800/30 border-t border-zinc-800 space-y-2">
-                            <p className="text-[10px] text-zinc-500 mb-2">
-                              Заповнені значення застосуються до всіх активних товарів у категорії «{cat}»
-                            </p>
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="text-[10px] text-zinc-500">
+                                Заповнені значення застосуються до всіх активних товарів у категорії «{cat}»
+                              </p>
+                              <label className="flex items-center gap-1 cursor-pointer shrink-0 ml-2" title="Завантажити шаблон MauDau для синхронізації slugів характеристик">
+                                <span className="text-[10px] text-purple-400 hover:text-purple-300 whitespace-nowrap">📄 Шаблон MauDau</span>
+                                <input
+                                  type="file"
+                                  accept=".xlsx"
+                                  className="hidden"
+                                  onChange={async e => {
+                                    const f = e.target.files?.[0]
+                                    if (!f || !resolvedPortalId) return
+                                    e.target.value = ''
+                                    setAttrTemplateStatus(s => ({ ...s, [resolvedPortalId]: '⏳' }))
+                                    try {
+                                      const fd = new FormData()
+                                      fd.append('portal_id', resolvedPortalId)
+                                      fd.append('file', f)
+                                      const res = await fetch('/api/maudau/upload-attr-template', { method: 'POST', body: fd })
+                                      const data = await res.json()
+                                      if (!res.ok) throw new Error(data.error ?? 'Помилка')
+                                      const msg = data.unmatched?.length
+                                        ? `✓ ${data.matched}/${data.total} (не зіставлено: ${data.unmatched.join(', ')})`
+                                        : `✓ ${data.matched}/${data.total} slugів`
+                                      setAttrTemplateStatus(s => ({ ...s, [resolvedPortalId]: msg }))
+                                    } catch (err: any) {
+                                      setAttrTemplateStatus(s => ({ ...s, [resolvedPortalId]: `✗ ${err.message}` }))
+                                    }
+                                  }}
+                                />
+                              </label>
+                            </div>
+                            {attrTemplateStatus[resolvedPortalId] && (
+                              <p className={`text-[10px] ${attrTemplateStatus[resolvedPortalId].startsWith('✓') ? 'text-green-400' : attrTemplateStatus[resolvedPortalId] === '⏳' ? 'text-zinc-400' : 'text-red-400'}`}>
+                                {attrTemplateStatus[resolvedPortalId]}
+                              </p>
+                            )}
                             {catAttrsForBlock.map(attr => {
                               const productWithCat = allProducts.find(p =>
                                 p.category_name === cat && overrides[p.id]?.is_active
