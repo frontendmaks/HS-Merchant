@@ -2,6 +2,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+const CUSTOM_VALUE = '__custom__'
+
 type Marketplace = { id: string; name: string; slug: string }
 
 export default function NewFeedForm({ marketplaces }: { marketplaces: Marketplace[] }) {
@@ -9,8 +11,11 @@ export default function NewFeedForm({ marketplaces }: { marketplaces: Marketplac
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
   const [marketplaceId, setMarketplaceId] = useState(marketplaces[0]?.id ?? '')
+  const [customName, setCustomName] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  const isCustom = marketplaceId === CUSTOM_VALUE
 
   const handleNameChange = (v: string) => {
     setName(v)
@@ -23,17 +28,19 @@ export default function NewFeedForm({ marketplaces }: { marketplaces: Marketplac
   }
 
   const handleSubmit = async () => {
-    if (!name.trim() || !slug.trim() || !marketplaceId) {
-      setError('Заповніть усі поля')
-      return
-    }
+    if (!name.trim() || !slug.trim()) { setError('Заповніть усі поля'); return }
+    if (isCustom && !customName.trim()) { setError('Введіть назву маркетплейсу'); return }
+    if (!isCustom && !marketplaceId) { setError('Оберіть маркетплейс'); return }
     setSaving(true)
     setError('')
     try {
+      const body = isCustom
+        ? { name: name.trim(), slug: slug.trim(), custom_marketplace_name: customName.trim() }
+        : { name: name.trim(), slug: slug.trim(), marketplace_id: marketplaceId }
       const res = await fetch('/api/feeds/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), slug: slug.trim(), marketplace_id: marketplaceId }),
+        body: JSON.stringify(body),
       })
       const data = await res.json()
       if (!data.success) throw new Error(data.error ?? 'Помилка створення')
@@ -85,7 +92,18 @@ export default function NewFeedForm({ marketplaces }: { marketplaces: Marketplac
           {marketplaces.map(m => (
             <option key={m.id} value={m.id}>{m.name}</option>
           ))}
+          <option value={CUSTOM_VALUE}>✏️ Інший (ввести свій)...</option>
         </select>
+        {isCustom && (
+          <input
+            type="text"
+            autoFocus
+            value={customName}
+            onChange={e => setCustomName(e.target.value)}
+            placeholder="Назва маркетплейсу"
+            className="mt-2 w-full bg-zinc-800 border border-red-500 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-red-400"
+          />
+        )}
       </div>
 
       {error && <p className="text-red-400 text-xs">{error}</p>}
@@ -99,7 +117,7 @@ export default function NewFeedForm({ marketplaces }: { marketplaces: Marketplac
         </button>
         <button
           onClick={handleSubmit}
-          disabled={saving || !name.trim() || !slug.trim()}
+          disabled={saving || !name.trim() || !slug.trim() || (isCustom && !customName.trim())}
           className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
         >
           {saving ? 'Створення...' : 'Створити фід →'}
