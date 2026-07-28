@@ -361,7 +361,7 @@ export async function GET(
 
   for (const [, group] of categoryGroups) {
     const { catTitle, catAttrs, products } = group
-    const sheetAttrs = catAttrs.filter(a => !['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад'].includes(a.name))
+    const sheetAttrs = catAttrs.filter(a => !['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад', 'Гарантія'].includes(a.name))
     const colKeys = sheetAttrs.map(a => a.name)
 
     // Build raw data rows (before filtering empty columns)
@@ -396,7 +396,7 @@ export async function GET(
     // Yellow highlight for empty non-id cells
     for (let R = 1; R < wsData.length; R++) {
       for (let C = 1; C < headers.length; C++) {
-        if (filteredColKeys[C - 1] === 'Гарантія') continue
+        // Гарантія excluded from sheetAttrs entirely — skip just in case
         const cellAddr = XLSX.utils.encode_cell({ r: R, c: C })
         if (!wsData[R][C]) {
           ws[cellAddr] = { v: '', t: 's', s: { fill: YELLOW } }
