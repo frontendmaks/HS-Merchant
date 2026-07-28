@@ -363,31 +363,38 @@ export async function GET(
     const { catTitle, catAttrs, products } = group
     const sheetAttrs = catAttrs.filter(a => !['Країна виробник', 'Торгова марка', 'Вага упаковки', 'Назва', 'Опис', 'Склад', 'Гарантія'].includes(a.name))
     const colKeys = sheetAttrs.map(a => a.name)
+    const attrByName = new Map(sheetAttrs.map(a => [a.name, a]))
 
     // Build raw data rows (before filtering empty columns)
     const rawRows: (string | null)[][] = products.map(product => {
       const maudauId = vendorToMaudauId[product.id] ?? ''
       return [
-        maudauId || product.id,
+        maudauId || null, // skip products without MauDau ID — they don't exist in MauDau yet
         ...colKeys.map(k => {
           if (k === 'Вага') return product.params['Вага'] ?? product.params['Вага упаковки'] ?? null
-          return product.params[k] ?? null
+          const val = product.params[k] ?? null
+          // Validate against allowed values for select-type attributes
+          const attrDef = attrByName.get(k)
+          if (val && attrDef?.values?.length && !attrDef.values.includes(val)) return null
+          return val
         }),
       ]
     })
 
+    // Skip products without a MauDau ID — they don't exist in MauDau yet
+    const validRows = rawRows.filter(row => row[0])
+
     // Remove columns where ALL rows are empty
     const keepColIndices: number[] = [0]
     for (let C = 1; C <= colKeys.length; C++) {
-      if (rawRows.some(row => row[C] !== null && row[C] !== '')) keepColIndices.push(C)
+      if (validRows.some(row => row[C] !== null && row[C] !== '')) keepColIndices.push(C)
     }
 
     const filteredColKeys = keepColIndices.slice(1).map(i => colKeys[i - 1])
-    const attrByName = new Map(sheetAttrs.map(a => [a.name, a]))
     const headers = ['id', ...filteredColKeys.map(k => attrColName(k, attrByName.get(k)?.slug))]
     const wsData: (string | null)[][] = [
       headers,
-      ...rawRows.map(row => keepColIndices.map(i => row[i])),
+      ...validRows.map(row => keepColIndices.map(i => row[i])),
     ]
 
     const wb = XLSX.utils.book_new()
