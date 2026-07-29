@@ -371,7 +371,19 @@ export async function GET(
       return [
         maudauId || null, // skip products without MauDau ID — they don't exist in MauDau yet
         ...colKeys.map(k => {
-          if (k === 'Вага') return product.params['Вага'] ?? product.params['Вага упаковки'] ?? null
+          if (k === 'Вага') {
+            // params['Вага'] was already matched by closestWeight; 'Вага упаковки' is raw — re-validate
+            const vahaVal = product.params['Вага'] ?? null
+            if (vahaVal) return vahaVal
+            const rawFallback = product.params['Вага упаковки'] ?? null
+            if (!rawFallback) return null
+            const attrDef = attrByName.get(k)
+            if (attrDef?.values?.length) {
+              const matched = closestWeight(rawFallback, attrDef.values)
+              return matched || null
+            }
+            return rawFallback
+          }
           const val = product.params[k] ?? null
           // Validate against allowed values for select-type attributes
           const attrDef = attrByName.get(k)
