@@ -35,18 +35,27 @@ export async function GET(
 
   const isMaudau = feed.marketplace?.slug === 'maudau' || feed.marketplace?.name?.toLowerCase().includes('maudau')
 
-  // Build slug→portalId map from maudau_categories for numeric portal_id lookup
+  // Build slug→portalId map and portalId→catAttrs map from maudau_categories
   let slugToPortalId: Record<string, string> = {}
+  let catAttrsMap: Record<string, Array<{ name: string; values: string[] }>> = {}
   if (isMaudau) {
     const { data: cats } = await supabase
       .from('maudau_categories')
-      .select('slug, portal_id')
+      .select('slug, portal_id, attributes')
       .not('portal_id', 'is', null)
-    if (cats) slugToPortalId = Object.fromEntries(cats.map((c: any) => [c.slug, c.portal_id]))
+    if (cats) {
+      for (const c of cats) {
+        slugToPortalId[c.slug] = String(c.portal_id)
+        catAttrsMap[String(c.portal_id)] = (c.attributes ?? []).map((a: any) => ({
+          name: a.name as string,
+          values: (a.values ?? []) as string[],
+        }))
+      }
+    }
   }
 
   const { xml, offersCount, errorsCount, errors } = isMaudau
-    ? generateMaudauYML(feed, slugToPortalId)
+    ? generateMaudauYML(feed, slugToPortalId, catAttrsMap)
     : generateYML(feed)
 
   // Log access (fire-and-forget)
@@ -152,7 +161,11 @@ function normalizeMaudauBrand(brand: string): string {
 }
 
 /** MauDau-specific YML format per MauDau import spec */
-function generateMaudauYML(feed: any, slugToPortalId: Record<string, string> = {}): { xml: string; offersCount: number; errorsCount: number; errors: string[] } {
+function generateMaudauYML(
+  feed: any,
+  slugToPortalId: Record<string, string> = {},
+  catAttrsMap: Record<string, Array<{ name: string; values: string[] }>> = {},
+): { xml: string; offersCount: number; errorsCount: number; errors: string[] } {
   const activeFps = feed.feed_products.filter((fp: any) => fp.is_active && fp.product)
   const errors: string[] = []
 
@@ -161,6 +174,7 @@ function generateMaudauYML(feed: any, slugToPortalId: Record<string, string> = {
   // portal_id = MauDau category id for auto-matching (may repeat across WC categories)
   const categoryPortalIds: Record<string, string> = feed.settings?.category_portal_ids ?? {}
   const catIdMap = new Map<string, string>()       // catName → our numeric id
+  const catPortalIdMap = new Map<string, string>() // catName → resolved portal_id
   const categoryRows: { numId: string; portalId: string; name: string }[] = []
   let numCounter = 0
 
@@ -174,6 +188,7 @@ function generateMaudauYML(feed: any, slugToPortalId: Record<string, string> = {
       : ''
     const numId = String(++numCounter)
     catIdMap.set(catName, numId)
+    catPortalIdMap.set(catName, portalId)
     categoryRows.push({ numId, portalId, name: catName })
   }
 
@@ -225,31 +240,34 @@ function generateMaudauYML(feed: any, slugToPortalId: Record<string, string> = {
       // country: dedicated XML tag (Ukrainian name)
       const countryName = attrs_map['Країна виробник'] ?? 'Україна'
 
-      // Excluded from <param>: internal fields, fields with dedicated XML tags,
-      // and fields whose values MauDau doesn't accept (cause non-critical warnings)
-      const EXCLUDED_PARAMS = new Set([
-        // WooCommerce internal pricing/unit fields (not product characteristics)
-        'Крок', 'крок', 'Мінімальний крок',
-        'Мін', 'мін', 'Одиниця', 'одиниця', 'Назва', 'Опис',
-        // Fields rendered as dedicated MauDau XML tags instead of <param>
-        'Тип обробки', 'Країна виробник',
-        // Sent via <vendor> tag — must NOT also be a <param> (MauDau rejects duplicate)
-        'Торгова марка',
-        // Fields with values MauDau doesn't accept / causes non-critical warnings:
-        'Гарантія',       // value "Термін придатності вказаний на упаковці" not in MauDau list
-        'Упаковка',       // "Вакуумний пакет" not in MauDau allowed values for this characteristic
-        'Вага', 'вага',   // MauDau does not accept free-text weight values like "300 г"
-        'Вага упаковки',  // not a MauDau characteristic name (legacy field)
+      // Fields that have dedicated XML tags or are WC-internal — always excluded from <param>
+      const ALWAYS_EXCLUDED = new Set([
+        'Крок', 'крок', 'Мінімальний крок', 'Мін', 'мін', 'Одиниця', 'одиниця', 'Назва', 'Опис',
+        'Тип обробки',    // rendered as <temperature_mode>
+        'Країна виробник', // rendered as <country>
+        'Торгова марка',   // rendered as <vendor>
+        'Вага упаковки',   // legacy WC field, not a MauDau characteristic
+        'Гарантія',        // requires bilingual columns in xlsx, skip from feed too
       ])
+
+      // Look up MauDau allowed attributes for this product's category
+      const productPortalId = catPortalIdMap.get(p.category_name ?? 'Без категорії') ?? ''
+      const allowedCatAttrs = productPortalId ? (catAttrsMap[productPortalId] ?? []) : []
+      const allowedAttrMap = new Map(allowedCatAttrs.map(a => [a.name, a.values]))
 
       const attrs = Object.entries(attrs_map)
         .filter(([k, v]) => {
-          if (EXCLUDED_PARAMS.has(k)) return false
+          if (ALWAYS_EXCLUDED.has(k)) return false
           const s = String(v).trim()
           if (!s) return false
-          // Skip raw numeric 'Вага' values from WC internal attributes (e.g. "0.5");
-          // only pass through formatted values like "500 г" or "1.5 кг"
-          if ((k === 'Вага' || k === 'вага') && /^\d+([.,]\d+)?$/.test(s)) return false
+
+          // If we have category attribute data, validate name and value
+          if (allowedAttrMap.size > 0) {
+            const allowedValues = allowedAttrMap.get(k)
+            if (allowedValues === undefined) return false // attr not in this category
+            if (allowedValues.length > 0 && !allowedValues.includes(s)) return false // value not in allowed list
+          }
+
           return true
         })
         .map(([k, v]) => `      <param name="${escapeXml(k)}">${escapeXml(String(v))}</param>`)
