@@ -133,10 +133,11 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       const attrsXml = Object.entries(mergedAttrs)
         .map(([k, v]) => `<param name="${k}">${v}</param>`)
         .join('\n        ')
-      const oldPriceLine = p.price_old ? `\n      <oldprice>${p.price_old}</oldprice>` : ''
+      const oldPriceRaw = p.price_old ? (calcMarketplacePrice(Number(p.price_old), attrs) ?? Number(p.price_old)) : null
+      const oldPriceLine = oldPriceRaw ? `\n      <oldprice>${oldPriceRaw}</oldprice>` : ''
 
       return `
-    <offer id="${p.id}" available="${p.status === 'active' && p.stock > 0}">
+    <offer id="${p.id}" available="${p.status === 'active'}">
       <name>${escapeXml(name)}</name>
       <price>${price}</price>${oldPriceLine}
       <currencyId>${p.currency}</currencyId>
@@ -307,7 +308,8 @@ function generateMaudauYML(
       const offerId = sanitizeSku(p.sku || String(p.external_id || p.id))
 
       // MauDau treats fractional quantity as 0 → use integer ceiling
-      const quantityInt = stock != null ? (stock > 0 ? Math.ceil(stock) : 0) : null
+      // Active products with stock=0 treated as unlimited (no quantity tag) since WC may have tracking disabled
+      const quantityInt = (stock != null && stock > 0) ? Math.ceil(stock) : null
       const quantityLine = quantityInt != null ? `\n      <quantity>${quantityInt}</quantity>` : ''
 
       // Sale price: p.price = current (discounted), p.price_old = original price before discount

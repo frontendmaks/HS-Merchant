@@ -50,6 +50,7 @@ type Props = {
 type Override = {
   custom_price?: string
   custom_stock?: string
+  custom_name?: string
   is_active?: boolean
   name_ru?: string
   description_ru?: string
@@ -380,7 +381,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     const product = allProducts.find(p => p.id === expandedProduct)
     if (!product) return
     if (!ov.name_ru?.trim()) {
-      translateField(expandedProduct, 'name_ru', product.name)
+      translateField(expandedProduct, 'name_ru', productFullName(product, ov.custom_name))
     }
     if (!ov.description_ru?.trim()) {
       const descSource = ov.custom_params?.['Опис']?.trim() || product.description?.trim()
@@ -400,7 +401,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     })
     for (const p of toTranslate) {
       const ov = overrides[p.id] ?? {}
-      if (!ov.name_ru?.trim()) await translateField(p.id, 'name_ru', p.name)
+      if (!ov.name_ru?.trim()) await translateField(p.id, 'name_ru', productFullName(p, ov.custom_name))
       if (!ov.description_ru?.trim()) {
         const descSource = ov.custom_params?.['Опис']?.trim() || p.description?.trim()
         if (descSource) await translateField(p.id, 'description_ru', descSource)
@@ -442,6 +443,20 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
       return Math.round(price * 100) / 100
     }
     return null
+  }
+
+  function getMinWeightLabel(attrs: Record<string, string> | null): string | null {
+    const unit = (attrs?.['Одиниця'] ?? '').toLowerCase()
+    const minRaw = parseFloat(attrs?.['Мін'] ?? '0') || 0
+    if (unit === 'кг' || unit === 'л') return `${minRaw > 0 ? Math.round(minRaw * 1000) : 400} г`
+    if (unit === 'г' || unit === 'мл') return `${minRaw > 0 ? Math.round(minRaw) : 400} ${unit}`
+    return null
+  }
+
+  function productFullName(product: { name: string; attributes: unknown }, customName?: string): string {
+    const base = customName?.trim() || product.name
+    const label = getMinWeightLabel(product.attributes as Record<string, string> | null)
+    return label ? `${base}, ${label}` : base
   }
 
   // Strip HTML tags for display (e.g. MauDau Гарантія values have <p>...</p>)
@@ -1591,7 +1606,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                                   <button
                                     type="button"
                                     disabled={translating[`${p.id}:name_ru`]}
-                                    onClick={() => translateField(p.id, 'name_ru', p.name)}
+                                    onClick={() => translateField(p.id, 'name_ru', productFullName(p, ov.custom_name))}
                                     className="text-[10px] text-purple-400 hover:text-purple-300 disabled:opacity-40 transition-colors"
                                   >{translating[`${p.id}:name_ru`] ? '⏳' : '🔄'}</button>
                                 </div>
