@@ -427,6 +427,15 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     })
   }
 
+  // Price per 100g for weight products
+  function calcPer100g(price: number, attrs: Record<string, string> | null): number | null {
+    const unit = (attrs?.['Одиниця'] ?? '').toLowerCase()
+    const min = parseFloat(attrs?.['Мін'] ?? '0') || 0
+    if (unit === 'кг' || unit === 'л') return Math.round(price / 10 * 10) / 10
+    if ((unit === 'г' || unit === 'мл') && min > 0) return Math.round(price / min * 100 * 10) / 10
+    return null
+  }
+
   // Strip HTML tags for display (e.g. MauDau Гарантія values have <p>...</p>)
   function stripHtml(s: string): string {
     return s.replace(/<[^>]+>/g, '').trim()
@@ -1286,13 +1295,20 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           </div>
 
           {/* Column headers */}
-          <div className="grid grid-cols-[20px_36px_1fr_70px_70px_56px] gap-2 px-4 py-2 bg-zinc-800/50 border-b border-zinc-800">
+          <div className="grid gap-2 px-4 py-2 bg-zinc-800/50 border-b border-zinc-800"
+            style={{ gridTemplateColumns: '20px 10px 36px 1fr 36px 48px 48px 70px 70px 52px 68px 68px' }}>
             <div className="text-xs text-zinc-600">✓</div>
             <div />
+            <div />
             <div className="text-xs text-zinc-600 uppercase tracking-wide">Товар</div>
-            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Ціна</div>
-            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Акційна</div>
+            <div className="text-xs text-zinc-600 uppercase tracking-wide text-center">Од.</div>
+            <div className="text-xs text-zinc-600 uppercase tracking-wide text-center">Мін.</div>
+            <div className="text-xs text-zinc-600 uppercase tracking-wide text-center">Крок</div>
+            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Ціна WC</div>
+            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Акційна WC</div>
             <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Залишок</div>
+            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Ціна М</div>
+            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Акц. М</div>
           </div>
 
           <div className="overflow-y-auto divide-y divide-zinc-800/60" style={{ minHeight: 400, maxHeight: 'calc(100vh - 420px)' }}>
@@ -1328,6 +1344,29 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                 setOverride(p.id, 'custom_params', next)
               }
 
+              // Attributes for display + per-100g calc
+              const attrs = p.attributes
+              const unitBase = attrs?.['Одиниця'] ?? null
+              const minVal = attrs?.['Мін'] ?? null
+              const stepVal = attrs?.['Вага'] ?? attrs?.['Крок'] ?? null
+
+              // Effective WC price (what's in the WC product right now)
+              const wcPrice = Number(p.price)
+              const wcOldPrice = p.price_old != null ? Number(p.price_old) : null
+
+              // Marketplace price = custom_price override if set, else WC current price
+              const mPrice = ov.custom_price && ov.custom_price !== '' ? parseFloat(ov.custom_price) : wcPrice
+              // Marketplace old price = WC old price (sale comparison), not affected by custom_price
+              const mOldPrice = wcOldPrice
+
+              // Per-100g for weight products; null means piece product (show as-is)
+              const mPricePer100g = calcPer100g(mPrice, attrs)
+              const mOldPricePer100g = mOldPrice != null ? calcPer100g(mOldPrice, attrs) : null
+
+              const displayMPrice = mPricePer100g !== null ? mPricePer100g : mPrice
+              const displayMOldPrice = mOldPrice != null ? (mOldPricePer100g !== null ? mOldPricePer100g : mOldPrice) : null
+              const isWeightProduct = mPricePer100g !== null
+
               return (
                 <div key={p.id} className={`transition-colors border-l-2 ${
                   isActive && hasErrors ? 'border-red-600' :
@@ -1335,7 +1374,8 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                   inSavedFeed && !isActive ? 'border-orange-700' :
                   'border-transparent'
                 } ${isActive ? 'hover:bg-zinc-800/30' : 'opacity-35 hover:opacity-60'}`}>
-                  <div className="grid grid-cols-[20px_10px_36px_1fr_70px_70px_56px] gap-2 px-4 py-2 items-center">
+                  <div className="grid gap-2 px-4 py-2 items-center"
+                    style={{ gridTemplateColumns: '20px 10px 36px 1fr 36px 48px 48px 70px 70px 52px 68px 68px' }}>
                     {/* Checkbox */}
                     <input
                       type="checkbox"
@@ -1382,7 +1422,18 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                       </button>
                     </div>
 
-                    {/* Price */}
+                    {/* Од. */}
+                    <div className="text-xs text-zinc-500 text-center">{unitBase ?? '—'}</div>
+
+                    {/* Мін. */}
+                    <div className="text-xs text-zinc-400 text-center">{minVal ?? <span className="text-zinc-700">—</span>}</div>
+
+                    {/* Крок */}
+                    <div className="text-xs text-center">
+                      {stepVal ? <span className={stepVal === minVal ? 'text-blue-400' : 'text-amber-400'}>{stepVal}</span> : <span className="text-zinc-700">—</span>}
+                    </div>
+
+                    {/* Price (WC custom override input) */}
                     <div>
                       <input
                         type="number"
@@ -1393,12 +1444,12 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                       />
                     </div>
 
-                    {/* Sale price (price_old = original, price = discounted) */}
+                    {/* Sale price WC (price_old = original, price = discounted) */}
                     <div className="text-right">
-                      {p.price_old != null ? (
+                      {wcOldPrice != null ? (
                         <div>
-                          <div className="text-xs text-emerald-400 font-medium">{p.price} ₴</div>
-                          <div className="text-[10px] text-zinc-500 line-through">{p.price_old} ₴</div>
+                          <div className="text-xs text-emerald-400 font-medium">{wcPrice} ₴</div>
+                          <div className="text-[10px] text-zinc-500 line-through">{wcOldPrice} ₴</div>
                         </div>
                       ) : (
                         <span className="text-xs text-zinc-600">—</span>
@@ -1410,6 +1461,26 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                       {stock == null
                         ? <span className="text-xs text-zinc-600">∞</span>
                         : <span className={`text-xs font-medium ${stock > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{stock}</span>}
+                    </div>
+
+                    {/* Ціна М — effective marketplace price per 100g (weight) or as-is (piece) */}
+                    <div className="text-right">
+                      <div className={`text-xs font-medium ${wcOldPrice != null ? 'text-emerald-400' : 'text-white'}`}>
+                        {displayMPrice} ₴
+                      </div>
+                      {isWeightProduct && <div className="text-[9px] text-zinc-600">/100{unitBase === 'мл' || unitBase === 'л' ? 'мл' : 'г'}</div>}
+                    </div>
+
+                    {/* Акц. М — old/original price per 100g when product is on sale */}
+                    <div className="text-right">
+                      {displayMOldPrice != null ? (
+                        <div>
+                          <div className="text-xs text-zinc-500 line-through">{displayMOldPrice} ₴</div>
+                          {isWeightProduct && <div className="text-[9px] text-zinc-600">/100г</div>}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-zinc-600">—</span>
+                      )}
                     </div>
                   </div>
 
