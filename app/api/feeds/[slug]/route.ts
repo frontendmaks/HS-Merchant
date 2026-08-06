@@ -82,6 +82,34 @@ export async function GET(
   })
 }
 
+/**
+ * Marketplace price for weight products:
+ * кг/л: price is per kg → multiply by min_kg (default 0.4 = 400g if no min)
+ * г/мл: price is already per-portion → no change
+ * piece: return null (no transformation)
+ */
+function calcMarketplacePrice(price: number, attrs: Record<string, string> | null): number | null {
+  const unit = (attrs?.['Одиниця'] ?? '').toLowerCase()
+  const minRaw = parseFloat(attrs?.['Мін'] ?? '0') || 0
+  if (unit === 'кг' || unit === 'л') {
+    const minKg = minRaw > 0 ? minRaw : 0.4
+    return Math.round(price * minKg * 100) / 100
+  }
+  if (unit === 'г' || unit === 'мл') {
+    return Math.round(price * 100) / 100
+  }
+  return null
+}
+
+/** Min weight label for product name (weight products only, in grams) */
+function minWeightLabel(attrs: Record<string, string> | null): string | null {
+  const unit = (attrs?.['Одиниця'] ?? '').toLowerCase()
+  const minRaw = parseFloat(attrs?.['Мін'] ?? '0') || 0
+  if (unit === 'кг' || unit === 'л') return `${minRaw > 0 ? Math.round(minRaw * 1000) : 400} г`
+  if (unit === 'г' || unit === 'мл') return `${minRaw > 0 ? Math.round(minRaw) : 400} ${unit}`
+  return null
+}
+
 /** Generic YML format */
 function generateYML(feed: any): { xml: string; offersCount: number; errorsCount: number; errors: string[] } {
   const errors: string[] = []
@@ -89,15 +117,20 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
     .filter((fp: any) => fp.is_active && fp.product)
     .map((fp: any) => {
       const p = fp.product
-      const price = fp.custom_price ?? p.price
-      const name = fp.custom_name ?? p.name
+      const attrs = (p.attributes as Record<string, string>) ?? {}
+      const weightLabel = minWeightLabel(attrs)
+      const baseName = fp.custom_name ?? p.name
+      const name = weightLabel ? `${baseName}, ${weightLabel}` : baseName
+      const basePrice = Number(fp.custom_price ?? p.price)
+      const mPrice = fp.custom_price ? basePrice : (calcMarketplacePrice(basePrice, attrs) ?? basePrice)
+      const price = mPrice
       if (!price) errors.push(`Немає ціни: ${name || p.sku || p.id}`)
       if (!name) errors.push(`Немає назви: ${p.sku || p.id}`)
       const images = (p.images as string[])
         .map((url: string) => `<picture>${url}</picture>`)
         .join('\n        ')
-      const mergedAttrs = { ...(p.attributes as Record<string, string>), ...(fp.custom_params ?? {}) }
-      const attrs = Object.entries(mergedAttrs)
+      const mergedAttrs = { ...attrs, ...(fp.custom_params ?? {}) }
+      const attrsXml = Object.entries(mergedAttrs)
         .map(([k, v]) => `<param name="${k}">${v}</param>`)
         .join('\n        ')
       const oldPriceLine = p.price_old ? `\n      <oldprice>${p.price_old}</oldprice>` : ''
@@ -112,7 +145,7 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       <description><![CDATA[${p.description ?? ''}]]></description>
       <vendor>${escapeXml(p.vendor ?? '')}</vendor>
       <vendorCode>${escapeXml(p.sku ?? '')}</vendorCode>
-      ${attrs}
+      ${attrsXml}
     </offer>`
     })
 
@@ -203,7 +236,10 @@ function generateMaudauYML(
   const offersXml = activeFps
     .map((fp: any) => {
       const p = fp.product
-      const nameUa = fp.custom_name ?? p.name
+      const attrs_map = { ...(p.attributes as Record<string, string>) ?? {}, ...(fp.custom_params ?? {}) }
+      const weightLabel = minWeightLabel(p.attributes as Record<string, string> | null)
+      const baseNameUa = fp.custom_name ?? p.name
+      const nameUa = weightLabel ? `${baseNameUa}, ${weightLabel}` : baseNameUa
       const nameRu = fp.name_ru ?? nameUa
       // MauDau requires non-empty description — fall back to product name if empty
       const descUa = (p.description && p.description.trim()) ? p.description.trim() : nameUa
@@ -211,16 +247,11 @@ function generateMaudauYML(
       const stock = fp.custom_stock ?? p.stock
       const catId = catIdMap.get(p.category_name ?? 'Без категорії') ?? '1'
 
-      // Merge product attributes with feed-level custom params (custom_params override)
-      const attrs_map = { ...(p.attributes as Record<string, string>) ?? {}, ...(fp.custom_params ?? {}) }
-      const stepAttr = attrs_map['Крок'] ?? attrs_map['крок'] ?? attrs_map['Мінімальний крок'] ?? null
-      const weightStep = stepAttr ? parseFloat(stepAttr.replace(',', '.')) : null
-
-      // Calculate unit price for weighted products (price stored as per-kg)
-      let unitPrice = fp.custom_price ?? p.price
-      if (!fp.custom_price && weightStep && weightStep > 0 && weightStep < 1) {
-        unitPrice = Math.round(p.price * weightStep)
-      }
+      // Calculate marketplace price: use custom_price if set, else apply weight formula
+      const basePrice = Number(p.price)
+      const unitPrice = fp.custom_price
+        ? Number(fp.custom_price)
+        : (calcMarketplacePrice(basePrice, p.attributes as Record<string, string> | null) ?? basePrice)
 
       // Validate
       const label = nameUa || p.sku || p.id
@@ -280,7 +311,10 @@ function generateMaudauYML(
       const quantityLine = quantityInt != null ? `\n      <quantity>${quantityInt}</quantity>` : ''
 
       // Sale price: p.price = current (discounted), p.price_old = original price before discount
-      const oldPriceLine = p.price_old ? `\n      <price_old>${p.price_old}</price_old>` : ''
+      const oldPriceM = p.price_old
+        ? (calcMarketplacePrice(Number(p.price_old), p.attributes as Record<string, string> | null) ?? Number(p.price_old))
+        : null
+      const oldPriceLine = oldPriceM ? `\n      <price_old>${oldPriceM}</price_old>` : ''
 
       return `    <offer id="${offerId}" available="true">
       <name_ua>${escapeXml(nameUa.slice(0, 255))}</name_ua>
