@@ -1,6 +1,10 @@
 'use client'
-import { useState, useMemo, useTransition, useCallback } from 'react'
+import { useState, useMemo, useTransition, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+
+type WcCategory = { id: number; name: string; slug: string }
+
+type ProductImage = { src: string; alt: string; name: string; id?: number }
 
 type Product = {
   id: string
@@ -27,8 +31,16 @@ type Props = {
   readOnly: boolean
 }
 
-const PER_PAGE = 50
+type EditState = {
+  name: string
+  description: string
+  categoryIds: number[]
+  min: string
+  step: string
+  images: ProductImage[]
+}
 
+const PER_PAGE = 50
 type SortKey = 'name' | 'price' | 'stock' | 'status' | 'category_name' | 'brand'
 
 function calcPer100g(price: number, attrs: Record<string, string> | null): number | null {
@@ -58,12 +70,255 @@ function getProductSaleCats(p: Product, saleCats: Set<string>): string[] {
   return (p.categories ?? []).filter(c => saleCats.has(c))
 }
 
+function filenameFromUrl(url: string) {
+  return url.split('/').pop()?.split('?')[0] ?? ''
+}
+
+// ─── Category picker ────────────────────────────────────────────────
+function CategoryPicker({
+  selected, onChange, allCats,
+}: { selected: number[]; onChange: (ids: number[]) => void; allCats: WcCategory[] }) {
+  const [search, setSearch] = useState('')
+  const filtered = allCats.filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
+
+  return (
+    <div className="border border-zinc-700 rounded-lg overflow-hidden">
+      <div className="p-2 border-b border-zinc-700">
+        <input
+          type="text"
+          placeholder="Пошук..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-full bg-zinc-800 text-sm text-white px-3 py-1.5 rounded border border-zinc-700 focus:outline-none focus:border-zinc-500"
+        />
+      </div>
+      <div className="max-h-48 overflow-y-auto">
+        {selected.length > 0 && (
+          <button
+            onClick={() => onChange([])}
+            className="w-full text-left px-3 py-2 text-xs text-zinc-500 hover:bg-zinc-800 border-b border-zinc-800"
+          >— прибрати —</button>
+        )}
+        {filtered.map(cat => {
+          const isSelected = selected.includes(cat.id)
+          return (
+            <button
+              key={cat.id}
+              onClick={() => {
+                if (isSelected) onChange(selected.filter(id => id !== cat.id))
+                else onChange([...selected, cat.id])
+              }}
+              className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-zinc-800 ${
+                isSelected ? 'text-emerald-400' : 'text-zinc-300'
+              }`}
+            >{cat.name}</button>
+          )
+        })}
+        {filtered.length === 0 && <p className="text-xs text-zinc-600 px-3 py-2">Нічого не знайдено</p>}
+      </div>
+    </div>
+  )
+}
+
+// ─── Edit panel ────────────────────────────────────────────────────
+function EditPanel({
+  product, allCats, onSaved,
+}: { product: Product; allCats: WcCategory[]; onSaved: () => void }) {
+  const attrs = product.attributes
+
+  // Build initial image list from product.images (URLs only — no WC image IDs here)
+  const initImages: ProductImage[] = (product.images ?? []).map(url => {
+    const fn = filenameFromUrl(url)
+    const altGuess = fn.replace(/[-_]/g, ' ').replace(/\.\w+$/, '') || product.name
+    return { src: url, alt: altGuess, name: fn }
+  })
+
+  // Map current category names → IDs using allCats
+  const initCatIds = (product.categories ?? [])
+    .map(name => allCats.find(c => c.name === name)?.id)
+    .filter((id): id is number => id !== undefined)
+
+  const [edit, setEdit] = useState<EditState>({
+    name: product.name,
+    description: product.description ?? '',
+    categoryIds: initCatIds,
+    min: attrs?.['Мін'] ?? '',
+    step: attrs?.['Вага'] ?? attrs?.['Крок'] ?? '',
+    images: initImages,
+  })
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const updateImg = (i: number, field: 'alt' | 'name', val: string) => {
+    setEdit(e => ({ ...e, images: e.images.map((img, idx) => idx === i ? { ...img, [field]: val } : img) }))
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/wc/products/${product.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: edit.name,
+          description: edit.description,
+          categories: edit.categoryIds,
+          min: edit.min || undefined,
+          step: edit.step || undefined,
+          images: edit.images.map(img => ({ src: img.src, alt: img.alt, name: img.name })),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Помилка')
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+      onSaved()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Невідома помилка')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-4 pt-4 border-t border-zinc-700/50 space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Редагування → WooCommerce</p>
+        <div className="flex items-center gap-2">
+          {error && <span className="text-xs text-red-400">{error}</span>}
+          {saved && <span className="text-xs text-emerald-400">✓ Збережено на сайті</span>}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-4 py-1.5 bg-red-700 hover:bg-red-600 text-white text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            {saving ? <span className="animate-spin">⟳</span> : '↑'}
+            {saving ? 'Зберігаємо...' : 'Зберегти на сайт'}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Left */}
+        <div className="space-y-3">
+          {/* Name */}
+          <div>
+            <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Назва</label>
+            <input
+              type="text"
+              value={edit.name}
+              onChange={e => setEdit(s => ({ ...s, name: e.target.value }))}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500"
+            />
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Опис</label>
+            <textarea
+              value={edit.description}
+              onChange={e => setEdit(s => ({ ...s, description: e.target.value }))}
+              rows={5}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 resize-y font-mono"
+            />
+          </div>
+
+          {/* Min + Step */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Мінімальне значення</label>
+              <input
+                type="text"
+                value={edit.min}
+                onChange={e => setEdit(s => ({ ...s, min: e.target.value }))}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Крок</label>
+              <input
+                type="text"
+                value={edit.step}
+                onChange={e => setEdit(s => ({ ...s, step: e.target.value }))}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500"
+              />
+            </div>
+          </div>
+
+          {/* Categories */}
+          <div>
+            <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">
+              Категорії{edit.categoryIds.length > 0 && <span className="ml-1 text-emerald-500">({edit.categoryIds.length})</span>}
+            </label>
+            {edit.categoryIds.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-2">
+                {edit.categoryIds.map(id => {
+                  const cat = allCats.find(c => c.id === id)
+                  return cat ? (
+                    <span key={id} className="text-[10px] px-2 py-0.5 bg-zinc-700 text-zinc-300 rounded-full flex items-center gap-1">
+                      {cat.name}
+                      <button onClick={() => setEdit(s => ({ ...s, categoryIds: s.categoryIds.filter(i => i !== id) }))} className="text-zinc-500 hover:text-red-400">×</button>
+                    </span>
+                  ) : null
+                })}
+              </div>
+            )}
+            {allCats.length === 0
+              ? <p className="text-xs text-zinc-600">Завантаження категорій...</p>
+              : <CategoryPicker selected={edit.categoryIds} onChange={ids => setEdit(s => ({ ...s, categoryIds: ids }))} allCats={allCats} />
+            }
+          </div>
+        </div>
+
+        {/* Right: images */}
+        <div>
+          <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-2 block">
+            Фото — Alt текст та назва файлу
+          </label>
+          {edit.images.length === 0 && <p className="text-xs text-zinc-700">Немає фото</p>}
+          <div className="space-y-3">
+            {edit.images.map((img, i) => (
+              <div key={i} className="flex gap-3 items-start">
+                <a href={img.src} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                  <img src={img.src} alt={img.alt} className="w-16 h-16 object-cover rounded-lg bg-zinc-800 hover:opacity-80" loading="lazy" />
+                </a>
+                <div className="flex-1 space-y-1.5 min-w-0">
+                  <div>
+                    <label className="text-[9px] text-zinc-600 uppercase">Alt текст</label>
+                    <input
+                      type="text"
+                      value={img.alt}
+                      onChange={e => updateImg(i, 'alt', e.target.value)}
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-zinc-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-zinc-600 uppercase">Назва файлу</label>
+                    <input
+                      type="text"
+                      value={img.name}
+                      onChange={e => updateImg(i, 'name', e.target.value)}
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-zinc-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Main component ────────────────────────────────────────────────
 export default function ProductsClient({ allProducts, warehouseName, readOnly }: Props) {
   const router = useRouter()
   const [syncing, setSyncing] = useState(false)
   const [, startTransition] = useTransition()
 
-  // Filters
   const [search, setSearch] = useState('')
   const [filterInStock, setFilterInStock] = useState(false)
   const [filterOutStock, setFilterOutStock] = useState(false)
@@ -74,15 +329,23 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
   const [filterNoSaleCat, setFilterNoSaleCat] = useState(false)
   const [filterUnit, setFilterUnit] = useState<'weight' | 'piece' | null>(null)
 
-  // Sort
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-
-  // Pagination
   const [page, setPage] = useState(1)
-
-  // Expand
   const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  // WC categories — loaded once lazily when first product is expanded
+  const [allCats, setAllCats] = useState<WcCategory[]>([])
+  const catsLoaded = useRef(false)
+
+  const loadCats = useCallback(async () => {
+    if (catsLoaded.current) return
+    catsLoaded.current = true
+    try {
+      const res = await fetch('/api/wc/categories')
+      if (res.ok) setAllCats(await res.json())
+    } catch { /* ignore */ }
+  }, [])
 
   const saleCategories = useMemo(() => getSaleCategories(allProducts), [allProducts])
   const saleCatSet = useMemo(() => new Set(saleCategories), [saleCategories])
@@ -101,10 +364,8 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
 
   const filteredProducts = useMemo(() => {
     let list = allProducts
-
     if (filterStatus === 'active') list = list.filter(p => p.status === 'active')
     else if (filterStatus === 'inactive') list = list.filter(p => p.status !== 'active')
-
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter(p => p.name.toLowerCase().includes(q) || (p.sku ?? '').toLowerCase().includes(q))
@@ -113,16 +374,10 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
     if (filterOutStock) list = list.filter(p => p.stock !== null && p.stock <= 0)
     if (filterWarehouse) list = list.filter(p => p.stock !== null)
     if (filterSale) list = list.filter(p => p.price_old != null)
-
-    if (filterSaleCat) {
-      list = list.filter(p => (p.categories ?? []).includes(filterSaleCat))
-    }
-    if (filterNoSaleCat) {
-      list = list.filter(p => p.price_old != null && getProductSaleCats(p, saleCatSet).length === 0)
-    }
+    if (filterSaleCat) list = list.filter(p => (p.categories ?? []).includes(filterSaleCat))
+    if (filterNoSaleCat) list = list.filter(p => p.price_old != null && getProductSaleCats(p, saleCatSet).length === 0)
     if (filterUnit === 'weight') list = list.filter(p => isWeightUnit(p.attributes))
     if (filterUnit === 'piece') list = list.filter(p => !isWeightUnit(p.attributes))
-
     list = [...list].sort((a, b) => {
       let va: string | number = ''
       let vb: string | number = ''
@@ -135,7 +390,6 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
       const cmp = typeof va === 'number' ? (va as number) - (vb as number) : (va as string).localeCompare(vb as string, 'uk')
       return sortDir === 'asc' ? cmp : -cmp
     })
-
     return list
   }, [allProducts, search, filterStatus, filterInStock, filterOutStock, filterWarehouse, filterSale, filterSaleCat, filterNoSaleCat, filterUnit, saleCatSet, sortKey, sortDir])
 
@@ -143,32 +397,15 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
   const paginated = filteredProducts.slice((page - 1) * PER_PAGE, page * PER_PAGE)
 
   const SortBtn = ({ col, label, className = '' }: { col: SortKey; label: string; className?: string }) => (
-    <button
-      onClick={() => handleSort(col)}
-      className={`text-xs text-zinc-500 uppercase tracking-wide flex items-center gap-1 hover:text-zinc-300 transition-colors ${className}`}
-    >
-      {label}
-      {sortKey === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ' ↕'}
+    <button onClick={() => handleSort(col)} className={`text-xs text-zinc-500 uppercase tracking-wide flex items-center gap-1 hover:text-zinc-300 transition-colors ${className}`}>
+      {label}{sortKey === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ' ↕'}
     </button>
   )
 
-  const FilterBtn = ({
-    active, onClick, children, color = 'zinc',
-  }: { active: boolean; onClick: () => void; children: React.ReactNode; color?: 'zinc' | 'emerald' | 'red' | 'amber' | 'blue' }) => {
-    const activeClass = {
-      zinc: 'bg-zinc-600 border-zinc-500 text-white',
-      emerald: 'bg-emerald-700 border-emerald-700 text-white',
-      red: 'bg-red-800 border-red-700 text-white',
-      amber: 'bg-amber-700 border-amber-600 text-white',
-      blue: 'bg-blue-800 border-blue-700 text-white',
-    }[color]
+  const FilterBtn = ({ active, onClick, children, color = 'zinc' }: { active: boolean; onClick: () => void; children: React.ReactNode; color?: 'zinc' | 'emerald' | 'red' | 'amber' | 'blue' }) => {
+    const activeClass = { zinc: 'bg-zinc-600 border-zinc-500 text-white', emerald: 'bg-emerald-700 border-emerald-700 text-white', red: 'bg-red-800 border-red-700 text-white', amber: 'bg-amber-700 border-amber-600 text-white', blue: 'bg-blue-800 border-blue-700 text-white' }[color]
     return (
-      <button
-        onClick={onClick}
-        className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
-          active ? activeClass : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'
-        }`}
-      >{children}</button>
+      <button onClick={onClick} className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${active ? activeClass : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'}`}>{children}</button>
     )
   }
 
@@ -195,42 +432,23 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
         <p className="text-zinc-500 text-sm mt-1">Каталог синхронізований з WooCommerce</p>
       </div>
 
-      {/* Toolbar */}
       <div className="mb-4 space-y-2">
-        {/* Row 1: search + counter + sync + warehouse */}
         <div className="flex items-center gap-3 flex-wrap">
           <div className="relative flex-1 max-w-sm">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm">🔍</span>
-            <input
-              type="text"
-              placeholder="Пошук товарів..."
-              value={search}
-              onChange={e => { setSearch(e.target.value); setPage(1) }}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-red-500 transition-colors"
-            />
+            <input type="text" placeholder="Пошук товарів..." value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-red-500 transition-colors" />
           </div>
           <div className="text-xs text-zinc-500">{filteredProducts.length} товарів</div>
           {!readOnly && (
-            <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm text-zinc-300 transition-colors disabled:opacity-50"
-            >
+            <button onClick={handleSync} disabled={syncing} className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm text-zinc-300 transition-colors disabled:opacity-50">
               <span className={syncing ? 'animate-spin inline-block' : ''}>🔄</span>
               {syncing ? 'Синхронізація...' : 'Синк з WC'}
             </button>
           )}
-          {/* Warehouse — right-aligned */}
           <div className="ml-auto">
-            <FilterBtn
-              active={filterWarehouse}
-              onClick={() => setFilter(setFilterWarehouse, !filterWarehouse)}
-              color="zinc"
-            >🏭 {warehouseName}</FilterBtn>
+            <FilterBtn active={filterWarehouse} onClick={() => setFilter(setFilterWarehouse, !filterWarehouse)} color="zinc">🏭 {warehouseName}</FilterBtn>
           </div>
         </div>
-
-        {/* Row 2: all other filters */}
         <div className="flex items-center gap-2 flex-wrap">
           <FilterBtn active={filterInStock} onClick={() => { setFilter(setFilterInStock, !filterInStock); setFilter(setFilterOutStock, false) }} color="emerald">✓ В наявності</FilterBtn>
           <FilterBtn active={filterOutStock} onClick={() => { setFilter(setFilterOutStock, !filterOutStock); setFilter(setFilterInStock, false) }} color="red">✕ Не в наявності</FilterBtn>
@@ -241,18 +459,12 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
           <FilterBtn active={filterSale} onClick={() => setFilter(setFilterSale, !filterSale)} color="amber">% З акцією</FilterBtn>
           <FilterBtn active={filterNoSaleCat} onClick={() => { setFilter(setFilterNoSaleCat, !filterNoSaleCat); setFilter(setFilterSaleCat, null) }} color="amber">Знижка поза акцією</FilterBtn>
           {saleCategories.map(cat => (
-            <FilterBtn
-              key={cat}
-              active={filterSaleCat === cat}
-              onClick={() => { setFilter(setFilterSaleCat, filterSaleCat === cat ? null : cat); setFilter(setFilterNoSaleCat, false) }}
-              color="amber"
-            >🏷 {cat}</FilterBtn>
+            <FilterBtn key={cat} active={filterSaleCat === cat} onClick={() => { setFilter(setFilterSaleCat, filterSaleCat === cat ? null : cat); setFilter(setFilterNoSaleCat, false) }} color="amber">🏷 {cat}</FilterBtn>
           ))}
         </div>
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        {/* Table header */}
         <div className="grid gap-3 px-4 py-3 border-b border-zinc-800 bg-zinc-800/50"
           style={{ gridTemplateColumns: '24px 72px 1fr 160px 160px 100px 100px 90px 45px 90px 100px 90px' }}>
           <div />
@@ -264,7 +476,7 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
           <div className="text-xs text-zinc-500 uppercase tracking-wide text-right">Акційна</div>
           <SortBtn col="stock" label="Залишок" className="justify-end" />
           <div className="text-xs text-zinc-500 uppercase tracking-wide text-center">Од.</div>
-          <div className="text-xs text-zinc-500 uppercase tracking-wide text-center">Мін. значення</div>
+          <div className="text-xs text-zinc-500 uppercase tracking-wide text-center">Мін.</div>
           <div className="text-xs text-zinc-500 uppercase tracking-wide text-center">Крок</div>
           <SortBtn col="status" label="Статус" className="justify-center" />
         </div>
@@ -285,46 +497,28 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
             const minVal = attrs?.['Мін'] ?? null
             const stepVal = attrs?.['Вага'] ?? attrs?.['Крок'] ?? null
             const unitBase = attrs?.['Одиниця'] ?? null
-            const isWeight = isWeightUnit(attrs)
             const isExpanded = expandedId === p.id
-
-            // Price: price = current (discounted if on sale), price_old = original
             const currentPrice = Number(p.price)
             const originalPrice = p.price_old ? Number(p.price_old) : null
             const current100 = calcPer100g(currentPrice, attrs)
             const original100 = originalPrice ? calcPer100g(originalPrice, attrs) : null
-
             const productSaleCats = getProductSaleCats(p, saleCatSet)
-
             const siteUrl = p.external_id ? `https://halytska-svizhyna.ua/?p=${p.external_id}` : null
 
             return (
               <div key={p.id} className="border-b border-zinc-800/60 last:border-0">
-                {/* Main row */}
                 <div
                   className="grid gap-3 px-4 py-2.5 items-center hover:bg-zinc-800/40 transition-colors cursor-pointer"
                   style={{ gridTemplateColumns: '24px 72px 1fr 160px 160px 100px 100px 90px 45px 90px 100px 90px' }}
-                  onClick={() => setExpandedId(isExpanded ? null : p.id)}
+                  onClick={() => { setExpandedId(isExpanded ? null : p.id); if (!isExpanded) loadCats() }}
                 >
-                  {/* Expand toggle */}
                   <div className="text-zinc-600 text-xs select-none">{isExpanded ? '▾' : '▸'}</div>
-
-                  {/* Image */}
                   <div className="w-14 h-14 rounded-lg overflow-hidden bg-zinc-800 shrink-0">
-                    {img ? (
-                      <img src={img} alt={p.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-zinc-600 text-xl">□</div>
-                    )}
+                    {img ? <img src={img} alt={p.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-zinc-600 text-xl">□</div>}
                   </div>
-
-                  {/* Name + SKU + sale badges */}
                   <div className="min-w-0" onClick={e => e.stopPropagation()}>
                     <div className="text-sm text-white leading-snug flex items-start gap-1.5">
-                      <button
-                        className="text-left line-clamp-2 hover:text-zinc-300"
-                        onClick={() => setExpandedId(isExpanded ? null : p.id)}
-                      >{p.name}</button>
+                      <button className="text-left line-clamp-2 hover:text-zinc-300" onClick={() => { setExpandedId(isExpanded ? null : p.id); if (!isExpanded) loadCats() }}>{p.name}</button>
                       <div className="flex gap-1 shrink-0 mt-0.5">
                         {noImg && <span title="Немає фото" className="text-amber-500 text-xs">📷</span>}
                         {noPrice && <span title="Немає ціни" className="text-red-500 text-xs">₴</span>}
@@ -333,44 +527,23 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
                     <div className="text-xs text-zinc-600 mt-0.5 font-mono flex items-center gap-2">
                       {p.sku ? <span>{p.sku}</span> : <span className="text-zinc-700">без артикулу</span>}
                       {p.external_id && (
-                        <a
-                          href={`https://halytska-svizhyna.ua/?p=${p.external_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-zinc-600 hover:text-red-400"
-                          onClick={e => e.stopPropagation()}
-                        >#{p.external_id} ↗</a>
+                        <a href={`https://halytska-svizhyna.ua/?p=${p.external_id}`} target="_blank" rel="noopener noreferrer" className="text-zinc-600 hover:text-red-400" onClick={e => e.stopPropagation()}>#{p.external_id} ↗</a>
                       )}
                     </div>
                     {productSaleCats.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {productSaleCats.map(cat => (
-                          <span key={cat} className="text-[9px] px-1.5 py-px bg-amber-950/60 border border-amber-800/50 text-amber-400 rounded">
-                            🏷 {cat}
-                          </span>
+                          <span key={cat} className="text-[9px] px-1.5 py-px bg-amber-950/60 border border-amber-800/50 text-amber-400 rounded">🏷 {cat}</span>
                         ))}
                       </div>
                     )}
                   </div>
-
-                  {/* Category */}
-                  <div className="text-xs text-zinc-400 truncate">
-                    {p.category_name ?? <span className="text-zinc-700">—</span>}
-                  </div>
-
-                  {/* Brand */}
+                  <div className="text-xs text-zinc-400 truncate">{p.category_name ?? <span className="text-zinc-700">—</span>}</div>
                   <div className="text-xs truncate">
-                    {p.brand === 'Галицька Свіжина'
-                      ? <span className="text-red-400">{p.brand}</span>
-                      : <span className="text-zinc-300">{p.brand ?? <span className="text-zinc-700">—</span>}</span>
-                    }
+                    {p.brand === 'Галицька Свіжина' ? <span className="text-red-400">{p.brand}</span> : <span className="text-zinc-300">{p.brand ?? <span className="text-zinc-700">—</span>}</span>}
                   </div>
-
-                  {/* Ціна (current = discounted if on sale) */}
                   <div className="text-right">
-                    {noPrice ? (
-                      <span className="text-red-500 text-sm">—</span>
-                    ) : (
+                    {noPrice ? <span className="text-red-500 text-sm">—</span> : (
                       <div>
                         <div className={`text-sm font-semibold ${p.price_old ? 'text-emerald-400' : 'text-white'}`}>
                           {current100 != null ? `${current100} ₴` : `${currentPrice.toLocaleString('uk-UA')} ₴`}
@@ -379,206 +552,93 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
                       </div>
                     )}
                   </div>
-
-                  {/* Акційна (original price crossed out) */}
                   <div className="text-right">
                     {originalPrice ? (
-                      original100 != null ? (
-                        <div>
-                          <div className="text-xs text-zinc-500 line-through">{original100} ₴</div>
-                          <div className="text-[10px] text-emerald-600 mt-0.5">
-                            -{Math.round((1 - currentPrice / originalPrice) * 100)}%
-                          </div>
-                        </div>
-                      ) : (
-                        <div>
-                          <div className="text-xs text-zinc-500 line-through">
-                            {originalPrice.toLocaleString('uk-UA')} ₴
-                          </div>
-                          <div className="text-[10px] text-emerald-600 mt-0.5">
-                            -{Math.round((1 - currentPrice / originalPrice) * 100)}%
-                          </div>
-                        </div>
-                      )
-                    ) : (
-                      <span className="text-xs text-zinc-700">—</span>
-                    )}
+                      <div>
+                        <div className="text-xs text-zinc-500 line-through">{original100 != null ? `${original100} ₴` : `${originalPrice.toLocaleString('uk-UA')} ₴`}</div>
+                        <div className="text-[10px] text-emerald-600 mt-0.5">-{Math.round((1 - currentPrice / originalPrice) * 100)}%</div>
+                      </div>
+                    ) : <span className="text-xs text-zinc-700">—</span>}
                   </div>
-
-                  {/* Stock */}
                   <div className={`text-sm text-right font-medium ${zeroStock ? 'text-red-400' : 'text-zinc-300'}`}>
-                    {stockVal === null
-                      ? <span className="text-zinc-500 text-xs">∞</span>
-                      : <>
-                          {Number(stockVal).toLocaleString('uk-UA', { maximumFractionDigits: 2 })}
-                          {zeroStock && <span className="ml-1 text-xs text-red-400">⚠</span>}
-                        </>
-                    }
+                    {stockVal === null ? <span className="text-zinc-500 text-xs">∞</span> : <>{Number(stockVal).toLocaleString('uk-UA', { maximumFractionDigits: 2 })}{zeroStock && <span className="ml-1 text-xs text-red-400">⚠</span>}</>}
                   </div>
-
-                  {/* Одиниця */}
                   <div className="text-xs text-zinc-500 text-center">{unitBase ?? '—'}</div>
-
-                  {/* Мінімальне значення */}
                   <div className="text-xs text-center">
-                    {minVal
-                      ? <span className="text-zinc-400">{minVal}{unitBase && unitBase !== 'шт' ? <span className="text-zinc-600"> {unitBase}</span> : ''}</span>
-                      : <span className="text-zinc-700">—</span>}
+                    {minVal ? <span className="text-zinc-400">{minVal}</span> : <span className="text-zinc-700">—</span>}
                   </div>
-
-                  {/* Крок */}
                   <div className="text-xs text-center">
-                    {stepVal
-                      ? <span className={stepVal === minVal ? 'text-blue-400' : 'text-amber-400'}>{stepVal}</span>
-                      : <span className="text-zinc-700">—</span>}
+                    {stepVal ? <span className={stepVal === minVal ? 'text-blue-400' : 'text-amber-400'}>{stepVal}</span> : <span className="text-zinc-700">—</span>}
                   </div>
-
-                  {/* Status */}
                   <div className="text-center">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${
-                      p.status === 'active'
-                        ? 'bg-emerald-950 text-emerald-400'
-                        : 'bg-zinc-800 text-zinc-500'
-                    }`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${p.status === 'active' ? 'bg-emerald-950 text-emerald-400' : 'bg-zinc-800 text-zinc-500'}`}>
                       {p.status === 'active' ? 'Актив' : p.status === 'inactive' ? 'Неактив' : p.status}
                     </span>
                   </div>
                 </div>
 
-                {/* Expanded row */}
                 {isExpanded && (
                   <div className="bg-zinc-800/20 border-t border-zinc-800/60 px-6 py-4">
+                    {/* View section */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-                      {/* Left: info */}
                       <div className="space-y-3">
                         <p className="text-[10px] text-zinc-600 uppercase tracking-wider font-medium">Інформація з сайту</p>
-
-                        {/* Site link */}
                         {siteUrl && (
-                          <div>
-                            <a
-                              href={siteUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs text-red-400 hover:text-red-300 underline break-all"
-                            >🔗 {siteUrl}</a>
-                          </div>
+                          <a href={siteUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-red-400 hover:text-red-300 underline break-all block">🔗 {siteUrl}</a>
                         )}
-
-                        {/* Basic fields */}
                         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-                          {[
-                            ['Категорія', p.category_name],
-                            ['Бренд', p.brand],
-                            ['Артикул', p.sku],
-                            ['Одиниця', p.unit ?? attrs?.['Одиниця']],
-                            ['Продавець', p.vendor],
-                            ['Статус', p.status],
-                            ['ID', p.id],
-                            ['External ID', p.external_id],
-                          ].map(([label, val]) => val ? (
-                            <div key={label as string} className="flex gap-2">
-                              <span className="text-zinc-500 shrink-0">{label}:</span>
-                              <span className="text-zinc-300 break-all">{val}</span>
-                            </div>
+                          {([['Категорія', p.category_name], ['Бренд', p.brand], ['Артикул', p.sku], ['Одиниця', p.unit ?? attrs?.['Одиниця']], ['Продавець', p.vendor], ['Статус', p.status], ['External ID', p.external_id]] as [string, string | null | undefined][]).map(([label, val]) => val ? (
+                            <div key={label} className="flex gap-2"><span className="text-zinc-500 shrink-0">{label}:</span><span className="text-zinc-300 break-all">{val}</span></div>
                           ) : null)}
                         </div>
-
-                        {/* Categories */}
                         {(p.categories ?? []).length > 0 && (
                           <div>
                             <p className="text-[10px] text-zinc-600 mb-1">Категорії:</p>
                             <div className="flex flex-wrap gap-1">
                               {(p.categories ?? []).map(cat => (
-                                <span key={cat} className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                                  saleCatSet.has(cat)
-                                    ? 'bg-amber-950/60 border-amber-800/50 text-amber-400'
-                                    : 'bg-zinc-800 border-zinc-700 text-zinc-400'
-                                }`}>{cat}</span>
+                                <span key={cat} className={`text-[10px] px-1.5 py-0.5 rounded border ${saleCatSet.has(cat) ? 'bg-amber-950/60 border-amber-800/50 text-amber-400' : 'bg-zinc-800 border-zinc-700 text-zinc-400'}`}>{cat}</span>
                               ))}
                             </div>
                           </div>
                         )}
-
-                        {/* Prices */}
                         <div>
                           <p className="text-[10px] text-zinc-600 mb-1">Ціни:</p>
                           <div className="flex gap-4 text-xs">
-                            <div>
-                              <span className="text-zinc-500">Поточна: </span>
-                              <span className={p.price_old ? 'text-emerald-400' : 'text-white'}>
-                                {currentPrice.toLocaleString('uk-UA')} ₴
-                                {current100 != null && <span className="text-zinc-500 ml-1">({current100} ₴/100г)</span>}
-                              </span>
-                            </div>
-                            {originalPrice && (
-                              <div>
-                                <span className="text-zinc-500">До знижки: </span>
-                                <span className="text-zinc-400 line-through">
-                                  {originalPrice.toLocaleString('uk-UA')} ₴
-                                  {original100 != null && <span className="text-zinc-500 ml-1">({original100} ₴/100г)</span>}
-                                </span>
-                              </div>
-                            )}
+                            <div><span className="text-zinc-500">Поточна: </span><span className={p.price_old ? 'text-emerald-400' : 'text-white'}>{currentPrice.toLocaleString('uk-UA')} ₴{current100 != null && <span className="text-zinc-500 ml-1">({current100} ₴/100г)</span>}</span></div>
+                            {originalPrice && <div><span className="text-zinc-500">До знижки: </span><span className="text-zinc-400 line-through">{originalPrice.toLocaleString('uk-UA')} ₴{original100 != null && <span className="text-zinc-500 ml-1">({original100} ₴/100г)</span>}</span></div>}
                           </div>
                         </div>
-
-                        {/* Description */}
                         {p.description && (
                           <div>
                             <p className="text-[10px] text-zinc-600 mb-1">Опис:</p>
-                            <div
-                              className="text-xs text-zinc-400 leading-relaxed max-h-32 overflow-y-auto [&_p]:mb-1 [&_ul]:list-disc [&_ul]:pl-4 [&_li]:mb-0.5"
-                              dangerouslySetInnerHTML={{ __html: p.description }}
-                            />
+                            <div className="text-xs text-zinc-400 leading-relaxed max-h-24 overflow-y-auto [&_p]:mb-1 [&_ul]:list-disc [&_ul]:pl-4" dangerouslySetInnerHTML={{ __html: p.description }} />
                           </div>
                         )}
-
-                        {/* Attributes */}
                         {attrs && Object.keys(attrs).length > 0 && (
                           <div>
                             <p className="text-[10px] text-zinc-600 mb-1">Атрибути:</p>
                             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                               {Object.entries(attrs).map(([k, v]) => (
-                                <div key={k} className="flex gap-2 text-xs">
-                                  <span className="text-zinc-500 shrink-0 w-24 truncate">{k}:</span>
-                                  <span className="text-zinc-300 break-all">{String(v)}</span>
-                                </div>
+                                <div key={k} className="flex gap-2 text-xs"><span className="text-zinc-500 shrink-0 w-24 truncate">{k}:</span><span className="text-zinc-300 break-all">{String(v)}</span></div>
                               ))}
                             </div>
                           </div>
                         )}
                       </div>
-
-                      {/* Right: images */}
                       <div>
-                        <p className="text-[10px] text-zinc-600 uppercase tracking-wider font-medium mb-2">
-                          Фото ({p.images?.length ?? 0})
-                        </p>
-                        {(p.images ?? []).length === 0 ? (
-                          <p className="text-xs text-zinc-700">Немає фото</p>
-                        ) : (
+                        <p className="text-[10px] text-zinc-600 uppercase tracking-wider font-medium mb-2">Фото ({p.images?.length ?? 0})</p>
+                        {(p.images ?? []).length === 0 ? <p className="text-xs text-zinc-700">Немає фото</p> : (
                           <div className="grid grid-cols-3 gap-2">
                             {(p.images ?? []).map((url, i) => {
-                              const filename = url.split('/').pop()?.split('?')[0] ?? ''
+                              const filename = filenameFromUrl(url)
                               const altGuess = filename.replace(/[-_]/g, ' ').replace(/\.\w+$/, '') || p.name
                               return (
                                 <div key={i} className="space-y-1">
                                   <a href={url} target="_blank" rel="noopener noreferrer">
-                                    <img
-                                      src={url}
-                                      alt={altGuess}
-                                      className="w-full aspect-square object-cover rounded-lg bg-zinc-800 hover:opacity-80 transition-opacity"
-                                      loading="lazy"
-                                    />
+                                    <img src={url} alt={altGuess} className="w-full aspect-square object-cover rounded-lg bg-zinc-800 hover:opacity-80 transition-opacity" loading="lazy" />
                                   </a>
-                                  <div className="text-[9px] text-zinc-600 truncate" title={filename}>
-                                    <span className="text-zinc-700">alt: </span>{altGuess}
-                                  </div>
-                                  <div className="text-[9px] text-zinc-700 truncate" title={filename}>
-                                    {filename}
-                                  </div>
+                                  <div className="text-[9px] text-zinc-600 truncate"><span className="text-zinc-700">alt: </span>{altGuess}</div>
+                                  <div className="text-[9px] text-zinc-700 truncate">{filename}</div>
                                 </div>
                               )
                             })}
@@ -586,6 +646,15 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
                         )}
                       </div>
                     </div>
+
+                    {/* Edit panel */}
+                    {!readOnly && (
+                      <EditPanel
+                        product={p}
+                        allCats={allCats}
+                        onSaved={() => startTransition(() => router.refresh())}
+                      />
+                    )}
                   </div>
                 )}
               </div>
@@ -594,7 +663,6 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
         </div>
       </div>
 
-      {/* Pagination */}
       <div className="mt-4 flex items-center justify-between">
         <div className="flex items-center gap-3 text-xs text-zinc-500">
           <span>{filteredProducts.length} товарів · сторінка {page} з {totalPages}</span>
@@ -602,11 +670,7 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
         </div>
         {totalPages > 1 && (
           <div className="flex items-center gap-1">
-            <button
-              disabled={page === 1}
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors disabled:opacity-30"
-            >← Попередня</button>
+            <button disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))} className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors disabled:opacity-30">← Попередня</button>
             {Array.from({ length: totalPages }, (_, i) => i + 1)
               .filter(pg => pg === 1 || pg === totalPages || Math.abs(pg - page) <= 2)
               .reduce<(number | '...')[]>((acc, pg, i, arr) => {
@@ -616,22 +680,10 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
               }, [])
               .map((pg, i) => pg === '...'
                 ? <span key={`e${i}`} className="text-xs text-zinc-600 px-1">…</span>
-                : <button
-                    key={pg}
-                    onClick={() => setPage(pg as number)}
-                    className={`text-xs px-2.5 py-1 rounded border transition-colors ${
-                      page === pg
-                        ? 'bg-red-700 border-red-700 text-white'
-                        : 'bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-400'
-                    }`}
-                  >{pg}</button>
+                : <button key={pg} onClick={() => setPage(pg as number)} className={`text-xs px-2.5 py-1 rounded border transition-colors ${page === pg ? 'bg-red-700 border-red-700 text-white' : 'bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-400'}`}>{pg}</button>
               )
             }
-            <button
-              disabled={page === totalPages}
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors disabled:opacity-30"
-            >Наступна →</button>
+            <button disabled={page === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))} className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors disabled:opacity-30">Наступна →</button>
           </div>
         )}
       </div>
