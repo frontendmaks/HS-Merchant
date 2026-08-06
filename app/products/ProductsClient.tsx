@@ -93,7 +93,8 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
     setPage(1)
   }
 
-  const setFilter = useCallback(<T>(setter: React.Dispatch<React.SetStateAction<T>>, val: T) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const setFilter = useCallback((setter: (v: any) => void, val: any) => {
     setter(val)
     setPage(1)
   }, [])
