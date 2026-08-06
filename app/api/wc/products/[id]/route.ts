@@ -5,6 +5,39 @@ const WC_URL = process.env.WC_URL!
 const CK = process.env.WC_CONSUMER_KEY!
 const CS = process.env.WC_CONSUMER_SECRET!
 
+async function getWcId(supabaseId: string) {
+  const supabase = createServiceClient()
+  const { data } = await supabase.from('products').select('external_id').eq('id', supabaseId).single()
+  return data?.external_id ?? null
+}
+
+// GET — fetch real WC product data for the edit form
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const wcId = await getWcId(id)
+  if (!wcId) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  const res = await fetch(
+    `${WC_URL}/wp-json/wc/v3/products/${wcId}?consumer_key=${CK}&consumer_secret=${CS}`,
+    { cache: 'no-store' }
+  )
+  if (!res.ok) return NextResponse.json({ error: 'WC error' }, { status: res.status })
+  const p = await res.json()
+
+  return NextResponse.json({
+    name: p.name ?? '',
+    description: p.description ?? '',
+    categories: (p.categories ?? []) as { id: number; name: string }[],
+    images: (p.images ?? []).map((img: { id: number; src: string; alt: string; name: string }) => ({
+      id: img.id,
+      src: img.src,
+      alt: img.alt,
+      name: img.name,
+    })),
+    attributes: (p.attributes ?? []) as { name: string; options: string[] }[],
+  })
+}
+
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const body = await req.json()

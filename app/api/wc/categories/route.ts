@@ -10,10 +10,10 @@ function wcFetch(path: string) {
 }
 
 export async function GET() {
-  const cats: { id: number; name: string; slug: string }[] = []
+  const cats: { id: number; name: string; slug: string; parent: number }[] = []
   let page = 1
   while (true) {
-    const res = await wcFetch(`/products/categories?per_page=100&page=${page}&_fields=id,name,slug`)
+    const res = await wcFetch(`/products/categories?per_page=100&page=${page}&_fields=id,name,slug,parent`)
     if (!res.ok) break
     const data = await res.json()
     if (!data.length) break

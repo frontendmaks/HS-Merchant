@@ -1,8 +1,8 @@
 'use client'
-import { useState, useMemo, useTransition, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useTransition, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
-type WcCategory = { id: number; name: string; slug: string }
+type WcCategory = { id: number; name: string; slug: string; parent: number }
 
 type ProductImage = { src: string; alt: string; name: string; id?: number }
 
@@ -74,47 +74,64 @@ function filenameFromUrl(url: string) {
   return url.split('/').pop()?.split('?')[0] ?? ''
 }
 
-// ─── Category picker ────────────────────────────────────────────────
+// ─── Category picker (hierarchical) ────────────────────────────────
 function CategoryPicker({
   selected, onChange, allCats,
 }: { selected: number[]; onChange: (ids: number[]) => void; allCats: WcCategory[] }) {
   const [search, setSearch] = useState('')
-  const filtered = allCats.filter(c => c.name.toLowerCase().includes(search.toLowerCase()))
+
+  const toggle = (id: number) => {
+    if (selected.includes(id)) onChange(selected.filter(i => i !== id))
+    else onChange([...selected, id])
+  }
+
+  // Build tree
+  const roots = allCats.filter(c => c.parent === 0)
+  const children = (parentId: number) => allCats.filter(c => c.parent === parentId)
+
+  const matchesSearch = (cat: WcCategory): boolean => {
+    if (!search) return true
+    if (cat.name.toLowerCase().includes(search.toLowerCase())) return true
+    return children(cat.id).some(matchesSearch)
+  }
+
+  const renderCat = (cat: WcCategory, depth = 0): React.ReactNode => {
+    if (!matchesSearch(cat)) return null
+    const isSelected = selected.includes(cat.id)
+    const kids = children(cat.id)
+    return (
+      <div key={cat.id}>
+        <label
+          className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-zinc-800 transition-colors ${isSelected ? 'text-emerald-400' : 'text-zinc-300'}`}
+          style={{ paddingLeft: `${12 + depth * 20}px` }}
+        >
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => toggle(cat.id)}
+            className="accent-emerald-500 shrink-0"
+          />
+          <span className="text-sm">{cat.name}</span>
+        </label>
+        {kids.map(k => renderCat(k, depth + 1))}
+      </div>
+    )
+  }
 
   return (
     <div className="border border-zinc-700 rounded-lg overflow-hidden">
       <div className="p-2 border-b border-zinc-700">
         <input
           type="text"
-          placeholder="Пошук..."
+          placeholder="Пошук категорій..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="w-full bg-zinc-800 text-sm text-white px-3 py-1.5 rounded border border-zinc-700 focus:outline-none focus:border-zinc-500"
         />
       </div>
-      <div className="max-h-48 overflow-y-auto">
-        {selected.length > 0 && (
-          <button
-            onClick={() => onChange([])}
-            className="w-full text-left px-3 py-2 text-xs text-zinc-500 hover:bg-zinc-800 border-b border-zinc-800"
-          >— прибрати —</button>
-        )}
-        {filtered.map(cat => {
-          const isSelected = selected.includes(cat.id)
-          return (
-            <button
-              key={cat.id}
-              onClick={() => {
-                if (isSelected) onChange(selected.filter(id => id !== cat.id))
-                else onChange([...selected, cat.id])
-              }}
-              className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-zinc-800 ${
-                isSelected ? 'text-emerald-400' : 'text-zinc-300'
-              }`}
-            >{cat.name}</button>
-          )
-        })}
-        {filtered.length === 0 && <p className="text-xs text-zinc-600 px-3 py-2">Нічого не знайдено</p>}
+      <div className="max-h-56 overflow-y-auto py-1">
+        {roots.map(r => renderCat(r))}
+        {roots.length === 0 && <p className="text-xs text-zinc-600 px-3 py-2">Завантаження...</p>}
       </div>
     </div>
   )
@@ -124,37 +141,63 @@ function CategoryPicker({
 function EditPanel({
   product, allCats, onSaved,
 }: { product: Product; allCats: WcCategory[]; onSaved: () => void }) {
-  const attrs = product.attributes
-
-  // Build initial image list from product.images (URLs only — no WC image IDs here)
-  const initImages: ProductImage[] = (product.images ?? []).map(url => {
-    const fn = filenameFromUrl(url)
-    const altGuess = fn.replace(/[-_]/g, ' ').replace(/\.\w+$/, '') || product.name
-    return { src: url, alt: altGuess, name: fn }
-  })
-
-  // Map current category names → IDs using allCats
-  const initCatIds = (product.categories ?? [])
-    .map(name => allCats.find(c => c.name === name)?.id)
-    .filter((id): id is number => id !== undefined)
-
-  const [edit, setEdit] = useState<EditState>({
-    name: product.name,
-    description: product.description ?? '',
-    categoryIds: initCatIds,
-    min: attrs?.['Мін'] ?? '',
-    step: attrs?.['Вага'] ?? attrs?.['Крок'] ?? '',
-    images: initImages,
-  })
+  const [edit, setEdit] = useState<EditState | null>(null)
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Load real WC data
+  useEffect(() => {
+    fetch(`/api/wc/products/${product.id}`)
+      .then(r => r.json())
+      .then(data => {
+        const minAttr = data.attributes?.find((a: { name: string }) => a.name === 'Мін')
+        const stepAttr = data.attributes?.find((a: { name: string }) => a.name === 'Вага') ??
+                         data.attributes?.find((a: { name: string }) => a.name === 'Крок')
+        setEdit({
+          name: data.name ?? product.name,
+          description: data.description ?? '',
+          categoryIds: (data.categories ?? []).map((c: { id: number }) => c.id),
+          min: minAttr?.options?.[0] ?? '',
+          step: stepAttr?.options?.[0] ?? '',
+          images: (data.images ?? []).map((img: ProductImage) => ({
+            id: img.id,
+            src: img.src,
+            alt: img.alt ?? '',
+            name: img.name ?? filenameFromUrl(img.src),
+          })),
+        })
+        setLoading(false)
+      })
+      .catch(() => {
+        // Fallback to Supabase data
+        const attrs = product.attributes
+        const initImages: ProductImage[] = (product.images ?? []).map(url => {
+          const fn = filenameFromUrl(url)
+          return { src: url, alt: fn.replace(/[-_]/g, ' ').replace(/\.\w+$/, '') || product.name, name: fn }
+        })
+        const initCatIds = (product.categories ?? [])
+          .map(name => allCats.find(c => c.name === name)?.id)
+          .filter((id): id is number => id !== undefined)
+        setEdit({
+          name: product.name,
+          description: product.description ?? '',
+          categoryIds: initCatIds,
+          min: attrs?.['Мін'] ?? '',
+          step: attrs?.['Вага'] ?? attrs?.['Крок'] ?? '',
+          images: initImages,
+        })
+        setLoading(false)
+      })
+  })
+
   const updateImg = (i: number, field: 'alt' | 'name', val: string) => {
-    setEdit(e => ({ ...e, images: e.images.map((img, idx) => idx === i ? { ...img, [field]: val } : img) }))
+    setEdit(e => e ? ({ ...e, images: e.images.map((img, idx) => idx === i ? { ...img, [field]: val } : img) }) : e)
   }
 
   const handleSave = async () => {
+    if (!edit) return
     setSaving(true)
     setError(null)
     try {
@@ -167,7 +210,7 @@ function EditPanel({
           categories: edit.categoryIds,
           min: edit.min || undefined,
           step: edit.step || undefined,
-          images: edit.images.map(img => ({ src: img.src, alt: img.alt, name: img.name })),
+          images: edit.images.map(img => ({ id: img.id, src: img.src, alt: img.alt, name: img.name })),
         }),
       })
       const data = await res.json()
@@ -191,124 +234,124 @@ function EditPanel({
           {saved && <span className="text-xs text-emerald-400">✓ Збережено на сайті</span>}
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || loading || !edit}
             className="px-4 py-1.5 bg-red-700 hover:bg-red-600 text-white text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
           >
-            {saving ? <span className="animate-spin">⟳</span> : '↑'}
+            {saving ? <span className="animate-spin inline-block">⟳</span> : '↑'}
             {saving ? 'Зберігаємо...' : 'Зберегти на сайт'}
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left */}
-        <div className="space-y-3">
-          {/* Name */}
-          <div>
-            <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Назва</label>
-            <input
-              type="text"
-              value={edit.name}
-              onChange={e => setEdit(s => ({ ...s, name: e.target.value }))}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500"
-            />
-          </div>
-
-          {/* Description */}
-          <div>
-            <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Опис</label>
-            <textarea
-              value={edit.description}
-              onChange={e => setEdit(s => ({ ...s, description: e.target.value }))}
-              rows={5}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 resize-y font-mono"
-            />
-          </div>
-
-          {/* Min + Step */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Мінімальне значення</label>
-              <input
-                type="text"
-                value={edit.min}
-                onChange={e => setEdit(s => ({ ...s, min: e.target.value }))}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Крок</label>
-              <input
-                type="text"
-                value={edit.step}
-                onChange={e => setEdit(s => ({ ...s, step: e.target.value }))}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500"
-              />
-            </div>
-          </div>
-
-          {/* Categories */}
-          <div>
-            <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">
-              Категорії{edit.categoryIds.length > 0 && <span className="ml-1 text-emerald-500">({edit.categoryIds.length})</span>}
-            </label>
-            {edit.categoryIds.length > 0 && (
-              <div className="flex flex-wrap gap-1 mb-2">
-                {edit.categoryIds.map(id => {
-                  const cat = allCats.find(c => c.id === id)
-                  return cat ? (
-                    <span key={id} className="text-[10px] px-2 py-0.5 bg-zinc-700 text-zinc-300 rounded-full flex items-center gap-1">
-                      {cat.name}
-                      <button onClick={() => setEdit(s => ({ ...s, categoryIds: s.categoryIds.filter(i => i !== id) }))} className="text-zinc-500 hover:text-red-400">×</button>
-                    </span>
-                  ) : null
-                })}
-              </div>
-            )}
-            {allCats.length === 0
-              ? <p className="text-xs text-zinc-600">Завантаження категорій...</p>
-              : <CategoryPicker selected={edit.categoryIds} onChange={ids => setEdit(s => ({ ...s, categoryIds: ids }))} allCats={allCats} />
-            }
-          </div>
-        </div>
-
-        {/* Right: images */}
-        <div>
-          <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-2 block">
-            Фото — Alt текст та назва файлу
-          </label>
-          {edit.images.length === 0 && <p className="text-xs text-zinc-700">Немає фото</p>}
+      {loading || !edit ? (
+        <div className="text-xs text-zinc-600 py-4 text-center">Завантаження даних з сайту...</div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Left */}
           <div className="space-y-3">
-            {edit.images.map((img, i) => (
-              <div key={i} className="flex gap-3 items-start">
-                <a href={img.src} target="_blank" rel="noopener noreferrer" className="shrink-0">
-                  <img src={img.src} alt={img.alt} className="w-16 h-16 object-cover rounded-lg bg-zinc-800 hover:opacity-80" loading="lazy" />
-                </a>
-                <div className="flex-1 space-y-1.5 min-w-0">
-                  <div>
-                    <label className="text-[9px] text-zinc-600 uppercase">Alt текст</label>
-                    <input
-                      type="text"
-                      value={img.alt}
-                      onChange={e => updateImg(i, 'alt', e.target.value)}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-zinc-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9px] text-zinc-600 uppercase">Назва файлу</label>
-                    <input
-                      type="text"
-                      value={img.name}
-                      onChange={e => updateImg(i, 'name', e.target.value)}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-zinc-500"
-                    />
+            <div>
+              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Назва</label>
+              <input
+                type="text"
+                value={edit.name}
+                onChange={e => setEdit(s => s ? ({ ...s, name: e.target.value }) : s)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Опис</label>
+              <textarea
+                value={edit.description}
+                onChange={e => setEdit(s => s ? ({ ...s, description: e.target.value }) : s)}
+                rows={5}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 resize-y font-mono"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Мінімальне значення</label>
+                <input
+                  type="text"
+                  value={edit.min}
+                  onChange={e => setEdit(s => s ? ({ ...s, min: e.target.value }) : s)}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Крок</label>
+                <input
+                  type="text"
+                  value={edit.step}
+                  onChange={e => setEdit(s => s ? ({ ...s, step: e.target.value }) : s)}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">
+                Категорії{edit.categoryIds.length > 0 && <span className="ml-1 text-emerald-500">({edit.categoryIds.length})</span>}
+              </label>
+              {edit.categoryIds.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {edit.categoryIds.map(id => {
+                    const cat = allCats.find(c => c.id === id)
+                    return cat ? (
+                      <span key={id} className="text-[10px] px-2 py-0.5 bg-zinc-700 text-zinc-300 rounded-full flex items-center gap-1">
+                        {cat.name}
+                        <button onClick={() => setEdit(s => s ? ({ ...s, categoryIds: s.categoryIds.filter(i => i !== id) }) : s)} className="text-zinc-500 hover:text-red-400 leading-none">×</button>
+                      </span>
+                    ) : null
+                  })}
+                </div>
+              )}
+              {allCats.length === 0
+                ? <p className="text-xs text-zinc-600">Завантаження категорій...</p>
+                : <CategoryPicker selected={edit.categoryIds} onChange={ids => setEdit(s => s ? ({ ...s, categoryIds: ids }) : s)} allCats={allCats} />
+              }
+            </div>
+          </div>
+
+          {/* Right: images */}
+          <div>
+            <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-2 block">
+              Фото — Alt текст та назва файлу
+            </label>
+            {edit.images.length === 0 && <p className="text-xs text-zinc-700">Немає фото</p>}
+            <div className="space-y-3">
+              {edit.images.map((img, i) => (
+                <div key={img.id ?? i} className="flex gap-3 items-start">
+                  <a href={img.src} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                    <img src={img.src} alt={img.alt} className="w-16 h-16 object-cover rounded-lg bg-zinc-800 hover:opacity-80" loading="lazy" />
+                  </a>
+                  <div className="flex-1 space-y-1.5 min-w-0">
+                    <div>
+                      <label className="text-[9px] text-zinc-600 uppercase">Alt текст</label>
+                      <input
+                        type="text"
+                        value={img.alt}
+                        onChange={e => updateImg(i, 'alt', e.target.value)}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-zinc-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-600 uppercase">Назва файлу</label>
+                      <input
+                        type="text"
+                        value={img.name}
+                        onChange={e => updateImg(i, 'name', e.target.value)}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-zinc-500"
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
