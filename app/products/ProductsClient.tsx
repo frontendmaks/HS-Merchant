@@ -132,7 +132,7 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
       else if (sortKey === 'status') { va = a.status; vb = b.status }
       else if (sortKey === 'category_name') { va = a.category_name ?? ''; vb = b.category_name ?? '' }
       else if (sortKey === 'brand') { va = a.brand ?? ''; vb = b.brand ?? '' }
-      const cmp = typeof va === 'number' ? va - vb : (va as string).localeCompare(vb as string, 'uk')
+      const cmp = typeof va === 'number' ? (va as number) - (vb as number) : (va as string).localeCompare(vb as string, 'uk')
       return sortDir === 'asc' ? cmp : -cmp
     })
 
