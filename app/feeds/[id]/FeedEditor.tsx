@@ -1375,6 +1375,16 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               const displayMOldPrice = mOldPrice != null ? (mOldPriceCalc !== null ? mOldPriceCalc : mOldPrice) : null
               const isWeightProduct = mPriceCalc !== null
 
+              // Min weight label for product name (weight products only, converted to grams)
+              const minWeightLabel = (() => {
+                if (!unitBase) return null
+                const u = unitBase.toLowerCase()
+                const minRaw = parseFloat(attrs?.['Мін'] ?? '0') || 0
+                if (u === 'кг' || u === 'л') return `${minRaw > 0 ? Math.round(minRaw * 1000) : 400} г`
+                if (u === 'г' || u === 'мл') return `${minRaw > 0 ? Math.round(minRaw) : 400} ${u}`
+                return null
+              })()
+
               return (
                 <div key={p.id} className={`transition-colors border-l-2 ${
                   isActive && hasErrors ? 'border-red-600' :
@@ -1411,7 +1421,9 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                       >
                         <div className="text-xs text-white font-medium leading-snug flex items-start gap-1 flex-wrap">
                           <span className="text-zinc-600 shrink-0 mt-px">{isExpanded ? '▾' : '▸'}</span>
-                          <span className="line-clamp-1">{p.name}</span>
+                          <span className="line-clamp-1">
+                            {p.name}{minWeightLabel && <span className="text-zinc-400">, {minWeightLabel}</span>}
+                          </span>
                         </div>
                         <div className="text-[11px] text-zinc-500 mt-0.5 truncate">{p.category_name}</div>
                         {isActive && issues.length > 0 && (
