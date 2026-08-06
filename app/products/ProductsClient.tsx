@@ -75,6 +75,24 @@ function filenameFromUrl(url: string) {
   return url.split('/').pop()?.split('?')[0] ?? ''
 }
 
+function htmlToText(html: string): string {
+  return html
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function textToHtml(text: string): string {
+  if (!text.trim()) return ''
+  return text.split(/\n\n+/).map(p => `<p>${p.replace(/\n/g, '<br/>')}</p>`).join('')
+}
+
 // ─── Category picker (hierarchical) ────────────────────────────────
 function CategoryPicker({
   selected, onChange, allCats,
@@ -156,13 +174,17 @@ function EditPanel({
         const minAttr = data.attributes?.find((a: { name: string }) => a.name === 'Мін')
         const stepAttr = data.attributes?.find((a: { name: string }) => a.name === 'Вага') ??
                          data.attributes?.find((a: { name: string }) => a.name === 'Крок')
+        const supabaseAttrs = product.attributes
+        const minVal = minAttr?.options?.[0] ?? supabaseAttrs?.['Мін'] ?? ''
+        const stepVal = stepAttr?.options?.[0] ?? supabaseAttrs?.['Вага'] ?? supabaseAttrs?.['Крок'] ?? ''
+        const descText = htmlToText(data.short_description ?? data.description ?? '')
         setEdit({
           name: data.name ?? product.name,
           description: data.description ?? '',
-          short_description: data.short_description ?? '',
+          short_description: descText,
           categoryIds: (data.categories ?? []).map((c: { id: number }) => c.id),
-          min: minAttr?.options?.[0] ?? '',
-          step: stepAttr?.options?.[0] ?? '',
+          min: minVal,
+          step: stepVal,
           images: (data.images ?? []).map((img: ProductImage) => ({
             id: img.id,
             src: img.src,
@@ -186,7 +208,7 @@ function EditPanel({
         setEdit({
           name: product.name,
           description: product.description ?? '',
-          short_description: product.description ?? '',
+          short_description: htmlToText(product.description ?? ''),
           categoryIds: initCatIds,
           min: attrs?.['Мін'] ?? '',
           step: attrs?.['Вага'] ?? attrs?.['Крок'] ?? '',
@@ -211,8 +233,8 @@ function EditPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: edit.name,
-          description: edit.description,
-          short_description: edit.short_description,
+          description: textToHtml(edit.short_description),
+          short_description: textToHtml(edit.short_description),
           categories: edit.categoryIds,
           min: edit.min || undefined,
           step: edit.step || undefined,
