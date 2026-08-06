@@ -5,10 +5,13 @@ const WC_URL = process.env.WC_URL!
 const CK = process.env.WC_CONSUMER_KEY!
 const CS = process.env.WC_CONSUMER_SECRET!
 
-// Basic auth header — more reliable than query-string for PUT/POST
 function wcHeaders(extra?: Record<string, string>) {
-  const token = Buffer.from(`${CK}:${CS}`).toString('base64')
-  return { 'Authorization': `Basic ${token}`, 'Content-Type': 'application/json', ...extra }
+  return { 'Content-Type': 'application/json', ...extra }
+}
+
+function wcUrl(path: string) {
+  const sep = path.includes('?') ? '&' : '?'
+  return `${WC_URL}/wp-json/wc/v3${path}${sep}consumer_key=${CK}&consumer_secret=${CS}`
 }
 
 async function getWcId(supabaseId: string): Promise<string | null> {
@@ -18,7 +21,7 @@ async function getWcId(supabaseId: string): Promise<string | null> {
 }
 
 async function wcGet(wcId: string) {
-  const res = await fetch(`${WC_URL}/wp-json/wc/v3/products/${wcId}`, {
+  const res = await fetch(wcUrl(`/products/${wcId}`), {
     headers: wcHeaders(),
     cache: 'no-store',
   })
@@ -109,7 +112,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   // Push to WC
-  const wcRes = await fetch(`${WC_URL}/wp-json/wc/v3/products/${wcId}`, {
+  const wcRes = await fetch(wcUrl(`/products/${wcId}`), {
     method: 'PUT',
     headers: wcHeaders(),
     body: JSON.stringify(wcPayload),
