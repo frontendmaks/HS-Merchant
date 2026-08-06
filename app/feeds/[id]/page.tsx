@@ -26,6 +26,7 @@ export default async function FeedPage({ params }: { params: Promise<{ id: strin
       allProducts={allProducts ?? []}
       categories={categories.sort()}
       marketplaces={marketplaces ?? []}
+      warehouseName={process.env.WC_WAREHOUSE ?? 'Гуртівня онлайн'}
     />
   )
 }
