@@ -395,19 +395,23 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   async function translateAllEmpty() {
     if (bulkTranslating) return
     setBulkTranslating(true)
-    const toTranslate = filteredProducts.filter(p => {
-      const ov = overrides[p.id] ?? {}
-      return ov.is_active && (!ov.name_ru?.trim() || !ov.description_ru?.trim())
-    })
-    for (const p of toTranslate) {
-      const ov = overrides[p.id] ?? {}
-      if (!ov.name_ru?.trim()) await translateField(p.id, 'name_ru', productFullName(p, ov.custom_name))
-      if (!ov.description_ru?.trim()) {
+    try {
+      // Translate all active products — re-translates existing values too (needed after weight suffix was added)
+      const toTranslate = allProducts.filter(p => {
+        const ov = overrides[p.id] ?? {}
+        const fp = fpMap.get(p.id)
+        const isActive = ov.is_active ?? fp?.is_active ?? false
+        return isActive
+      })
+      for (const p of toTranslate) {
+        const ov = overrides[p.id] ?? {}
+        await translateField(p.id, 'name_ru', productFullName(p, ov.custom_name))
         const descSource = ov.custom_params?.['Опис']?.trim() || p.description?.trim()
         if (descSource) await translateField(p.id, 'description_ru', descSource)
       }
+    } finally {
+      setBulkTranslating(false)
     }
-    setBulkTranslating(false)
   }
 
   // Bulk param add
