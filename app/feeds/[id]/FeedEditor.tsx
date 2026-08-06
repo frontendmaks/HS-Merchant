@@ -45,7 +45,6 @@ type Props = {
   allProducts: Product[]
   categories: string[]
   marketplaces: { id: string; name: string }[]
-  warehouseName: string
 }
 
 type Override = {
@@ -190,16 +189,7 @@ function MauDauCatDropdown({
   )
 }
 
-function calcPer100g(price: number, attrs: Record<string, string> | null): number | null {
-  const unit = (attrs?.['Одиниця'] ?? '').toLowerCase()
-  const min = parseFloat(attrs?.['Мін'] ?? '0') || 0
-  if (unit === 'кг') return Math.round(price / 10 * 10) / 10
-  if (unit === 'л') return Math.round(price / 10 * 10) / 10
-  if ((unit === 'г' || unit === 'мл') && min > 0) return Math.round(price / min * 100 * 10) / 10
-  return null
-}
-
-export default function FeedEditor({ feed, feedProducts, allProducts, categories, marketplaces, warehouseName }: Props) {
+export default function FeedEditor({ feed, feedProducts, allProducts, categories, marketplaces }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [saving, setSaving] = useState(false)
@@ -355,17 +345,8 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [showOnlySelected, setShowOnlySelected] = useState(false)
   const [showOnlyWithIssues, setShowOnlyWithIssues] = useState(false)
   const [showOnlyInFeed, setShowOnlyInFeed] = useState(false)
-  const [filterStock, setFilterStock] = useState<'all' | 'in' | 'out'>('all')
-  const [filterActive, setFilterActive] = useState<'all' | 'active' | 'inactive'>('all')
-  const [filterSaleCategory, setFilterSaleCategory] = useState<string | null>(null)
-  const [filterWarehouse, setFilterWarehouse] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const PAGE_SIZE = 50
-
-  const saleCategories = useMemo(
-    () => categories.filter(c => c.toLowerCase().includes('акці')),
-    [categories]
-  )
   // Which product row is expanded
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null)
   // MauDau category block: expand per category + search + category-level defaults
@@ -692,12 +673,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         const unit = attrs['Одиниця'] ?? 'шт'
         const weightFromName = attrs['Вага']
 
-        // Мінімальне значення — auto-fill from WC 'Мін' attribute
-        if (!existing['Мінімальне значення'] && attrs['Мін']) {
-          auto['Мінімальне значення'] = attrs['Мін']
-        }
-
-        // Вага/Крок — only if category supports it; match to closest standard MauDau weight
+        // Вага — only if category supports it; match to closest standard MauDau weight
         if (!existing['Вага'] && hasAttr('Вага')) {
           const weightAttr = catAttrs.find((a: any) => a.name === 'Вага')
           const allowedWeights: string[] = weightAttr?.values ?? []
@@ -814,21 +790,14 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
         if (ov.is_active !== true) return false
         if (getProductIssues(p, ov).length === 0) return false
       }
-      const effStock = (ov.custom_stock !== '' && ov.custom_stock != null) ? Number(ov.custom_stock) : p.stock
-      if (filterStock === 'in' && (effStock === null || effStock <= 0)) return false
-      if (filterStock === 'out' && effStock !== null && effStock > 0) return false
-      if (filterWarehouse && effStock === null) return false
-      if (filterActive === 'active' && ov.is_active !== true) return false
-      if (filterActive === 'inactive' && ov.is_active === true) return false
-      if (filterSaleCategory && !p.categories?.includes(filterSaleCategory)) return false
       return true
     })
-  }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues, showOnlyInFeed, savedFeedIds, overrides, portalIdAttrsMap, slugToPortalIdClient, categoryPortalIds, isMaudau, filterStock, filterWarehouse, filterActive, filterSaleCategory])
+  }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues, showOnlyInFeed, savedFeedIds, overrides, portalIdAttrsMap, slugToPortalIdClient, categoryPortalIds, isMaudau])
 
   // Reset to page 1 whenever filters change
   useEffect(() => {
     setCurrentPage(1)
-  }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues, showOnlyInFeed, filterStock, filterWarehouse, filterActive, filterSaleCategory])
+  }, [allProducts, selectedCategories, productSearch, showOnlySelected, showOnlyWithIssues, showOnlyInFeed])
 
   // Categories: when a context filter is active, show only categories in filtered products
   const contextActiveCategories = useMemo(() => {
@@ -1163,64 +1132,6 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                 >
                   ⚠ З помилками
                 </button>
-                {/* Warehouse filter */}
-                <button
-                  onClick={() => setFilterWarehouse(v => !v)}
-                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
-                    filterWarehouse
-                      ? 'bg-zinc-600 border-zinc-500 text-white'
-                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'
-                  }`}
-                  title="Показати лише товари з відслідковуваним складом"
-                >
-                  🏭 {warehouseName}
-                </button>
-                {/* In/Out of stock */}
-                <button
-                  onClick={() => setFilterStock(s => s === 'in' ? 'all' : 'in')}
-                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
-                    filterStock === 'in'
-                      ? 'bg-emerald-700 border-emerald-700 text-white'
-                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-emerald-700'
-                  }`}
-                >✓ В наявності</button>
-                <button
-                  onClick={() => setFilterStock(s => s === 'out' ? 'all' : 'out')}
-                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
-                    filterStock === 'out'
-                      ? 'bg-red-800 border-red-700 text-white'
-                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-red-700'
-                  }`}
-                >✕ Не в наявності</button>
-                {/* Active/Inactive in feed */}
-                <button
-                  onClick={() => setFilterActive(s => s === 'active' ? 'all' : 'active')}
-                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
-                    filterActive === 'active'
-                      ? 'bg-emerald-900 border-emerald-700 text-emerald-300'
-                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-emerald-700'
-                  }`}
-                >Активний</button>
-                <button
-                  onClick={() => setFilterActive(s => s === 'inactive' ? 'all' : 'inactive')}
-                  className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
-                    filterActive === 'inactive'
-                      ? 'bg-zinc-600 border-zinc-500 text-zinc-200'
-                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'
-                  }`}
-                >Неактивний</button>
-                {/* Sale category filters */}
-                {saleCategories.map(cat => (
-                  <button
-                    key={cat}
-                    onClick={() => setFilterSaleCategory(fc => fc === cat ? null : cat)}
-                    className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
-                      filterSaleCategory === cat
-                        ? 'bg-amber-700 border-amber-600 text-white'
-                        : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-amber-600'
-                    }`}
-                  >🏷 {cat}</button>
-                ))}
                 <input
                   type="text"
                   placeholder="🔍 Пошук..."
@@ -1375,13 +1286,12 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           </div>
 
           {/* Column headers */}
-          <div className="grid grid-cols-[20px_36px_1fr_38px_80px_80px_56px] gap-2 px-4 py-2 bg-zinc-800/50 border-b border-zinc-800">
+          <div className="grid grid-cols-[20px_36px_1fr_70px_70px_56px] gap-2 px-4 py-2 bg-zinc-800/50 border-b border-zinc-800">
             <div className="text-xs text-zinc-600">✓</div>
             <div />
             <div className="text-xs text-zinc-600 uppercase tracking-wide">Товар</div>
-            <div className="text-xs text-zinc-600 uppercase tracking-wide text-center">Од.</div>
-            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Ціна/100г</div>
-            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Акц./100г</div>
+            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Ціна</div>
+            <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Акційна</div>
             <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Залишок</div>
           </div>
 
@@ -1425,7 +1335,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                   inSavedFeed && !isActive ? 'border-orange-700' :
                   'border-transparent'
                 } ${isActive ? 'hover:bg-zinc-800/30' : 'opacity-35 hover:opacity-60'}`}>
-                  <div className="grid grid-cols-[20px_10px_36px_1fr_38px_80px_80px_56px] gap-2 px-4 py-2 items-center">
+                  <div className="grid grid-cols-[20px_10px_36px_1fr_70px_70px_56px] gap-2 px-4 py-2 items-center">
                     {/* Checkbox */}
                     <input
                       type="checkbox"
@@ -1472,68 +1382,28 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                       </button>
                     </div>
 
-                    {/* Одиниця виміру */}
-                    {(() => {
-                      const unit = (p.attributes as any)?.['Одиниця'] ?? ''
-                      return (
-                        <div className="text-center">
-                          <span className="text-[11px] text-zinc-400">{unit || '—'}</span>
-                        </div>
-                      )
-                    })()}
+                    {/* Price */}
+                    <div>
+                      <input
+                        type="number"
+                        placeholder={String(p.price ?? '')}
+                        value={ov.custom_price ?? ''}
+                        onChange={e => setOverride(p.id, 'custom_price', e.target.value)}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-xs text-white text-right focus:outline-none focus:border-amber-500 placeholder:text-zinc-500"
+                      />
+                    </div>
 
-                    {/* Ціна за 100г */}
-                    {(() => {
-                      const attrs = p.attributes as Record<string, string> | null
-                      const effectivePrice = ov.custom_price ? Number(ov.custom_price) : p.price
-                      const per100 = calcPer100g(effectivePrice, attrs)
-                      return (
-                        <div className="text-right">
-                          {per100 != null ? (
-                            <div>
-                              <div className="text-xs text-white font-medium">{per100} ₴</div>
-                              <div className="text-[10px] text-zinc-500">/100г</div>
-                            </div>
-                          ) : (
-                            <div>
-                              <input
-                                type="number"
-                                placeholder={String(effectivePrice ?? '')}
-                                value={ov.custom_price ?? ''}
-                                onChange={e => setOverride(p.id, 'custom_price', e.target.value)}
-                                className="w-full bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-xs text-white text-right focus:outline-none focus:border-amber-500 placeholder:text-zinc-500"
-                              />
-                            </div>
-                          )}
+                    {/* Sale price (price_old = original, price = discounted) */}
+                    <div className="text-right">
+                      {p.price_old != null ? (
+                        <div>
+                          <div className="text-xs text-emerald-400 font-medium">{p.price} ₴</div>
+                          <div className="text-[10px] text-zinc-500 line-through">{p.price_old} ₴</div>
                         </div>
-                      )
-                    })()}
-
-                    {/* Акційна ціна за 100г */}
-                    {(() => {
-                      const attrs = p.attributes as Record<string, string> | null
-                      const salePer100 = p.price_old != null ? calcPer100g(p.price, attrs) : null
-                      const origPer100 = p.price_old != null ? calcPer100g(p.price_old, attrs) : null
-                      return (
-                        <div className="text-right">
-                          {p.price_old != null ? (
-                            salePer100 != null ? (
-                              <div>
-                                <div className="text-xs text-emerald-400 font-medium">{salePer100} ₴</div>
-                                <div className="text-[10px] text-zinc-500 line-through">{origPer100} ₴</div>
-                              </div>
-                            ) : (
-                              <div>
-                                <div className="text-xs text-emerald-400 font-medium">{p.price} ₴</div>
-                                <div className="text-[10px] text-zinc-500 line-through">{p.price_old} ₴</div>
-                              </div>
-                            )
-                          ) : (
-                            <span className="text-xs text-zinc-600">—</span>
-                          )}
-                        </div>
-                      )
-                    })()}
+                      ) : (
+                        <span className="text-xs text-zinc-600">—</span>
+                      )}
+                    </div>
 
                     {/* Stock */}
                     <div className="text-right">
@@ -1752,38 +1622,6 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                           {/* Structured MauDau attrs */}
                           {catAttrsExp.length > 0 && (
                             <div className="space-y-1.5">
-                              {/* Мінімальне значення — before Вага/Крок */}
-                              {catAttrsExp.some((a: any) => a.name === 'Вага') && (() => {
-                                const minFromSite = (p.attributes as any)?.['Мін'] ?? ''
-                                const minVal = curParams['Мінімальне значення'] ?? minFromSite
-                                const isEmpty = !minVal
-                                return (
-                                  <div className="flex items-center gap-1.5">
-                                    <span className={`w-28 shrink-0 text-[11px] truncate ${isEmpty ? 'text-amber-400' : 'text-zinc-400'}`}>
-                                      Мінімальне значення
-                                    </span>
-                                    <span className="text-zinc-600 text-xs shrink-0">:</span>
-                                    <input
-                                      type="text"
-                                      value={minVal}
-                                      onChange={e => setParam('Мінімальне значення', e.target.value)}
-                                      className={`flex-1 min-w-0 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none ${
-                                        isEmpty
-                                          ? 'bg-amber-950/30 border border-amber-600 focus:border-amber-400'
-                                          : 'bg-zinc-800 border border-zinc-700 focus:border-zinc-500'
-                                      }`}
-                                      placeholder={minFromSite || 'Значення'}
-                                    />
-                                    {minVal && (
-                                      <button
-                                        type="button"
-                                        onClick={() => clearParam('Мінімальне значення')}
-                                        className="text-zinc-600 hover:text-red-400 text-xs px-1 transition-colors shrink-0"
-                                      >✕</button>
-                                    )}
-                                  </div>
-                                )
-                              })()}
                               {catAttrsExp.map((attr: any) => {
                                 const val: string = attr.name === 'Вага'
                                   ? (curParams['Вага'] ?? curParams['Вага упаковки'] ?? '')
@@ -1791,12 +1629,11 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                                 const isEmpty = !val
                                 const rawValues: string[] = attr.values ?? []
                                 const hasDropdown = rawValues.length > 0
-                                const displayName = attr.name === 'Вага' ? 'Крок' : attr.name
 
                                 return (
                                   <div key={attr.name} className="flex items-center gap-1.5">
                                     <span className={`w-28 shrink-0 text-[11px] truncate ${isEmpty ? 'text-amber-400' : 'text-zinc-400'}`}>
-                                      {displayName}
+                                      {attr.name}
                                     </span>
                                     <span className="text-zinc-600 text-xs shrink-0">:</span>
                                     {hasDropdown ? (
@@ -1891,16 +1728,11 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           </div>
 
           {/* Pagination */}
-          {filteredProducts.length > 0 && (
+          {filteredProducts.length > PAGE_SIZE && (
             <div className="px-4 py-3 border-t border-zinc-800 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-zinc-500">
-                  {filteredProducts.length > PAGE_SIZE
-                    ? `${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filteredProducts.length)} з ${filteredProducts.length}`
-                    : `${filteredProducts.length} товарів`}
-                </span>
-                <span className="text-xs text-zinc-700">{PAGE_SIZE} на сторінці</span>
-              </div>
+              <span className="text-xs text-zinc-500">
+                {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredProducts.length)} з {filteredProducts.length}
+              </span>
               <div className="flex items-center gap-1">
                 <button
                   disabled={currentPage === 1}
