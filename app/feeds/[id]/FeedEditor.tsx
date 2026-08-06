@@ -427,12 +427,20 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
     })
   }
 
-  // Price per 100g for weight products
-  function calcPer100g(price: number, attrs: Record<string, string> | null): number | null {
+  // Marketplace price for weight products:
+  // кг/л: price is per kg → multiply by min_kg (default 0.4 = 400g if no min)
+  // г/мл: price is already per-portion → no change
+  // other: null (piece product, no transformation)
+  function calcMarketplacePrice(price: number, attrs: Record<string, string> | null): number | null {
     const unit = (attrs?.['Одиниця'] ?? '').toLowerCase()
-    const min = parseFloat(attrs?.['Мін'] ?? '0') || 0
-    if (unit === 'кг' || unit === 'л') return Math.round(price / 10 * 10) / 10
-    if ((unit === 'г' || unit === 'мл') && min > 0) return Math.round(price / min * 100 * 10) / 10
+    const minRaw = parseFloat(attrs?.['Мін'] ?? '0') || 0
+    if (unit === 'кг' || unit === 'л') {
+      const minKg = minRaw > 0 ? minRaw : 0.4
+      return Math.round(price * minKg * 100) / 100
+    }
+    if (unit === 'г' || unit === 'мл') {
+      return Math.round(price * 100) / 100
+    }
     return null
   }
 
@@ -1359,13 +1367,13 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               // Marketplace old price = WC old price (sale comparison), not affected by custom_price
               const mOldPrice = wcOldPrice
 
-              // Per-100g for weight products; null means piece product (show as-is)
-              const mPricePer100g = calcPer100g(mPrice, attrs)
-              const mOldPricePer100g = mOldPrice != null ? calcPer100g(mOldPrice, attrs) : null
+              // Marketplace price: for кг/л — price×min_kg (default 0.4); for г/мл — price as-is; null = piece
+              const mPriceCalc = calcMarketplacePrice(mPrice, attrs)
+              const mOldPriceCalc = mOldPrice != null ? calcMarketplacePrice(mOldPrice, attrs) : null
 
-              const displayMPrice = mPricePer100g !== null ? mPricePer100g : mPrice
-              const displayMOldPrice = mOldPrice != null ? (mOldPricePer100g !== null ? mOldPricePer100g : mOldPrice) : null
-              const isWeightProduct = mPricePer100g !== null
+              const displayMPrice = mPriceCalc !== null ? mPriceCalc : mPrice
+              const displayMOldPrice = mOldPrice != null ? (mOldPriceCalc !== null ? mOldPriceCalc : mOldPrice) : null
+              const isWeightProduct = mPriceCalc !== null
 
               return (
                 <div key={p.id} className={`transition-colors border-l-2 ${
