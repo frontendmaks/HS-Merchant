@@ -186,7 +186,7 @@ function EditPanel({
         setEdit({
           name: product.name,
           description: product.description ?? '',
-          short_description: '',
+          short_description: product.description ?? '',
           categoryIds: initCatIds,
           min: attrs?.['Мін'] ?? '',
           step: attrs?.['Вага'] ?? attrs?.['Крок'] ?? '',
@@ -194,7 +194,8 @@ function EditPanel({
         })
         setLoading(false)
       })
-  })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const updateImg = (i: number, field: 'alt' | 'name', val: string) => {
     setEdit(e => e ? ({ ...e, images: e.images.map((img, idx) => idx === i ? { ...img, [field]: val } : img) }) : e)
@@ -265,21 +266,11 @@ function EditPanel({
             </div>
 
             <div>
-              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Короткий опис</label>
+              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Опис</label>
               <textarea
                 value={edit.short_description}
-                onChange={e => setEdit(s => s ? ({ ...s, short_description: e.target.value }) : s)}
-                rows={3}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 resize-y font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Повний опис</label>
-              <textarea
-                value={edit.description}
-                onChange={e => setEdit(s => s ? ({ ...s, description: e.target.value }) : s)}
-                rows={5}
+                onChange={e => setEdit(s => s ? ({ ...s, short_description: e.target.value, description: e.target.value }) : s)}
+                rows={6}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 resize-y font-mono"
               />
             </div>
