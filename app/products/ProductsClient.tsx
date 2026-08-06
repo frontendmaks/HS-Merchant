@@ -34,6 +34,7 @@ type Props = {
 type EditState = {
   name: string
   description: string
+  short_description: string
   categoryIds: number[]
   min: string
   step: string
@@ -150,7 +151,7 @@ function EditPanel({
   // Load real WC data
   useEffect(() => {
     fetch(`/api/wc/products/${product.id}`)
-      .then(r => r.json())
+      .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`); return d })
       .then(data => {
         const minAttr = data.attributes?.find((a: { name: string }) => a.name === 'Мін')
         const stepAttr = data.attributes?.find((a: { name: string }) => a.name === 'Вага') ??
@@ -158,6 +159,7 @@ function EditPanel({
         setEdit({
           name: data.name ?? product.name,
           description: data.description ?? '',
+          short_description: data.short_description ?? '',
           categoryIds: (data.categories ?? []).map((c: { id: number }) => c.id),
           min: minAttr?.options?.[0] ?? '',
           step: stepAttr?.options?.[0] ?? '',
@@ -170,12 +172,13 @@ function EditPanel({
         })
         setLoading(false)
       })
-      .catch(() => {
+      .catch((e: Error) => {
+        setError(`Не вдалось завантажити дані з WC: ${e.message}`)
         // Fallback to Supabase data
         const attrs = product.attributes
         const initImages: ProductImage[] = (product.images ?? []).map(url => {
           const fn = filenameFromUrl(url)
-          return { src: url, alt: fn.replace(/[-_]/g, ' ').replace(/\.\w+$/, '') || product.name, name: fn }
+          return { src: url, alt: '', name: fn }
         })
         const initCatIds = (product.categories ?? [])
           .map(name => allCats.find(c => c.name === name)?.id)
@@ -183,6 +186,7 @@ function EditPanel({
         setEdit({
           name: product.name,
           description: product.description ?? '',
+          short_description: '',
           categoryIds: initCatIds,
           min: attrs?.['Мін'] ?? '',
           step: attrs?.['Вага'] ?? attrs?.['Крок'] ?? '',
@@ -207,6 +211,7 @@ function EditPanel({
         body: JSON.stringify({
           name: edit.name,
           description: edit.description,
+          short_description: edit.short_description,
           categories: edit.categoryIds,
           min: edit.min || undefined,
           step: edit.step || undefined,
@@ -230,7 +235,7 @@ function EditPanel({
       <div className="flex items-center justify-between">
         <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Редагування → WooCommerce</p>
         <div className="flex items-center gap-2">
-          {error && <span className="text-xs text-red-400">{error}</span>}
+          {error && <span className="text-xs text-red-400 max-w-xs truncate" title={error}>{error.replace(/<[^>]+>/g, '').slice(0, 120)}</span>}
           {saved && <span className="text-xs text-emerald-400">✓ Збережено на сайті</span>}
           <button
             onClick={handleSave}
@@ -260,7 +265,17 @@ function EditPanel({
             </div>
 
             <div>
-              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Опис</label>
+              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Короткий опис</label>
+              <textarea
+                value={edit.short_description}
+                onChange={e => setEdit(s => s ? ({ ...s, short_description: e.target.value }) : s)}
+                rows={3}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 resize-y font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Повний опис</label>
               <textarea
                 value={edit.description}
                 onChange={e => setEdit(s => s ? ({ ...s, description: e.target.value }) : s)}
