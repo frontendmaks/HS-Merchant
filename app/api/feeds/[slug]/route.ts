@@ -133,8 +133,10 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       const attrsXml = Object.entries(mergedAttrs)
         .map(([k, v]) => `<param name="${k}">${v}</param>`)
         .join('\n        ')
-      const oldPriceRaw = p.price_old ? (calcMarketplacePrice(Number(p.price_old), attrs) ?? Number(p.price_old)) : null
-      const oldPriceLine = oldPriceRaw ? `\n      <oldprice>${oldPriceRaw}</oldprice>` : ''
+      const oldPriceRaw = p.price_old && Number(p.price_old) > Number(p.price)
+        ? (calcMarketplacePrice(Number(p.price_old), attrs) ?? Number(p.price_old))
+        : null
+      const oldPriceLine = oldPriceRaw && oldPriceRaw > price ? `\n      <oldprice>${oldPriceRaw}</oldprice>` : ''
 
       return `
     <offer id="${p.id}" available="${p.status === 'active'}">
@@ -316,11 +318,11 @@ function generateMaudauYML(
       const quantityLine = quantityInt != null ? `\n      <quantity>${quantityInt}</quantity>` : ''
 
       // Sale price: p.price = current (discounted), p.price_old = original price before discount
-      // If custom marketplace price is set manually, don't show old price (it's already a final price)
-      const oldPriceM = !customParamPrice && p.price_old
+      // Only include if price_old > price (genuine sale) and no manual marketplace price override
+      const oldPriceM = !customParamPrice && p.price_old && Number(p.price_old) > Number(p.price)
         ? (calcMarketplacePrice(Number(p.price_old), p.attributes as Record<string, string> | null) ?? Number(p.price_old))
         : null
-      const oldPriceLine = oldPriceM ? `\n      <price_old>${oldPriceM}</price_old>` : ''
+      const oldPriceLine = oldPriceM && oldPriceM > unitPrice ? `\n      <price_old>${oldPriceM}</price_old>` : ''
 
       return `    <offer id="${offerId}" available="true">
       <name_ua>${escapeXml(nameUa.slice(0, 255))}</name_ua>
