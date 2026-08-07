@@ -248,11 +248,14 @@ function generateMaudauYML(
       const stock = fp.custom_stock ?? p.stock
       const catId = catIdMap.get(p.category_name ?? 'Без категорії') ?? '1'
 
-      // Calculate marketplace price: use custom_price if set, else apply weight formula
+      // Calculate marketplace price: custom_params override first, then custom_price, then weight formula
       const basePrice = Number(p.price)
-      const unitPrice = fp.custom_price
-        ? Number(fp.custom_price)
-        : (calcMarketplacePrice(basePrice, p.attributes as Record<string, string> | null) ?? basePrice)
+      const customParamPrice = fp.custom_params?.['Ціна на маркетплейсі']
+      const unitPrice = customParamPrice && Number(customParamPrice) > 0
+        ? Number(customParamPrice)
+        : fp.custom_price
+          ? Number(fp.custom_price)
+          : (calcMarketplacePrice(basePrice, p.attributes as Record<string, string> | null) ?? basePrice)
 
       // Validate
       const label = nameUa || p.sku || p.id
@@ -313,7 +316,8 @@ function generateMaudauYML(
       const quantityLine = quantityInt != null ? `\n      <quantity>${quantityInt}</quantity>` : ''
 
       // Sale price: p.price = current (discounted), p.price_old = original price before discount
-      const oldPriceM = p.price_old
+      // If custom marketplace price is set manually, don't show old price (it's already a final price)
+      const oldPriceM = !customParamPrice && p.price_old
         ? (calcMarketplacePrice(Number(p.price_old), p.attributes as Record<string, string> | null) ?? Number(p.price_old))
         : null
       const oldPriceLine = oldPriceM ? `\n      <price_old>${oldPriceM}</price_old>` : ''
