@@ -201,8 +201,8 @@ export async function syncWoocommerce(trigger: 'cron' | 'manual' = 'manual', tri
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let allProducts: any[] = [...firstPage]
-    for (let batch = 2; batch <= totalPages; batch += 5) {
-      const pages = Array.from({ length: Math.min(5, totalPages - batch + 1) }, (_, i) => batch + i)
+    for (let batch = 2; batch <= totalPages; batch += 10) {
+      const pages = Array.from({ length: Math.min(10, totalPages - batch + 1) }, (_, i) => batch + i)
       const results = await Promise.all(pages.map(p => fetchWCPage(p)))
       allProducts.push(...results.flatMap(r => r.data))
     }
@@ -211,8 +211,8 @@ export async function syncWoocommerce(trigger: 'cron' | 'manual' = 'manual', tri
     const variableProducts = allProducts.filter((p: any) => p.type === 'variable')
     const variationMap = new Map<number, { price: number | null; stock: number | null } | null>()
 
-    for (let i = 0; i < variableProducts.length; i += 10) {
-      const batch = variableProducts.slice(i, i + 10)
+    for (let i = 0; i < variableProducts.length; i += 20) {
+      const batch = variableProducts.slice(i, i + 20)
       const results = await Promise.all(batch.map((p: { id: number }) => fetchWarehouseVariation(p.id)))
       batch.forEach((p: { id: number }, idx: number) => variationMap.set(p.id, results[idx]))
     }
