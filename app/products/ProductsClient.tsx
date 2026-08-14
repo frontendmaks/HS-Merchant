@@ -394,7 +394,7 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
   const [filterInStock, setFilterInStock] = useState(false)
   const [filterOutStock, setFilterOutStock] = useState(false)
   const [filterWarehouse, setFilterWarehouse] = useState(false)
-  const [filterStatus, setFilterStatus] = useState<'active' | 'inactive' | null>('active')
+  const [filterStatus, setFilterStatus] = useState<'active' | 'inactive' | null>(null)
   const [filterSale, setFilterSale] = useState(false)
   const [filterSaleCat, setFilterSaleCat] = useState<string | null>(null)
   const [filterNoSaleCat, setFilterNoSaleCat] = useState(false)
