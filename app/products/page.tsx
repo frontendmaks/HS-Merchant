@@ -15,6 +15,7 @@ export default async function ProductsPage() {
     .from('products')
     .select('id, name, description, sku, price, price_old, stock, status, images, external_id, category_name, categories, brand, attributes, unit, vendor')
     .order('name')
+    .limit(5000)
 
   const warehouseName = process.env.WC_WAREHOUSE ?? 'Гуртівня онлайн'
   const readOnly = userRole === 'viewer'
