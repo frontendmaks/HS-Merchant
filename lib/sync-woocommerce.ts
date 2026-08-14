@@ -5,11 +5,22 @@ const CK = process.env.WC_CONSUMER_KEY!
 const CS = process.env.WC_CONSUMER_SECRET!
 const WAREHOUSE = process.env.WC_WAREHOUSE ?? 'Гуртівня онлайн'
 
-function wcFetch(path: string) {
+async function wcFetch(path: string, retries = 3): Promise<Response> {
   const sep = path.includes('?') ? '&' : '?'
-  return fetch(`${WC_URL}/wp-json/wc/v3${path}${sep}consumer_key=${CK}&consumer_secret=${CS}`, {
-    cache: 'no-store',
-  })
+  const url = `${WC_URL}/wp-json/wc/v3${path}${sep}consumer_key=${CK}&consumer_secret=${CS}`
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 30_000)
+      const res = await fetch(url, { cache: 'no-store', signal: controller.signal })
+      clearTimeout(timeout)
+      return res
+    } catch (e) {
+      if (attempt === retries) throw e
+      await new Promise(r => setTimeout(r, attempt * 1000))
+    }
+  }
+  throw new Error('wcFetch: unreachable')
 }
 
 async function fetchWCPage(page: number) {
@@ -22,6 +33,7 @@ async function fetchWCPage(page: number) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function fetchWarehouseVariation(productId: number): Promise<{ price: number | null; price_old: number | null; stock: number | null } | null> {
+  try {
   const res = await wcFetch(`/products/${productId}/variations?per_page=100`)
   if (!res.ok) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,6 +55,9 @@ async function fetchWarehouseVariation(productId: number): Promise<{ price: numb
     price: salePrice ?? regularPrice,
     price_old: salePrice && regularPrice && salePrice < regularPrice ? regularPrice : null,
     stock: match.manage_stock ? (match.stock_quantity ?? 0) : null,
+  }
+  } catch {
+    return null
   }
 }
 
