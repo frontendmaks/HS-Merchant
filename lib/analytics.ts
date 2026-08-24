@@ -201,14 +201,39 @@ export function totals(orders: OrderRow[]): Totals {
   }
 }
 
-export interface DayBucket { date: string; count: number; revenue: number }
+export interface DayBucket {
+  date: string
+  count: number
+  /** What customers ordered that day, cancellations excluded */
+  ordered: number
+  /** Of that, what actually got delivered */
+  revenue: number
+}
 
-export function ordersPerDay(orders: OrderRow[]): DayBucket[] {
+/** One bucket per calendar day in [from, to] — days without orders are kept as
+ *  zeros so the chart reads as a timeline instead of a row of equal bars. */
+export function ordersPerDay(orders: OrderRow[], from?: string, to?: string): DayBucket[] {
   const map = new Map<string, DayBucket>()
+
+  const blank = (date: string): DayBucket => ({ date, count: 0, ordered: 0, revenue: 0 })
+
+  if (from && to) {
+    const cursor = new Date(from + 'T00:00:00')
+    const end = new Date(to + 'T00:00:00')
+    while (cursor <= end) {
+      const y = cursor.getFullYear()
+      const m = String(cursor.getMonth() + 1).padStart(2, '0')
+      const d = String(cursor.getDate()).padStart(2, '0')
+      map.set(`${y}-${m}-${d}`, blank(`${y}-${m}-${d}`))
+      cursor.setDate(cursor.getDate() + 1)
+    }
+  }
+
   for (const o of orders) {
     if (!o.order_date) continue
-    const b = map.get(o.order_date) ?? { date: o.order_date, count: 0, revenue: 0 }
+    const b = map.get(o.order_date) ?? blank(o.order_date)
     b.count++
+    if (!isCanceled(o)) b.ordered += num(o.total)
     if (isDelivered(o)) b.revenue += num(o.total)
     map.set(o.order_date, b)
   }

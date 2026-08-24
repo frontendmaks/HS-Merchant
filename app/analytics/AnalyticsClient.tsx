@@ -7,7 +7,7 @@ import type {
   Totals, DayBucket, ProductStat, CategoryStat, CustomerStat, RegionStat,
 } from '@/lib/analytics'
 
-import { money, moneyShort, pct, num, dayMonth } from '@/lib/format'
+import { money, moneyShort, pct, num, dayMonth, orderWord } from '@/lib/format'
 
 function Card({ label, value, sub, tone = 'white' }: {
   label: string
@@ -48,31 +48,56 @@ function Panel({ title, subtitle, children, right }: {
   )
 }
 
-type ChartMetric = 'count' | 'revenue'
+type ChartMetric = 'count' | 'ordered'
 
 /** Bar chart of orders per day, drawn with plain divs. */
 function DailyChart({ data, metric }: { data: DayBucket[]; metric: ChartMetric }) {
   if (!data.length) {
     return <div className="px-5 py-10 text-center text-zinc-600 text-sm">Немає даних</div>
   }
-  const valueOf = (d: DayBucket) => metric === 'count' ? d.count : d.revenue
-  const max = Math.max(...data.map(valueOf))
-  const avg = data.reduce((s, d) => s + valueOf(d), 0) / data.length
+  const valueOf = (d: DayBucket) => metric === 'count' ? d.count : d.ordered
+  const max = Math.max(...data.map(valueOf), metric === 'count' ? 1 : 0)
+
+  // Averages ignore empty days — "4.9 per day" should not be diluted by
+  // stretches with no orders at all.
+  const active = data.filter(d => d.count > 0)
+  const avg = active.length
+    ? active.reduce((s, d) => s + valueOf(d), 0) / active.length
+    : 0
+
+  const fmtValue = (v: number) => metric === 'count' ? String(v) : moneyShort(v)
 
   return (
     <div className="p-5">
-      <div className="flex items-end gap-[2px] h-40" style={{ minHeight: '10rem' }}>
+      <div className="flex items-end gap-[3px] h-44">
         {data.map(d => {
-          const h = max ? (valueOf(d) / max) * 100 : 0
+          const v = valueOf(d)
+          const h = max ? (v / max) * 100 : 0
+          const empty = d.count === 0
           return (
             <div
               key={d.date}
-              className="flex-1 min-w-[2px] bg-red-600/70 hover:bg-red-500 rounded-t-sm transition-colors relative group"
-              style={{ height: `${Math.max(h, 2)}%` }}
+              className="flex-1 min-w-[3px] max-w-[26px] h-full flex flex-col justify-end relative group"
             >
-              <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-10 whitespace-nowrap bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white">
-                {dayMonth(d.date)}{' · '}{d.count} зам.
-                {d.revenue > 0 && <> · {moneyShort(d.revenue)}</>}
+              <div
+                className={`w-full rounded-t-sm transition-colors ${
+                  empty
+                    ? 'bg-zinc-800 group-hover:bg-zinc-700'
+                    : 'bg-red-600/80 group-hover:bg-red-500'
+                }`}
+                style={{ height: empty ? '2px' : `${Math.max(h, 3)}%` }}
+              />
+              <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-10 whitespace-nowrap bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs shadow-xl">
+                <div className="text-white font-medium">{dayMonth(d.date)}</div>
+                {empty ? (
+                  <div className="text-zinc-500">без замовлень</div>
+                ) : (
+                  <>
+                    <div className="text-zinc-300">{d.count} {orderWord(d.count)}</div>
+                    <div className="text-zinc-400">замовили на {moneyShort(d.ordered)}</div>
+                    <div className="text-emerald-400">доставлено {moneyShort(d.revenue)}</div>
+                  </>
+                )}
               </div>
             </div>
           )
@@ -85,11 +110,8 @@ function DailyChart({ data, metric }: { data: DayBucket[]; metric: ChartMetric }
           <span className="text-white font-medium">
             {metric === 'count' ? avg.toFixed(1) : moneyShort(avg)}
           </span>
-          {metric === 'count' ? ' замовлень/день' : ' /день'}
-          {' · '}пік{' '}
-          <span className="text-white font-medium">
-            {metric === 'count' ? max : moneyShort(max)}
-          </span>
+          {' за день із замовленнями · пік '}
+          <span className="text-white font-medium">{fmtValue(max)}</span>
         </span>
         <span>{dayMonth(data[data.length - 1].date)}</span>
       </div>
@@ -211,6 +233,89 @@ function PeriodPicker({ from, to, onChange }: {
   )
 }
 
+type CustomerSort = 'name' | 'address' | 'orders' | 'delivered' | 'revenue' | 'cadenceDays'
+
+function CustomersTable({ rows }: { rows: CustomerStat[] }) {
+  const [sort, setSort] = useState<CustomerSort>('revenue')
+  const [dir, setDir] = useState<'asc' | 'desc'>('desc')
+
+  const toggle = (key: CustomerSort) => {
+    if (key === sort) { setDir(d => d === 'asc' ? 'desc' : 'asc'); return }
+    setSort(key)
+    // Text reads naturally A→Z; numbers are most useful biggest-first
+    setDir(key === 'name' || key === 'address' ? 'asc' : 'desc')
+  }
+
+  const sorted = [...rows].sort((a, b) => {
+    const mul = dir === 'asc' ? 1 : -1
+    const av = a[sort], bv = b[sort]
+    if (av == null && bv == null) return 0
+    if (av == null) return 1          // blanks always last
+    if (bv == null) return -1
+    return typeof av === 'string' && typeof bv === 'string'
+      ? mul * av.localeCompare(bv, 'uk')
+      : mul * (Number(av) - Number(bv))
+  })
+
+  const COLUMNS: { key: CustomerSort; label: string; align: 'left' | 'right' }[] = [
+    { key: 'name', label: 'Клієнт', align: 'left' },
+    { key: 'address', label: 'Адреса', align: 'left' },
+    { key: 'orders', label: 'Замовлень', align: 'right' },
+    { key: 'delivered', label: 'Доставлено', align: 'right' },
+    { key: 'revenue', label: 'LTV', align: 'right' },
+    { key: 'cadenceDays', label: 'Періодичність', align: 'right' },
+  ]
+
+  return (
+    <Panel title="Топ клієнтів за LTV" subtitle="Натисніть на заголовок, щоб відсортувати">
+      {sorted.length === 0 ? (
+        <div className="px-5 py-10 text-center text-zinc-600 text-sm">Немає даних</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
+                {COLUMNS.map((c, i) => (
+                  <th
+                    key={c.key}
+                    onClick={() => toggle(c.key)}
+                    className={`px-5 py-2.5 cursor-pointer select-none hover:text-zinc-300 transition-colors ${
+                      c.align === 'right' ? 'text-right' : 'text-left'
+                    } ${i > 1 ? 'whitespace-nowrap' : ''}`}
+                  >
+                    {c.label}
+                    <span className={sort === c.key ? 'text-red-400' : 'text-zinc-700'}>
+                      {' '}{sort === c.key ? (dir === 'asc' ? '▲' : '▼') : '⇅'}
+                    </span>
+                  </th>
+                ))}
+                <th className="text-left px-5 py-2.5 whitespace-nowrap">Телефон</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/60">
+              {sorted.map(c => (
+                <tr key={c.key} className="hover:bg-zinc-800/30 transition-colors">
+                  <td className="px-5 py-2.5 text-white text-xs">{c.name}</td>
+                  <td className="px-5 py-2.5 text-zinc-400 text-xs max-w-[280px] truncate" title={c.address ?? ''}>
+                    {c.address ?? '—'}
+                  </td>
+                  <td className="px-5 py-2.5 text-right text-zinc-300 text-xs">{c.orders}</td>
+                  <td className="px-5 py-2.5 text-right text-emerald-400 text-xs">{c.delivered}</td>
+                  <td className="px-5 py-2.5 text-right text-white text-xs whitespace-nowrap">{moneyShort(c.revenue)}</td>
+                  <td className="px-5 py-2.5 text-right text-zinc-400 text-xs whitespace-nowrap">
+                    {c.cadenceDays != null ? `~${c.cadenceDays} дн.` : '—'}
+                  </td>
+                  <td className="px-5 py-2.5 text-zinc-400 text-xs whitespace-nowrap">{c.phone ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
 export default function AnalyticsClient({
   from, to, totals: t, perDay, products, categories, customers, customerSummary, regions,
 }: {
@@ -244,7 +349,7 @@ export default function AnalyticsClient({
         <div>
           <h1 className="text-2xl font-bold text-white">Аналітика</h1>
           <p className="text-zinc-400 text-sm mt-0.5">
-            {dayMonth(from)} — {dayMonth(to)} · {t.orders} замовлень
+            {dayMonth(from)} — {dayMonth(to)} · {t.orders} {orderWord(t.orders)}
           </p>
         </div>
         <PeriodPicker from={from} to={to} onChange={setRange} />
@@ -273,10 +378,12 @@ export default function AnalyticsClient({
 
       <Panel
         title="Замовлення по днях"
-        subtitle="Наведіть на стовпець для деталей"
+        subtitle={chartMetric === 'count'
+          ? 'Наведіть на стовпець для деталей'
+          : 'Сума замовлень, зроблених того дня (без скасованих)'}
         right={
           <div className="flex gap-1 shrink-0">
-            {([['count', 'Кількість'], ['revenue', 'Сума']] as const).map(([k, label]) => (
+            {([['count', 'Кількість'], ['ordered', 'Сума']] as const).map(([k, label]) => (
               <button
                 key={k}
                 onClick={() => setChartMetric(k)}
@@ -341,44 +448,7 @@ export default function AnalyticsClient({
         />
       </div>
 
-      <Panel title="Топ клієнтів за LTV" subtitle="Сума доставлених замовлень">
-        {customers.length === 0 ? (
-          <div className="px-5 py-10 text-center text-zinc-600 text-sm">Немає даних</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
-                  <th className="text-left px-5 py-2.5">Клієнт</th>
-                  <th className="text-left px-5 py-2.5 whitespace-nowrap">Телефон</th>
-                  <th className="text-left px-5 py-2.5">Адреса</th>
-                  <th className="text-right px-5 py-2.5 whitespace-nowrap">Замовлень</th>
-                  <th className="text-right px-5 py-2.5 whitespace-nowrap">Доставлено</th>
-                  <th className="text-right px-5 py-2.5 whitespace-nowrap">LTV</th>
-                  <th className="text-right px-5 py-2.5 whitespace-nowrap">Періодичність</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800/60">
-                {customers.map(c => (
-                  <tr key={c.key} className="hover:bg-zinc-800/30 transition-colors">
-                    <td className="px-5 py-2.5 text-white text-xs">{c.name}</td>
-                    <td className="px-5 py-2.5 text-zinc-400 text-xs whitespace-nowrap">{c.phone ?? '—'}</td>
-                    <td className="px-5 py-2.5 text-zinc-400 text-xs max-w-[280px] truncate" title={c.address ?? ''}>
-                      {c.address ?? '—'}
-                    </td>
-                    <td className="px-5 py-2.5 text-right text-zinc-300 text-xs">{c.orders}</td>
-                    <td className="px-5 py-2.5 text-right text-emerald-400 text-xs">{c.delivered}</td>
-                    <td className="px-5 py-2.5 text-right text-white text-xs whitespace-nowrap">{moneyShort(c.revenue)}</td>
-                    <td className="px-5 py-2.5 text-right text-zinc-400 text-xs whitespace-nowrap">
-                      {c.cadenceDays != null ? `~${c.cadenceDays} дн.` : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Panel>
+      <CustomersTable rows={customers} />
 
       {/* Operators — no data source yet, stated plainly rather than faked */}
       <Panel

@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { MAP_VIEWBOX, OBLAST_SHAPES } from '@/lib/ua-oblasts'
 import type { RegionStat } from '@/lib/analytics'
 import { MAP_BOUNDS } from '@/lib/ua-oblasts'
-import { moneyShort as money } from '@/lib/format'
+import { moneyShort as money, orderWord } from '@/lib/format'
 
 const PLATFORM_LABELS: Record<string, string> = { maudau: 'MauDau', rozetka: 'Rozetka' }
 
@@ -33,6 +33,7 @@ function boundsOf(d: string): { x: number; y: number; w: number; h: number } {
 export default function UkraineMap({ regions }: { regions: RegionStat[] }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
+  const [hoveredCity, setHoveredCity] = useState<string | null>(null)
 
   const byOblast = useMemo(
     () => new Map(regions.map(r => [r.oblast, r])), [regions])
@@ -82,7 +83,7 @@ export default function UkraineMap({ regions }: { regions: RegionStat[] }) {
         </div>
         {selected && (
           <button
-            onClick={() => setSelected(null)}
+            onClick={() => { setSelected(null); setHoveredCity(null) }}
             className="px-3 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
           >
             ← Вся Україна
@@ -110,36 +111,57 @@ export default function UkraineMap({ regions }: { regions: RegionStat[] }) {
                   className="cursor-pointer transition-colors"
                   onMouseEnter={() => setHovered(shape.name)}
                   onMouseLeave={() => setHovered(null)}
-                  onClick={() => setSelected(s => s === shape.name ? null : shape.name)}
+                  onClick={() => {
+                    setHoveredCity(null)
+                    setSelected(s => s === shape.name ? null : shape.name)
+                  }}
                 >
                   <title>
                     {shape.name}
-                    {stat ? ` — ${stat.orders} замовлень` : ' — немає замовлень'}
+                    {stat ? ` — ${stat.orders} ${orderWord(stat.orders)}` : ' — немає замовлень'}
                   </title>
                 </path>
               )
             })}
 
-            {/* Pins for the pinned oblast, sized by order volume */}
+            {/* Pins for the pinned oblast, sized by order volume. Labels only
+                on hover — permanent ones overlap into an unreadable pile. */}
             {selectedStat?.cities.map(c => {
               if (c.lat == null || c.lon == null) return null
               const { x, y } = project(c.lat, c.lon)
               const maxCity = Math.max(1, ...selectedStat.cities.map(x2 => x2.orders))
               const r = 2.5 + (c.orders / maxCity) * 4
+              const isHot = hoveredCity === c.city
               return (
-                <g key={c.city} className="pointer-events-none">
-                  <circle cx={x} cy={y} r={r + 2.5} fill="rgba(250,250,250,0.25)" />
-                  <circle cx={x} cy={y} r={r} fill="#fafafa" />
-                  <text
-                    x={x} y={y - r - 3}
-                    textAnchor="middle"
+                <g key={c.city}>
+                  {/* Native tooltip as well as the drawn label — works on any
+                      browser and for assistive tech, not just on hover state */}
+                  <title>{`${c.city} — ${c.orders} ${orderWord(c.orders)} · ${money(c.revenue)}`}</title>
+                  <circle
+                    cx={x} cy={y} r={r + 4}
+                    fill={isHot ? 'rgba(250,250,250,0.35)' : 'rgba(250,250,250,0.18)'}
+                    className="cursor-pointer"
+                    onMouseEnter={() => setHoveredCity(c.city)}
+                    onMouseLeave={() => setHoveredCity(null)}
+                  />
+                  <circle
+                    cx={x} cy={y} r={isHot ? r + 1 : r}
                     fill="#fafafa"
-                    style={{ fontSize: Math.max(7, MAP_BOUNDS.width / 90), paintOrder: 'stroke' }}
-                    stroke="rgba(0,0,0,0.7)"
-                    strokeWidth={2}
-                  >
-                    {c.city}
-                  </text>
+                    className="pointer-events-none transition-all"
+                  />
+                  {isHot && (
+                    <text
+                      x={x} y={y - r - 6}
+                      textAnchor="middle"
+                      fill="#fafafa"
+                      className="pointer-events-none"
+                      style={{ fontSize: Math.max(9, MAP_BOUNDS.width / 70), paintOrder: 'stroke' }}
+                      stroke="rgba(0,0,0,0.85)"
+                      strokeWidth={3}
+                    >
+                      {c.city} · {c.orders}
+                    </text>
+                  )}
                 </g>
               )
             })}
@@ -159,7 +181,7 @@ export default function UkraineMap({ regions }: { regions: RegionStat[] }) {
               <div>
                 <div className="text-white font-semibold">{activeStat.oblast}</div>
                 <div className="text-zinc-500 text-xs mt-0.5">
-                  {activeStat.orders} замовлень · {money(activeStat.revenue)}
+                  {activeStat.orders} {orderWord(activeStat.orders)} · {money(activeStat.revenue)}
                 </div>
               </div>
 
@@ -213,7 +235,14 @@ export default function UkraineMap({ regions }: { regions: RegionStat[] }) {
                   </div>
                   <div className="max-h-48 overflow-y-auto divide-y divide-zinc-800/60">
                     {selectedStat.cities.map(c => (
-                      <div key={c.city} className="flex items-center justify-between py-1.5 text-xs">
+                      <div
+                        key={c.city}
+                        onMouseEnter={() => setHoveredCity(c.city)}
+                        onMouseLeave={() => setHoveredCity(null)}
+                        className={`flex items-center justify-between py-1.5 px-1.5 -mx-1.5 rounded text-xs transition-colors ${
+                          hoveredCity === c.city ? 'bg-zinc-800/70' : ''
+                        }`}
+                      >
                         <span className="text-zinc-300 truncate pr-2">
                           {c.lat == null && <span className="text-zinc-600" title="Немає в довіднику — без піна">◌ </span>}
                           {c.city}
@@ -248,7 +277,7 @@ export default function UkraineMap({ regions }: { regions: RegionStat[] }) {
 
           {unknown && unknown.orders > 0 && (
             <div className="text-xs text-zinc-600 border-t border-zinc-800 pt-3">
-              {unknown.orders} замовлень без визначеної області
+              {unknown.orders} {orderWord(unknown.orders)} без визначеної області
             </div>
           )}
         </div>

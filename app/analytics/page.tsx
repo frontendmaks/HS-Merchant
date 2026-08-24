@@ -69,7 +69,7 @@ export default async function AnalyticsPage({
       from={from}
       to={to}
       totals={totals(orders)}
-      perDay={ordersPerDay(orders)}
+      perDay={ordersPerDay(orders, from, to)}
       products={popularProducts(orders)}
       categories={popularCategories(orders, productCategories)}
       customers={allCustomers.slice(0, 20)}
