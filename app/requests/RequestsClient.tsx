@@ -48,6 +48,30 @@ function Badge({ text, cls }: { text: string; cls: string }) {
   return <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{text}</span>
 }
 
+/** Date field that opens the picker from anywhere in the input, not just the icon.
+ *  showPicker() throws when it isn't tied to a user gesture, so it stays guarded. */
+function DateInput({ value, onChange, disabled, className }: {
+  value: string
+  onChange: (value: string) => void
+  disabled?: boolean
+  className: string
+}) {
+  const openPicker = (el: HTMLInputElement) => {
+    try { el.showPicker?.() } catch { /* not a user gesture — the icon still works */ }
+  }
+  return (
+    <input
+      type="date"
+      value={value}
+      disabled={disabled}
+      onChange={e => onChange(e.target.value)}
+      onClick={e => openPicker(e.currentTarget)}
+      onFocus={e => openPicker(e.currentTarget)}
+      className={`${className} cursor-pointer`}
+    />
+  )
+}
+
 export default function RequestsClient({ initialRequests, people, me, isAdmin }: {
   initialRequests: WorkRequest[]
   people: Person[]
@@ -487,7 +511,7 @@ function CreateForm({ people, me, onCreated }: {
 
         <div>
           <label className={label}>Дедлайн</label>
-          <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className={field} />
+          <DateInput value={deadline} onChange={setDeadline} className={field} />
         </div>
 
         <div>
@@ -538,7 +562,7 @@ function DetailModal({ request: r, me, isAdmin, busy, onClose, onPatch, onDelete
 
   const involved = r.created_by === me.id || r.assigned_to === me.id
   const canEdit = involved || isAdmin
-  const canDelete = r.created_by === me.id || isAdmin
+  const canDelete = r.created_by === me.id
   const dl = deadlineState(r.deadline, r.status)
   const notes = [...(r.notes ?? [])].sort((a, b) => a.created_at < b.created_at ? -1 : 1)
 
@@ -629,11 +653,10 @@ function DetailModal({ request: r, me, isAdmin, busy, onClose, onPatch, onDelete
             </div>
             <div>
               <div className="text-zinc-400 text-xs mb-1.5">Дедлайн</div>
-              <input
-                type="date"
+              <DateInput
                 value={r.deadline ?? ''}
                 disabled={!canEdit || busy}
-                onChange={e => onPatch(r.id, { deadline: e.target.value || null })}
+                onChange={v => onPatch(r.id, { deadline: v || null })}
                 className={`${control} w-full`}
               />
             </div>

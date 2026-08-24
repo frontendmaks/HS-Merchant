@@ -187,7 +187,7 @@ export async function PATCH(request: NextRequest) {
   return NextResponse.json({ success: true })
 }
 
-// DELETE /api/requests — author or an admin may remove a request
+// DELETE /api/requests — only the person who raised the request may remove it
 export async function DELETE(request: NextRequest) {
   const caller = await getCaller()
   if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -199,8 +199,8 @@ export async function DELETE(request: NextRequest) {
   const { data: target } = await service.from('requests').select('created_by').eq('id', id).single()
   if (!target) return NextResponse.json({ error: 'Запит не знайдено' }, { status: 404 })
 
-  if (target.created_by !== caller.id && !isAdmin(caller.role as UserRole)) {
-    return NextResponse.json({ error: 'Видаляти може автор або адміністратор' }, { status: 403 })
+  if (target.created_by !== caller.id) {
+    return NextResponse.json({ error: 'Видалити запит може лише той, хто його створив' }, { status: 403 })
   }
 
   const { error } = await service.from('requests').delete().eq('id', id)
