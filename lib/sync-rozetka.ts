@@ -180,21 +180,23 @@ async function fetchPages(dateParam: string): Promise<Map<string, ReturnType<typ
   return map
 }
 
-export async function syncRozetka(): Promise<{ synced: number }> {
+/** See SyncMode in lib/sync-maudau.ts — same contract. */
+export type SyncMode = 'full' | 'quick'
+
+const ymd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+export async function syncRozetka(mode: SyncMode = 'full'): Promise<{ synced: number }> {
   const supabase = createServiceClient()
 
   const now = new Date()
-  // created_from = start of current year (covers all months, not just current)
-  const monthStart = `${now.getFullYear()}-01-01`
-  // updated_from = 2 hours ago (fresher statuses)
-  const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000)
-  const updatedFrom = `${twoHoursAgo.getFullYear()}-${String(twoHoursAgo.getMonth() + 1).padStart(2, '0')}-${String(twoHoursAgo.getDate()).padStart(2, '0')}`
+  const updatedFrom = ymd(new Date(now.getTime() - 24 * 60 * 60 * 1000))
+  const yearStart = `${now.getFullYear()}-01-01`
 
-  // Dual fetch
-  const [createdMap, updatedMap] = await Promise.all([
-    fetchPages(`created_from=${monthStart}`),
-    fetchPages(`updated_from=${updatedFrom}`),
-  ])
+  const updatedMap = await fetchPages(`updated_from=${updatedFrom}`)
+  const createdMap = mode === 'full'
+    ? await fetchPages(`created_from=${yearStart}`)
+    : new Map<string, ReturnType<typeof orderToRow>>()
 
   // Merge: updatedMap wins
   const merged = new Map([...createdMap, ...updatedMap])

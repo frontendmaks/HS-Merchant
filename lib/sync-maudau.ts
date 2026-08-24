@@ -138,23 +138,29 @@ async function fetchAllPages(jwt: string, queryParam: string): Promise<Map<strin
   return map
 }
 
-export async function syncMaudau(): Promise<{ synced: number }> {
+/** 'quick' polls only what changed recently — cheap enough to run every few
+ *  minutes, and still catches brand-new orders because a new order's update
+ *  time is its creation time. 'full' additionally re-reads the whole year so
+ *  totals, TTNs and statuses on older orders cannot drift. */
+export type SyncMode = 'full' | 'quick'
+
+const ymd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: number }> {
   const supabase = createServiceClient()
   const jwt = await getMaudauJwt()
 
   const now = new Date()
-  // created_from = start of current year (covers all months, not just current)
-  // MauDau expects YYYY-MM-DD date string, not a full ISO timestamp
+  // MauDau filters by date, not timestamp — a 24h floor keeps the window safe
+  // across midnight while still covering at most two calendar days.
+  const updatedFrom = ymd(new Date(now.getTime() - 24 * 60 * 60 * 1000))
   const createdFrom = `${now.getFullYear()}-01-01`
-  // updated_from = 2 hours ago (catches recently changed statuses on older orders)
-  const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000)
-  const updatedFrom = `${twoHoursAgo.getFullYear()}-${String(twoHoursAgo.getMonth() + 1).padStart(2, '0')}-${String(twoHoursAgo.getDate()).padStart(2, '0')}`
 
-  // Dual fetch: by creation date (current month) + by update date (last 2h)
-  const [createdMap, updatedMap] = await Promise.all([
-    fetchAllPages(jwt, `created_from=${encodeURIComponent(createdFrom)}`),
-    fetchAllPages(jwt, `updated_from=${encodeURIComponent(updatedFrom)}`),
-  ])
+  const updatedMap = await fetchAllPages(jwt, `updated_from=${encodeURIComponent(updatedFrom)}`)
+  const createdMap = mode === 'full'
+    ? await fetchAllPages(jwt, `created_from=${encodeURIComponent(createdFrom)}`)
+    : new Map<string, ReturnType<typeof orderToRow>>()
 
   // Merge: updatedMap wins (fresher data)
   const merged = new Map([...createdMap, ...updatedMap])

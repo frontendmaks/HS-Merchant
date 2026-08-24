@@ -1,12 +1,21 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 
 export default function OrdersToolbar() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+
+  // Orders keep arriving while this page sits open — pull the server view back
+  // in periodically so a new order shows up without a manual reload.
+  useEffect(() => {
+    const timer = setInterval(() => router.refresh(), 60_000)
+    const onFocus = () => router.refresh()
+    window.addEventListener('focus', onFocus)
+    return () => { clearInterval(timer); window.removeEventListener('focus', onFocus) }
+  }, [router])
 
   const [syncingMaudau, setSyncingMaudau] = useState(false)
   const [syncingRozetka, setSyncingRozetka] = useState(false)

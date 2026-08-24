@@ -3,12 +3,15 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { syncMaudau } from '@/lib/sync-maudau'
 import { syncRozetka } from '@/lib/sync-rozetka'
 
+// ?mode=quick — only what changed in the last day, cheap enough to run every
+// few minutes. ?mode=full (default) also re-reads the year.
 export async function GET(req: NextRequest) {
   const secret = req.headers.get('x-cron-secret') || req.headers.get('authorization')?.replace('Bearer ', '')
   if (secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const mode = req.nextUrl.searchParams.get('mode') === 'quick' ? 'quick' : 'full'
   const start = Date.now()
   const supabase = createServiceClient()
 
@@ -18,8 +21,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const [maudau, rozetka] = await Promise.allSettled([
-      syncMaudau(),
-      syncRozetka(),
+      syncMaudau(mode),
+      syncRozetka(mode),
     ])
 
     if (maudau.status === 'fulfilled') {
@@ -40,7 +43,8 @@ export async function GET(req: NextRequest) {
   const duration = Date.now() - start
 
   await supabase.from('order_sync_logs').insert({
-    trigger: 'cron',
+    // 'auto' keeps the every-few-minutes noise out of the cron history
+    trigger: mode === 'quick' ? 'auto' : 'cron',
     status: errorMsg ? 'error' : 'success',
     maudau_synced: maudauSynced,
     rozetka_synced: rozetkasynced,
@@ -50,6 +54,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     success: !errorMsg,
+    mode,
     maudau_synced: maudauSynced,
     rozetka_synced: rozetkasynced,
     duration_ms: duration,
