@@ -95,7 +95,6 @@ function DailyChart({ data, metric }: { data: DayBucket[]; metric: ChartMetric }
                   <>
                     <div className="text-zinc-300">{d.count} {orderWord(d.count)}</div>
                     <div className="text-zinc-400">замовили на {moneyShort(d.ordered)}</div>
-                    <div className="text-emerald-400">доставлено {moneyShort(d.revenue)}</div>
                   </>
                 )}
               </div>
