@@ -1,10 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   REQUEST_CATEGORIES, STATUS_META, PRIORITY_META, STATUS_KEYS, PRIORITY_KEYS,
   EVENT_META, eventValue, categoryByKey, categoryLabel, sortForInbox,
-  deadlineState, DEADLINE_TONE, isClosed,
+  deadlineState, DEADLINE_TONE, isClosed, statusOptionsFor,
   type RequestStatus, type RequestPriority, type RequestEventType,
 } from '@/lib/requests'
 
@@ -94,7 +94,8 @@ function DateInput({ value, onChange, disabled, className }: {
   )
 }
 
-/** Checkbox list — a request often goes to two operators at once. */
+/** Collapsed like a select, but opens into a checkbox list — a request often
+ *  goes to two operators at once. */
 function PeoplePicker({ people, selected, onToggle, meId, disabled }: {
   people: Person[]
   selected: string[]
@@ -102,30 +103,60 @@ function PeoplePicker({ people, selected, onToggle, meId, disabled }: {
   meId: string
   disabled?: boolean
 }) {
+  const [open, setOpen] = useState(false)
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const chosen = people.filter(p => selected.includes(p.id))
+  const summary = chosen.length === 0
+    ? 'Оберіть виконавців'
+    : chosen.map(p => name(p)).join(', ')
+
   return (
-    <div className="max-h-44 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-800 divide-y divide-zinc-700/50">
-      {people.map(p => (
-        <label
-          key={p.id}
-          className={`flex items-center gap-2.5 px-3 py-2 transition-colors ${
-            disabled ? 'opacity-50' : 'cursor-pointer hover:bg-zinc-700/40'
-          }`}
-        >
-          <input
-            type="checkbox"
-            checked={selected.includes(p.id)}
-            onChange={() => onToggle(p.id)}
-            disabled={disabled}
-            className="w-4 h-4 accent-red-600"
-          />
-          <span className="w-5 h-5 rounded-full bg-zinc-700 text-zinc-300 text-[10px] font-semibold flex items-center justify-center shrink-0">
-            {initials(p)}
-          </span>
-          <span className="text-white text-sm">
-            {name(p)}{p.id === meId && <span className="text-zinc-500"> (я)</span>}
-          </span>
-        </label>
-      ))}
+    <div className="relative" ref={boxRef}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between gap-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-left text-sm focus:outline-none focus:border-red-500 disabled:opacity-50"
+      >
+        <span className={`truncate ${chosen.length ? 'text-white' : 'text-zinc-600'}`}>
+          {summary}
+        </span>
+        <span className="text-zinc-500 text-xs shrink-0">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="absolute z-30 mt-1 w-full max-h-52 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-800 shadow-2xl divide-y divide-zinc-700/50">
+          {people.map(p => (
+            <label
+              key={p.id}
+              className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-zinc-700/40 transition-colors"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(p.id)}
+                onChange={() => onToggle(p.id)}
+                className="w-4 h-4 accent-red-600"
+              />
+              <span className="w-5 h-5 rounded-full bg-zinc-700 text-zinc-300 text-[10px] font-semibold flex items-center justify-center shrink-0">
+                {initials(p)}
+              </span>
+              <span className="text-white text-sm">
+                {name(p)}{p.id === meId && <span className="text-zinc-500"> (я)</span>}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -774,10 +805,10 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
   const dl = deadlineState(r.deadline, r.status)
   const notes = r.notes ?? []
 
-  // An assignee sends work for review; only the author closes it
-  const statusOptions = isAuthor
-    ? STATUS_KEYS
-    : STATUS_KEYS.filter(s => s !== 'done' && s !== 'canceled')
+  // The assignee drives the work; the author only cancels — closing and rework
+  // happen through the decision buttons below the dropdown
+  const statusOptions = statusOptionsFor({ isAuthor, isAssignee, current: r.status })
+  const awaitingMyDecision = r.status === 'pending_review' && isAuthor
 
   async function addNote(e: React.FormEvent) {
     e.preventDefault()
@@ -834,30 +865,6 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
         </div>
 
         <div className="p-5 space-y-5">
-          {/* Sign-off, front and centre when it is the author's turn */}
-          {r.status === 'pending_review' && isAuthor && (
-            <div className="bg-purple-950/30 border border-purple-900/60 rounded-lg px-4 py-3">
-              <div className="text-purple-200 text-sm mb-2.5">
-                Виконавець позначив запит як зроблений. Підтвердьте або поверніть на доопрацювання.
-              </div>
-              <div className="flex gap-2">
-                <button
-                  disabled={busy}
-                  onClick={() => onPatch(r.id, { status: 'done' })}
-                  className="px-3 py-1.5 rounded-lg text-xs bg-emerald-900/60 text-emerald-300 hover:bg-emerald-800/60 disabled:opacity-50 transition-colors"
-                >
-                  ✓ Підтвердити виконання
-                </button>
-                <button
-                  disabled={busy}
-                  onClick={() => onPatch(r.id, { status: 'rework' })}
-                  className="px-3 py-1.5 rounded-lg text-xs bg-orange-950/60 text-orange-400 hover:bg-orange-900/60 disabled:opacity-50 transition-colors"
-                >
-                  ↩ На доопрацювання
-                </button>
-              </div>
-            </div>
-          )}
           {r.status === 'pending_review' && !isAuthor && (
             <div className="bg-zinc-800/40 border border-zinc-700 rounded-lg px-4 py-2.5 text-zinc-400 text-xs">
               Надіслано на підтвердження — очікує рішення {name(r.author)}
@@ -878,14 +885,11 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
               <div className="text-zinc-400 text-xs mb-1.5">Статус</div>
               <select
                 value={r.status}
-                disabled={!canEdit || busy}
+                disabled={!canEdit || busy || statusOptions.length < 2}
                 onChange={e => onPatch(r.id, { status: e.target.value })}
                 className={`${control} w-full`}
               >
                 {statusOptions.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
-                {!statusOptions.includes(r.status) && (
-                  <option value={r.status}>{STATUS_META[r.status].label}</option>
-                )}
               </select>
             </div>
             <div>
@@ -912,6 +916,30 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
               />
             </div>
           </div>
+
+          {awaitingMyDecision && (
+            <div className="bg-purple-950/30 border border-purple-900/60 rounded-lg px-4 py-3">
+              <div className="text-purple-200 text-sm mb-2.5">
+                Виконавець надіслав запит на підтвердження.
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  disabled={busy}
+                  onClick={() => onPatch(r.id, { status: 'done' })}
+                  className="px-3 py-1.5 rounded-lg text-xs bg-emerald-900/60 text-emerald-300 hover:bg-emerald-800/60 disabled:opacity-50 transition-colors"
+                >
+                  ✓ Підтвердити виконання
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => onPatch(r.id, { status: 'rework' })}
+                  className="px-3 py-1.5 rounded-lg text-xs bg-orange-950/60 text-orange-400 hover:bg-orange-900/60 disabled:opacity-50 transition-colors"
+                >
+                  ↩ Надіслати на доопрацювання
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className={`text-xs ${DEADLINE_TONE[dl.tone]}`}>◷ {dl.label}</div>
 

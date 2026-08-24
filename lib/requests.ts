@@ -90,6 +90,27 @@ export const STATUS_META: Record<RequestStatus, { label: string; badge: string; 
 /** A request leaves the active lists only once it is signed off or dropped. */
 export const isClosed = (status: string) => status === 'done' || status === 'canceled'
 
+/** Statuses the assignee drives the work through. */
+export const ASSIGNEE_STATUSES: RequestStatus[] = ['new', 'in_progress', 'pending_review']
+
+/** The author's only dropdown choice — closing and rework go through the
+ *  confirm / return buttons instead, so they are deliberate decisions. */
+export const AUTHOR_STATUSES: RequestStatus[] = ['canceled']
+
+/** Reached only by the author acting on a request sent for review. */
+export const AUTHOR_DECISION_STATUSES: RequestStatus[] = ['done', 'rework']
+
+export function statusOptionsFor(
+  { isAuthor, isAssignee, current }: { isAuthor: boolean; isAssignee: boolean; current: RequestStatus }
+): RequestStatus[] {
+  const list: RequestStatus[] = []
+  if (isAssignee) list.push(...ASSIGNEE_STATUSES)
+  if (isAuthor) list.push(...AUTHOR_STATUSES)
+  // The current status always stays visible, even when nobody may re-pick it
+  if (!list.includes(current)) list.unshift(current)
+  return [...new Set(list)]
+}
+
 export const PRIORITY_META: Record<RequestPriority, { label: string; badge: string; rank: number }> = {
   urgent: { label: 'Терміново',  badge: 'bg-red-950/60 text-red-400',      rank: 3 },
   high:   { label: 'Високий',    badge: 'bg-orange-950/60 text-orange-400', rank: 2 },

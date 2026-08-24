@@ -5,6 +5,7 @@ import { cookies } from 'next/headers'
 import { isAdmin, type UserRole } from '@/lib/getRole'
 import {
   NOTIFICATION_TYPES, normalizeRequest, PRIORITY_META,
+  ASSIGNEE_STATUSES, AUTHOR_DECISION_STATUSES, AUTHOR_STATUSES,
   type RequestStatus, type RequestPriority,
 } from '@/lib/requests'
 
@@ -190,10 +191,18 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json(
       { error: 'Виконавців може змінювати лише той, хто поставив запит' }, { status: 403 })
   }
-  // Sign-off belongs to the author: an assignee sends work for review, never closes it
-  if (status === 'done' && !isAuthor) {
-    return NextResponse.json(
-      { error: 'Закрити запит може лише той, хто його поставив' }, { status: 403 })
+  // Who may move the request where — mirrors the dropdowns the UI offers
+  if (status !== undefined && status !== before.status) {
+    const authorOnly = [...AUTHOR_DECISION_STATUSES, ...AUTHOR_STATUSES] as string[]
+    if (authorOnly.includes(status) && !isAuthor) {
+      return NextResponse.json(
+        { error: 'Підтвердити, повернути на доопрацювання або скасувати запит може лише той, хто його поставив' },
+        { status: 403 })
+    }
+    if ((ASSIGNEE_STATUSES as string[]).includes(status) && !isAssignee && !admin) {
+      return NextResponse.json(
+        { error: 'Рухати запит по статусах може лише виконавець' }, { status: 403 })
+    }
   }
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
