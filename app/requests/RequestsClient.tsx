@@ -1,13 +1,14 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   REQUEST_CATEGORIES, STATUS_META, PRIORITY_META, STATUS_KEYS, PRIORITY_KEYS,
-  categoryByKey, categoryLabel, sortForInbox, deadlineState, DEADLINE_TONE,
-  type RequestStatus, type RequestPriority,
+  EVENT_META, eventValue, categoryByKey, categoryLabel, sortForInbox,
+  deadlineState, DEADLINE_TONE, isClosed,
+  type RequestStatus, type RequestPriority, type RequestEventType,
 } from '@/lib/requests'
-import { ROLE_LABELS } from '@/lib/roles'
+
+const POLL_MS = 15_000
 
 interface Person { id: string; full_name: string | null; email: string; role: string }
 interface Note {
@@ -16,6 +17,14 @@ interface Note {
   created_at: string
   author_id: string
   author: { full_name: string | null; email: string } | null
+}
+interface Event {
+  id: string
+  type: string
+  old_value: string | null
+  new_value: string | null
+  created_at: string
+  actor: { full_name: string | null; email: string } | null
 }
 export interface WorkRequest {
   id: string
@@ -29,10 +38,10 @@ export interface WorkRequest {
   updated_at: string
   completed_at: string | null
   created_by: string
-  assigned_to: string
   author: Person | null
-  assignee: Person | null
+  assignees: Person[]
   notes: Note[] | null
+  events: Event[] | null
 }
 
 const name = (p: { full_name: string | null; email: string } | null | undefined) =>
@@ -46,6 +55,19 @@ const fmtDateTime = (iso: string) =>
 
 function Badge({ text, cls }: { text: string; cls: string }) {
   return <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{text}</span>
+}
+
+/** Small avatar + name, used wherever a person is shown. */
+function PersonChip({ person, label }: { person: Person | null | undefined; label?: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {label && <span className="text-zinc-600 text-xs">{label}</span>}
+      <span className="w-4 h-4 rounded-full bg-zinc-700 text-zinc-300 text-[9px] font-semibold flex items-center justify-center shrink-0">
+        {initials(person)}
+      </span>
+      <span className="text-zinc-300 text-xs">{name(person)}</span>
+    </span>
+  )
 }
 
 /** Date field that opens the picker from anywhere in the input, not just the icon.
@@ -72,41 +94,95 @@ function DateInput({ value, onChange, disabled, className }: {
   )
 }
 
+/** Checkbox list — a request often goes to two operators at once. */
+function PeoplePicker({ people, selected, onToggle, meId, disabled }: {
+  people: Person[]
+  selected: string[]
+  onToggle: (id: string) => void
+  meId: string
+  disabled?: boolean
+}) {
+  return (
+    <div className="max-h-44 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-800 divide-y divide-zinc-700/50">
+      {people.map(p => (
+        <label
+          key={p.id}
+          className={`flex items-center gap-2.5 px-3 py-2 transition-colors ${
+            disabled ? 'opacity-50' : 'cursor-pointer hover:bg-zinc-700/40'
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={selected.includes(p.id)}
+            onChange={() => onToggle(p.id)}
+            disabled={disabled}
+            className="w-4 h-4 accent-red-600"
+          />
+          <span className="w-5 h-5 rounded-full bg-zinc-700 text-zinc-300 text-[10px] font-semibold flex items-center justify-center shrink-0">
+            {initials(p)}
+          </span>
+          <span className="text-white text-sm">
+            {name(p)}{p.id === meId && <span className="text-zinc-500"> (я)</span>}
+          </span>
+        </label>
+      ))}
+    </div>
+  )
+}
+
 export default function RequestsClient({ initialRequests, people, me, isAdmin }: {
   initialRequests: WorkRequest[]
   people: Person[]
   me: Person
   isAdmin: boolean
 }) {
-  const router = useRouter()
   const [requests, setRequests] = useState<WorkRequest[]>(initialRequests)
   const [openId, setOpenId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  // History filters
   const [scope, setScope] = useState<'all' | 'mine' | 'assigned'>('all')
   const [statusFilter, setStatusFilter] = useState<string>('open')
   const [search, setSearch] = useState('')
 
-  async function refresh() {
-    const res = await fetch('/api/requests')
-    if (res.ok) {
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch('/api/requests')
+      if (!res.ok) return
       const data = await res.json() as { requests: WorkRequest[] }
       setRequests(data.requests)
-    }
-    router.refresh()
-  }
+    } catch { /* offline — the next tick retries */ }
+  }, [])
 
-  const inbox = useMemo(
-    () => sortForInbox(requests.filter(r => r.assigned_to === me.id && r.status !== 'done' && r.status !== 'canceled')),
+  // Keep the board current without a manual reload
+  useEffect(() => {
+    const timer = setInterval(refresh, POLL_MS)
+    const onFocus = () => refresh()
+    window.addEventListener('focus', onFocus)
+    return () => { clearInterval(timer); window.removeEventListener('focus', onFocus) }
+  }, [refresh])
+
+  const isMine = useCallback(
+    (r: WorkRequest) => r.assignees.some(a => a.id === me.id), [me.id])
+
+  // What I have to do — excludes work already sent for the author's sign-off
+  const todo = useMemo(
+    () => sortForInbox(requests.filter(
+      r => isMine(r) && !isClosed(r.status) && r.status !== 'pending_review')),
+    [requests, isMine]
+  )
+
+  // What is waiting on me to accept
+  const toReview = useMemo(
+    () => sortForInbox(requests.filter(
+      r => r.created_by === me.id && r.status === 'pending_review')),
     [requests, me.id]
   )
 
   const history = useMemo(() => {
     let rows = requests
     if (scope === 'mine') rows = rows.filter(r => r.created_by === me.id)
-    if (scope === 'assigned') rows = rows.filter(r => r.assigned_to === me.id)
-    if (statusFilter === 'open') rows = rows.filter(r => r.status !== 'done' && r.status !== 'canceled')
+    if (scope === 'assigned') rows = rows.filter(isMine)
+    if (statusFilter === 'open') rows = rows.filter(r => !isClosed(r.status))
     else if (statusFilter !== 'all') rows = rows.filter(r => r.status === statusFilter)
     const q = search.trim().toLowerCase()
     if (q) {
@@ -114,15 +190,15 @@ export default function RequestsClient({ initialRequests, people, me, isAdmin }:
         r.subject.toLowerCase().includes(q) ||
         (r.description ?? '').toLowerCase().includes(q) ||
         name(r.author).toLowerCase().includes(q) ||
-        name(r.assignee).toLowerCase().includes(q)
+        r.assignees.some(a => name(a).toLowerCase().includes(q))
       )
     }
     return sortForInbox(rows)
-  }, [requests, scope, statusFilter, search, me.id])
+  }, [requests, scope, statusFilter, search, me.id, isMine])
 
   const open = requests.find(r => r.id === openId) ?? null
 
-  async function patch(id: string, payload: Record<string, unknown>) {
+  const patch = useCallback(async (id: string, payload: Record<string, unknown>) => {
     setBusy(true)
     try {
       const res = await fetch('/api/requests', {
@@ -130,11 +206,16 @@ export default function RequestsClient({ initialRequests, people, me, isAdmin }:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, ...payload }),
       })
-      if (res.ok) await refresh()
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error || 'Не вдалося зберегти зміну')
+        return
+      }
+      await refresh()
     } finally {
       setBusy(false)
     }
-  }
+  }, [refresh])
 
   async function remove(id: string) {
     if (!confirm('Видалити цей запит?')) return
@@ -151,34 +232,30 @@ export default function RequestsClient({ initialRequests, people, me, isAdmin }:
     }
   }
 
-  const openCount = requests.filter(r => r.status !== 'done' && r.status !== 'canceled').length
-  const overdue = inbox.filter(r => deadlineState(r.deadline, r.status).tone === 'overdue').length
+  const openCount = requests.filter(r => !isClosed(r.status)).length
+  const overdue = todo.filter(r => deadlineState(r.deadline, r.status).tone === 'overdue').length
 
   return (
     <div className="space-y-5">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Запити</h1>
-          <p className="text-zinc-400 text-sm mt-0.5">
-            {isAdmin ? 'Усі запити команди' : 'Ваші запити та завдання'}
-            {' · '}<span className="text-zinc-300">{openCount}</span> активних
-            {overdue > 0 && <> · <span className="text-red-400">{overdue} протерміновано</span></>}
-          </p>
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold text-white">Запити</h1>
+        <p className="text-zinc-400 text-sm mt-0.5">
+          {isAdmin ? 'Усі запити команди' : 'Ваші запити та завдання'}
+          {' · '}<span className="text-zinc-300">{openCount}</span> активних
+          {overdue > 0 && <> · <span className="text-red-400">{overdue} протерміновано</span></>}
+        </p>
       </div>
 
-      {/* Top: my inbox | new request */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
-        <Inbox
-          rows={inbox}
-          onOpen={setOpenId}
-          onStatus={(id, status) => patch(id, { status })}
-          busy={busy}
-        />
+        <div className="space-y-5">
+          {toReview.length > 0 && (
+            <ReviewList rows={toReview} onOpen={setOpenId} onPatch={patch} busy={busy} />
+          )}
+          <Inbox rows={todo} me={me} onOpen={setOpenId} onPatch={patch} busy={busy} />
+        </div>
         <CreateForm people={people} me={me} onCreated={refresh} />
       </div>
 
-      {/* Bottom: full history */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-zinc-800">
           <h2 className="text-white font-semibold text-sm">Історія запитів</h2>
@@ -227,57 +304,61 @@ export default function RequestsClient({ initialRequests, people, me, isAdmin }:
         {history.length === 0 ? (
           <div className="px-4 py-10 text-center text-zinc-600 text-sm">Запитів не знайдено</div>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
-                <th className="text-left px-4 py-2.5">Запит</th>
-                <th className="text-left px-4 py-2.5 whitespace-nowrap">Категорія</th>
-                <th className="text-left px-4 py-2.5 whitespace-nowrap">Від кого</th>
-                <th className="text-left px-4 py-2.5 whitespace-nowrap">Кому</th>
-                <th className="text-left px-4 py-2.5 whitespace-nowrap">Пріоритет</th>
-                <th className="text-left px-4 py-2.5 whitespace-nowrap">Дедлайн</th>
-                <th className="text-left px-4 py-2.5 whitespace-nowrap">Статус</th>
-                <th className="text-left px-4 py-2.5 whitespace-nowrap">Створено</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800/60">
-              {history.map(r => {
-                const dl = deadlineState(r.deadline, r.status)
-                const noteCount = r.notes?.length ?? 0
-                return (
-                  <tr
-                    key={r.id}
-                    onClick={() => setOpenId(r.id)}
-                    className="hover:bg-zinc-800/30 transition-colors cursor-pointer"
-                  >
-                    <td className="px-4 py-2.5 text-white text-xs max-w-[320px]">
-                      <div className="truncate">{r.subject}</div>
-                      {noteCount > 0 && (
-                        <div className="text-zinc-600 text-xs mt-0.5">{noteCount} нотаток</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-2.5 text-zinc-400 text-xs whitespace-nowrap">
-                      {categoryByKey(r.category)?.icon} {categoryLabel(r.category)}
-                    </td>
-                    <td className="px-4 py-2.5 text-zinc-400 text-xs whitespace-nowrap">{name(r.author)}</td>
-                    <td className="px-4 py-2.5 text-zinc-300 text-xs whitespace-nowrap">{name(r.assignee)}</td>
-                    <td className="px-4 py-2.5 whitespace-nowrap">
-                      <Badge text={PRIORITY_META[r.priority].label} cls={PRIORITY_META[r.priority].badge} />
-                    </td>
-                    <td className={`px-4 py-2.5 text-xs whitespace-nowrap ${DEADLINE_TONE[dl.tone]}`}>
-                      {dl.label}
-                    </td>
-                    <td className="px-4 py-2.5 whitespace-nowrap">
-                      <Badge text={STATUS_META[r.status].label} cls={STATUS_META[r.status].badge} />
-                    </td>
-                    <td className="px-4 py-2.5 text-zinc-600 text-xs whitespace-nowrap">
-                      {fmtDateTime(r.created_at)}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
+                  <th className="text-left px-4 py-2.5">Запит</th>
+                  <th className="text-left px-4 py-2.5 whitespace-nowrap">Категорія</th>
+                  <th className="text-left px-4 py-2.5 whitespace-nowrap">Хто поставив</th>
+                  <th className="text-left px-4 py-2.5 whitespace-nowrap">Кому</th>
+                  <th className="text-left px-4 py-2.5 whitespace-nowrap">Пріоритет</th>
+                  <th className="text-left px-4 py-2.5 whitespace-nowrap">Дедлайн</th>
+                  <th className="text-left px-4 py-2.5 whitespace-nowrap">Статус</th>
+                  <th className="text-left px-4 py-2.5 whitespace-nowrap">Створено</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/60">
+                {history.map(r => {
+                  const dl = deadlineState(r.deadline, r.status)
+                  const noteCount = r.notes?.length ?? 0
+                  return (
+                    <tr
+                      key={r.id}
+                      onClick={() => setOpenId(r.id)}
+                      className="hover:bg-zinc-800/30 transition-colors cursor-pointer"
+                    >
+                      <td className="px-4 py-2.5 text-white text-xs max-w-[320px]">
+                        <div className="truncate">{r.subject}</div>
+                        {noteCount > 0 && (
+                          <div className="text-zinc-600 text-xs mt-0.5">{noteCount} нотаток</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-zinc-400 text-xs whitespace-nowrap">
+                        {categoryByKey(r.category)?.icon} {categoryLabel(r.category)}
+                      </td>
+                      <td className="px-4 py-2.5 whitespace-nowrap"><PersonChip person={r.author} /></td>
+                      <td className="px-4 py-2.5 text-zinc-300 text-xs whitespace-nowrap">
+                        {r.assignees.map(a => name(a)).join(', ') || '—'}
+                      </td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <Badge text={PRIORITY_META[r.priority].label} cls={PRIORITY_META[r.priority].badge} />
+                      </td>
+                      <td className={`px-4 py-2.5 text-xs whitespace-nowrap ${DEADLINE_TONE[dl.tone]}`}>
+                        {dl.label}
+                      </td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <Badge text={STATUS_META[r.status].label} cls={STATUS_META[r.status].badge} />
+                      </td>
+                      <td className="px-4 py-2.5 text-zinc-600 text-xs whitespace-nowrap">
+                        {fmtDateTime(r.created_at)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -285,6 +366,7 @@ export default function RequestsClient({ initialRequests, people, me, isAdmin }:
         <DetailModal
           request={open}
           me={me}
+          people={people}
           isAdmin={isAdmin}
           busy={busy}
           onClose={() => setOpenId(null)}
@@ -297,12 +379,68 @@ export default function RequestsClient({ initialRequests, people, me, isAdmin }:
   )
 }
 
-// --- My inbox -------------------------------------------------------------
+// --- Waiting for my sign-off ---------------------------------------------
 
-function Inbox({ rows, onOpen, onStatus, busy }: {
+function ReviewList({ rows, onOpen, onPatch, busy }: {
   rows: WorkRequest[]
   onOpen: (id: string) => void
-  onStatus: (id: string, status: RequestStatus) => void
+  onPatch: (id: string, payload: Record<string, unknown>) => Promise<void>
+  busy: boolean
+}) {
+  return (
+    <div className="bg-zinc-900 border border-purple-900/60 rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
+        <h2 className="text-white font-semibold text-sm">Чекають вашого підтвердження</h2>
+        <span className="text-purple-400 text-xs">{rows.length}</span>
+      </div>
+      <div className="divide-y divide-zinc-800/60">
+        {rows.map(r => (
+          <div key={r.id} className="px-4 py-3">
+            <div
+              onClick={() => onOpen(r.id)}
+              className="cursor-pointer hover:opacity-80 transition-opacity"
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge text={STATUS_META[r.status].label} cls={STATUS_META[r.status].badge} />
+                <span className="text-zinc-600 text-xs">
+                  {categoryByKey(r.category)?.icon} {categoryLabel(r.category)}
+                </span>
+              </div>
+              <div className="text-white text-sm mt-1.5">{r.subject}</div>
+              <div className="text-zinc-500 text-xs mt-1">
+                виконав: {r.assignees.map(a => name(a)).join(', ')}
+              </div>
+            </div>
+            <div className="flex gap-2 mt-2.5">
+              <button
+                disabled={busy}
+                onClick={() => onPatch(r.id, { status: 'done' })}
+                className="px-3 py-1.5 rounded-lg text-xs bg-emerald-900/60 text-emerald-300 hover:bg-emerald-800/60 disabled:opacity-50 transition-colors"
+              >
+                ✓ Підтвердити виконання
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => onPatch(r.id, { status: 'rework' })}
+                className="px-3 py-1.5 rounded-lg text-xs bg-orange-950/60 text-orange-400 hover:bg-orange-900/60 disabled:opacity-50 transition-colors"
+              >
+                ↩ На доопрацювання
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// --- My inbox -------------------------------------------------------------
+
+function Inbox({ rows, me, onOpen, onPatch, busy }: {
+  rows: WorkRequest[]
+  me: Person
+  onOpen: (id: string) => void
+  onPatch: (id: string, payload: Record<string, unknown>) => Promise<void>
   busy: boolean
 }) {
   return (
@@ -313,13 +451,13 @@ function Inbox({ rows, onOpen, onStatus, busy }: {
       </div>
 
       {rows.length === 0 ? (
-        <div className="px-4 py-10 text-center text-zinc-600 text-sm">
-          Активних запитів немає
-        </div>
+        <div className="px-4 py-10 text-center text-zinc-600 text-sm">Активних запитів немає</div>
       ) : (
         <div className="divide-y divide-zinc-800/60 max-h-[560px] overflow-y-auto">
           {rows.map(r => {
             const dl = deadlineState(r.deadline, r.status)
+            // Self-assigned work needs no sign-off from anyone else
+            const selfAssigned = r.created_by === me.id
             return (
               <div
                 key={r.id}
@@ -335,21 +473,28 @@ function Inbox({ rows, onOpen, onStatus, busy }: {
                         {categoryByKey(r.category)?.icon} {categoryLabel(r.category)}
                       </span>
                     </div>
+
                     <div className="text-white text-sm mt-1.5">{r.subject}</div>
                     {r.description && (
                       <div className="text-zinc-500 text-xs mt-0.5 line-clamp-2">{r.description}</div>
                     )}
-                    <div className="flex items-center gap-3 mt-1.5">
+
+                    <div className="flex items-center gap-3 mt-2 flex-wrap">
+                      <PersonChip person={r.author} label="Поставив:" />
                       <span className={`text-xs ${DEADLINE_TONE[dl.tone]}`}>◷ {dl.label}</span>
-                      <span className="text-zinc-600 text-xs">від {name(r.author)}</span>
                     </div>
+                    {r.assignees.length > 1 && (
+                      <div className="text-zinc-600 text-xs mt-1">
+                        Разом з вами: {r.assignees.filter(a => a.id !== me.id).map(a => name(a)).join(', ')}
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex flex-col gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
-                    {r.status === 'new' && (
+                    {r.status !== 'in_progress' && (
                       <button
                         disabled={busy}
-                        onClick={() => onStatus(r.id, 'in_progress')}
+                        onClick={() => onPatch(r.id, { status: 'in_progress' })}
                         className="px-2.5 py-1 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-50 transition-colors whitespace-nowrap"
                       >
                         В роботу
@@ -357,8 +502,9 @@ function Inbox({ rows, onOpen, onStatus, busy }: {
                     )}
                     <button
                       disabled={busy}
-                      onClick={() => onStatus(r.id, 'done')}
+                      onClick={() => onPatch(r.id, { status: selfAssigned ? 'done' : 'pending_review' })}
                       className="px-2.5 py-1 rounded-lg text-xs bg-emerald-900/60 text-emerald-300 hover:bg-emerald-800/60 disabled:opacity-50 transition-colors whitespace-nowrap"
+                      title={selfAssigned ? 'Закрити запит' : 'Надіслати на підтвердження автору'}
                     >
                       Виконано
                     </button>
@@ -383,7 +529,7 @@ function CreateForm({ people, me, onCreated }: {
   const [categoryKey, setCategoryKey] = useState(REQUEST_CATEGORIES[0].key)
   const [subject, setSubject] = useState(REQUEST_CATEGORIES[0].subjects[0])
   const [customSubject, setCustomSubject] = useState('')
-  const [assignedTo, setAssignedTo] = useState('')
+  const [assignees, setAssignees] = useState<string[]>([])
   const [priority, setPriority] = useState<RequestPriority>('normal')
   const [deadline, setDeadline] = useState('')
   const [description, setDescription] = useState('')
@@ -400,12 +546,15 @@ function CreateForm({ people, me, onCreated }: {
     setCustomSubject('')
   }
 
+  const toggleAssignee = (id: string) =>
+    setAssignees(list => list.includes(id) ? list.filter(x => x !== id) : [...list, id])
+
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setError(''); setOk('')
 
     const finalSubject = isCustom ? customSubject.trim() : subject
-    if (!assignedTo) return setError('Оберіть виконавця')
+    if (!assignees.length) return setError('Оберіть хоча б одного виконавця')
     if (!finalSubject) return setError('Вкажіть суть запиту')
 
     setSaving(true)
@@ -414,7 +563,7 @@ function CreateForm({ people, me, onCreated }: {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          assigned_to: assignedTo,
+          assignees,
           category: categoryKey,
           subject: finalSubject,
           description,
@@ -426,7 +575,8 @@ function CreateForm({ people, me, onCreated }: {
       if (!res.ok) throw new Error(data.error || 'Помилка')
 
       setOk('Запит створено та надіслано')
-      setDescription(''); setDeadline(''); setCustomSubject(''); setPriority('normal')
+      setDescription(''); setDeadline(''); setCustomSubject('')
+      setPriority('normal'); setAssignees([])
       await onCreated()
       setTimeout(() => setOk(''), 4000)
     } catch (e) {
@@ -446,7 +596,6 @@ function CreateForm({ people, me, onCreated }: {
       </div>
 
       <form onSubmit={submit} className="p-4 space-y-4">
-        {/* Category tiles — faster than a dropdown and shows what exists */}
         <div>
           <label className={label}>Категорія *</label>
           <div className="flex flex-wrap gap-1.5">
@@ -483,18 +632,19 @@ function CreateForm({ people, me, onCreated }: {
           )}
         </div>
 
+        <div>
+          <label className={label}>
+            Кому * {assignees.length > 0 && <span className="text-zinc-600">— обрано {assignees.length}</span>}
+          </label>
+          <PeoplePicker
+            people={people}
+            selected={assignees}
+            onToggle={toggleAssignee}
+            meId={me.id}
+          />
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={label}>Кому *</label>
-            <select value={assignedTo} onChange={e => setAssignedTo(e.target.value)} className={field}>
-              <option value="">Оберіть виконавця</option>
-              {people.map(p => (
-                <option key={p.id} value={p.id}>
-                  {name(p)}{p.id === me.id ? ' (я)' : ''} — {ROLE_LABELS[p.role] ?? p.role}
-                </option>
-              ))}
-            </select>
-          </div>
           <div>
             <label className={label}>Пріоритет</label>
             <select
@@ -507,11 +657,10 @@ function CreateForm({ people, me, onCreated }: {
               ))}
             </select>
           </div>
-        </div>
-
-        <div>
-          <label className={label}>Дедлайн</label>
-          <DateInput value={deadline} onChange={setDeadline} className={field} />
+          <div>
+            <label className={label}>Дедлайн</label>
+            <DateInput value={deadline} onChange={setDeadline} className={field} />
+          </div>
         </div>
 
         <div>
@@ -544,11 +693,67 @@ function CreateForm({ people, me, onCreated }: {
   )
 }
 
+// --- Journal --------------------------------------------------------------
+
+function Journal({ request: r }: { request: WorkRequest }) {
+  const [open, setOpen] = useState(false)
+  const events = r.events ?? []
+
+  return (
+    <div className="border border-zinc-800 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-zinc-800/40 hover:bg-zinc-800/70 transition-colors"
+      >
+        <span className="text-zinc-300 text-xs font-medium">
+          Журнал {events.length > 0 && <span className="text-zinc-600">({events.length})</span>}
+        </span>
+        <span className="text-zinc-500 text-xs">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="max-h-64 overflow-y-auto divide-y divide-zinc-800/60">
+          {events.length === 0 ? (
+            <div className="px-3 py-4 text-center text-zinc-600 text-xs">Записів немає</div>
+          ) : (
+            events.map(e => {
+              const meta = EVENT_META[e.type as RequestEventType]
+              const from = eventValue(e.type, e.old_value)
+              const to = eventValue(e.type, e.new_value)
+              return (
+                <div key={e.id} className="px-3 py-2 flex gap-2.5">
+                  <span className="text-zinc-600 text-xs mt-0.5 shrink-0">{meta?.icon ?? '•'}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs">
+                      <span className="text-zinc-300">{name(e.actor)}</span>{' '}
+                      <span className="text-zinc-500">{meta?.label ?? e.type}</span>
+                    </div>
+                    {(from || to) && e.type !== 'created' && (
+                      <div className="text-zinc-500 text-xs mt-0.5 break-words">
+                        {from && <span className="line-through text-zinc-600">{from}</span>}
+                        {from && to && ' → '}
+                        {to && <span className="text-zinc-400">{to}</span>}
+                      </div>
+                    )}
+                    <div className="text-zinc-600 text-xs mt-0.5">{fmtDateTime(e.created_at)}</div>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // --- Detail modal ---------------------------------------------------------
 
-function DetailModal({ request: r, me, isAdmin, busy, onClose, onPatch, onDelete, onNoteAdded }: {
+function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, onDelete, onNoteAdded }: {
   request: WorkRequest
   me: Person
+  people: Person[]
   isAdmin: boolean
   busy: boolean
   onClose: () => void
@@ -559,12 +764,20 @@ function DetailModal({ request: r, me, isAdmin, busy, onClose, onPatch, onDelete
   const [note, setNote] = useState('')
   const [savingNote, setSavingNote] = useState(false)
   const [noteError, setNoteError] = useState('')
+  const [editingPeople, setEditingPeople] = useState(false)
+  const [draftAssignees, setDraftAssignees] = useState<string[]>(r.assignees.map(a => a.id))
 
-  const involved = r.created_by === me.id || r.assigned_to === me.id
-  const canEdit = involved || isAdmin
-  const canDelete = r.created_by === me.id
+  const isAuthor = r.created_by === me.id
+  const isAssignee = r.assignees.some(a => a.id === me.id)
+  const canEdit = isAuthor || isAssignee || isAdmin
+  const canDelete = isAuthor
   const dl = deadlineState(r.deadline, r.status)
-  const notes = [...(r.notes ?? [])].sort((a, b) => a.created_at < b.created_at ? -1 : 1)
+  const notes = r.notes ?? []
+
+  // An assignee sends work for review; only the author closes it
+  const statusOptions = isAuthor
+    ? STATUS_KEYS
+    : STATUS_KEYS.filter(s => s !== 'done' && s !== 'canceled')
 
   async function addNote(e: React.FormEvent) {
     e.preventDefault()
@@ -599,7 +812,6 @@ function DetailModal({ request: r, me, isAdmin, busy, onClose, onPatch, onDelete
         className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-2xl my-8"
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="px-5 py-4 border-b border-zinc-800 flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap mb-1.5">
@@ -610,14 +822,48 @@ function DetailModal({ request: r, me, isAdmin, busy, onClose, onPatch, onDelete
               </span>
             </div>
             <h3 className="text-white font-semibold">{r.subject}</h3>
-            <div className="text-zinc-500 text-xs mt-1">
-              {name(r.author)} → {name(r.assignee)} · створено {fmtDateTime(r.created_at)}
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              <PersonChip person={r.author} label="Поставив:" />
+              <span className="text-zinc-600 text-xs">{fmtDateTime(r.created_at)}</span>
+            </div>
+            <div className="text-zinc-500 text-xs mt-1.5">
+              Кому: <span className="text-zinc-300">{r.assignees.map(a => name(a)).join(', ') || '—'}</span>
             </div>
           </div>
           <button onClick={onClose} className="text-zinc-500 hover:text-white text-xl leading-none px-1">×</button>
         </div>
 
         <div className="p-5 space-y-5">
+          {/* Sign-off, front and centre when it is the author's turn */}
+          {r.status === 'pending_review' && isAuthor && (
+            <div className="bg-purple-950/30 border border-purple-900/60 rounded-lg px-4 py-3">
+              <div className="text-purple-200 text-sm mb-2.5">
+                Виконавець позначив запит як зроблений. Підтвердьте або поверніть на доопрацювання.
+              </div>
+              <div className="flex gap-2">
+                <button
+                  disabled={busy}
+                  onClick={() => onPatch(r.id, { status: 'done' })}
+                  className="px-3 py-1.5 rounded-lg text-xs bg-emerald-900/60 text-emerald-300 hover:bg-emerald-800/60 disabled:opacity-50 transition-colors"
+                >
+                  ✓ Підтвердити виконання
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => onPatch(r.id, { status: 'rework' })}
+                  className="px-3 py-1.5 rounded-lg text-xs bg-orange-950/60 text-orange-400 hover:bg-orange-900/60 disabled:opacity-50 transition-colors"
+                >
+                  ↩ На доопрацювання
+                </button>
+              </div>
+            </div>
+          )}
+          {r.status === 'pending_review' && !isAuthor && (
+            <div className="bg-zinc-800/40 border border-zinc-700 rounded-lg px-4 py-2.5 text-zinc-400 text-xs">
+              Надіслано на підтвердження — очікує рішення {name(r.author)}
+            </div>
+          )}
+
           {r.description && (
             <div>
               <div className="text-zinc-400 text-xs mb-1.5">Опис</div>
@@ -627,7 +873,6 @@ function DetailModal({ request: r, me, isAdmin, busy, onClose, onPatch, onDelete
             </div>
           )}
 
-          {/* Controls */}
           <div className="grid grid-cols-3 gap-3">
             <div>
               <div className="text-zinc-400 text-xs mb-1.5">Статус</div>
@@ -637,16 +882,22 @@ function DetailModal({ request: r, me, isAdmin, busy, onClose, onPatch, onDelete
                 onChange={e => onPatch(r.id, { status: e.target.value })}
                 className={`${control} w-full`}
               >
-                {STATUS_KEYS.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
+                {statusOptions.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
+                {!statusOptions.includes(r.status) && (
+                  <option value={r.status}>{STATUS_META[r.status].label}</option>
+                )}
               </select>
             </div>
             <div>
-              <div className="text-zinc-400 text-xs mb-1.5">Пріоритет</div>
+              <div className="text-zinc-400 text-xs mb-1.5">
+                Пріоритет {!isAuthor && <span className="text-zinc-600">(лише автор)</span>}
+              </div>
               <select
                 value={r.priority}
-                disabled={!canEdit || busy}
+                disabled={!isAuthor || busy}
                 onChange={e => onPatch(r.id, { priority: e.target.value })}
                 className={`${control} w-full`}
+                title={isAuthor ? undefined : 'Пріоритет змінює лише той, хто поставив запит'}
               >
                 {PRIORITY_KEYS.map(p => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
               </select>
@@ -664,7 +915,43 @@ function DetailModal({ request: r, me, isAdmin, busy, onClose, onPatch, onDelete
 
           <div className={`text-xs ${DEADLINE_TONE[dl.tone]}`}>◷ {dl.label}</div>
 
-          {/* Notes */}
+          {/* Reassignment stays with the author */}
+          {isAuthor && (
+            <div>
+              <button
+                type="button"
+                onClick={() => { setEditingPeople(o => !o); setDraftAssignees(r.assignees.map(a => a.id)) }}
+                className="text-zinc-400 hover:text-white text-xs transition-colors"
+              >
+                {editingPeople ? '× Скасувати' : '✎ Змінити виконавців'}
+              </button>
+              {editingPeople && (
+                <div className="mt-2 space-y-2">
+                  <PeoplePicker
+                    people={people}
+                    selected={draftAssignees}
+                    onToggle={id => setDraftAssignees(l =>
+                      l.includes(id) ? l.filter(x => x !== id) : [...l, id])}
+                    meId={me.id}
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || draftAssignees.length === 0}
+                    onClick={async () => {
+                      await onPatch(r.id, { assignees: draftAssignees })
+                      setEditingPeople(false)
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white transition-colors"
+                  >
+                    Зберегти виконавців
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <Journal request={r} />
+
           <div>
             <div className="text-zinc-400 text-xs mb-2">Нотатки {notes.length > 0 && `(${notes.length})`}</div>
 

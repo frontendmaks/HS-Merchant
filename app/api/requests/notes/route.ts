@@ -39,13 +39,17 @@ export async function POST(request: NextRequest) {
   const service = createServiceClient()
   const { data: target } = await service
     .from('requests')
-    .select('id, created_by, assigned_to, subject')
+    .select('id, created_by, subject')
     .eq('id', request_id)
     .single()
 
   if (!target) return NextResponse.json({ error: 'Запит не знайдено' }, { status: 404 })
 
-  const involved = target.created_by === caller.id || target.assigned_to === caller.id
+  const { data: links } = await service
+    .from('request_assignees').select('user_id').eq('request_id', request_id)
+  const assignees = (links ?? []).map(l => l.user_id)
+
+  const involved = target.created_by === caller.id || assignees.includes(caller.id)
   if (!involved && !isAdmin(caller.role as UserRole)) {
     return NextResponse.json({ error: 'Немає доступу до цього запиту' }, { status: 403 })
   }
@@ -59,10 +63,13 @@ export async function POST(request: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const name = caller.full_name?.trim() || caller.email
-  // Both sides should hear about a note, except whoever wrote it
-  const recipients = [target.created_by, target.assigned_to].filter(
-    (uid, i, all) => uid !== caller.id && all.indexOf(uid) === i
-  )
+
+  await service.from('request_events').insert({
+    request_id, actor_id: caller.id, type: 'note', new_value: body.trim().slice(0, 200),
+  })
+
+  // Everyone on the thread hears about a note, except whoever wrote it
+  const recipients = [...new Set([target.created_by, ...assignees])].filter(uid => uid !== caller.id)
 
   if (recipients.length) {
     await service.from('notifications').insert(

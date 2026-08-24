@@ -23,6 +23,7 @@ const ICONS: Record<string, string> = {
   request_deadline: '◷',
   request_note:     '✎',
   request_updated:  '↻',
+  request_review:   '⏳',
 }
 
 function ago(iso: string) {

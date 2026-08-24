@@ -10,11 +10,13 @@ export const dynamic = 'force-dynamic'
 
 const SELECT = `
   id, category, subject, description, status, priority, deadline,
-  created_at, updated_at, completed_at, created_by, assigned_to,
+  created_at, updated_at, completed_at, created_by,
   author:profiles!requests_created_by_fkey(id, full_name, email),
-  assignee:profiles!requests_assigned_to_fkey(id, full_name, email),
+  assignees:request_assignees(user:profiles!request_assignees_user_id_fkey(id, full_name, email)),
   notes:request_notes(id, body, created_at, author_id,
-                      author:profiles!request_notes_author_id_fkey(full_name, email))
+                      author:profiles!request_notes_author_id_fkey(full_name, email)),
+  events:request_events(id, type, old_value, new_value, created_at,
+                        actor:profiles!request_events_actor_id_fkey(full_name, email))
 `
 
 export default async function RequestsPage() {
@@ -40,11 +42,23 @@ export default async function RequestsPage() {
 
   const admin = isAdmin(me.role as UserRole)
 
+  let ids: string[] | null = null
+  if (!admin) {
+    const [{ data: mine }, { data: authored }] = await Promise.all([
+      service.from('request_assignees').select('request_id').eq('user_id', me.id),
+      service.from('requests').select('id').eq('created_by', me.id),
+    ])
+    ids = [...new Set([
+      ...(mine ?? []).map(r => r.request_id),
+      ...(authored ?? []).map(r => r.id),
+    ])]
+  }
+
   let query = service.from('requests').select(SELECT).order('created_at', { ascending: false })
-  if (!admin) query = query.or(`created_by.eq.${me.id},assigned_to.eq.${me.id}`)
+  if (ids) query = query.in('id', ids)
 
   const [{ data: requests }, { data: people }] = await Promise.all([
-    query,
+    ids && ids.length === 0 ? Promise.resolve({ data: [] }) : query,
     service.from('profiles')
       .select('id, full_name, email, role')
       .eq('is_active', true)

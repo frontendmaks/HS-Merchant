@@ -1,6 +1,7 @@
 // Shared vocabulary for work requests — used by the UI and the API routes.
 
-export type RequestStatus = 'new' | 'in_progress' | 'done' | 'canceled'
+export type RequestStatus =
+  | 'new' | 'in_progress' | 'pending_review' | 'rework' | 'done' | 'canceled'
 export type RequestPriority = 'low' | 'normal' | 'high' | 'urgent'
 
 export interface RequestCategory {
@@ -78,11 +79,16 @@ export const categoryLabel = (key: string): string =>
   categoryByKey(key)?.label ?? key
 
 export const STATUS_META: Record<RequestStatus, { label: string; badge: string; dot: string }> = {
-  new:         { label: 'Новий',      badge: 'bg-amber-950/60 text-amber-400',   dot: 'bg-amber-400' },
-  in_progress: { label: 'В роботі',   badge: 'bg-blue-950/60 text-blue-400',     dot: 'bg-blue-400' },
-  done:        { label: 'Виконано',   badge: 'bg-emerald-950/60 text-emerald-400', dot: 'bg-emerald-400' },
-  canceled:    { label: 'Скасовано',  badge: 'bg-zinc-800 text-zinc-500',        dot: 'bg-zinc-600' },
+  new:            { label: 'Новий',            badge: 'bg-amber-950/60 text-amber-400',     dot: 'bg-amber-400' },
+  in_progress:    { label: 'В роботі',         badge: 'bg-blue-950/60 text-blue-400',       dot: 'bg-blue-400' },
+  pending_review: { label: 'На підтвердженні', badge: 'bg-purple-950/60 text-purple-300',   dot: 'bg-purple-400' },
+  rework:         { label: 'На доопрацюванні', badge: 'bg-orange-950/60 text-orange-400',   dot: 'bg-orange-400' },
+  done:           { label: 'Виконано',         badge: 'bg-emerald-950/60 text-emerald-400', dot: 'bg-emerald-400' },
+  canceled:       { label: 'Скасовано',        badge: 'bg-zinc-800 text-zinc-500',          dot: 'bg-zinc-600' },
 }
+
+/** A request leaves the active lists only once it is signed off or dropped. */
+export const isClosed = (status: string) => status === 'done' || status === 'canceled'
 
 export const PRIORITY_META: Record<RequestPriority, { label: string; badge: string; rank: number }> = {
   urgent: { label: 'Терміново',  badge: 'bg-red-950/60 text-red-400',      rank: 3 },
@@ -100,7 +106,7 @@ export const PRIORITY_KEYS = (Object.keys(PRIORITY_META) as RequestPriority[])
 export function sortForInbox<T extends { status: string; priority: string; deadline: string | null; created_at: string }>(
   rows: T[]
 ): T[] {
-  const openRank = (s: string) => (s === 'done' || s === 'canceled' ? 1 : 0)
+  const openRank = (s: string) => (isClosed(s) ? 1 : 0)
   return [...rows].sort((a, b) => {
     const open = openRank(a.status) - openRank(b.status)
     if (open !== 0) return open
@@ -131,7 +137,7 @@ export function deadlineState(deadline: string | null, status: string, today = n
   const human = d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
   // A finished request is never "late"
-  if (status === 'done' || status === 'canceled') return { label: human, tone: 'later' }
+  if (isClosed(status)) return { label: human, tone: 'later' }
 
   if (days < 0) return { label: `${human} · протерміновано на ${-days} дн.`, tone: 'overdue' }
   if (days === 0) return { label: `${human} · сьогодні`, tone: 'today' }
@@ -154,16 +160,26 @@ function one<T>(value: T | T[] | null | undefined): T | null {
   return value ?? null
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export function normalizeRequest(row: any) {
   return {
     ...row,
     author: one(row.author),
-    assignee: one(row.assignee),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    notes: (row.notes ?? []).map((n: any) => ({ ...n, author: one(n.author) })),
+    // the join table wraps each person one level deep
+    assignees: (row.assignees ?? []).map((a: any) => one(a.user)).filter(Boolean),
+    notes: (row.notes ?? [])
+      .map((n: any) => ({ ...n, author: one(n.author) }))
+      .sort((a: any, b: any) => (a.created_at < b.created_at ? -1 : 1)),
+    events: (row.events ?? [])
+      .map((e: any) => ({ ...e, actor: one(e.actor) }))
+      .sort((a: any, b: any) => (a.created_at < b.created_at ? -1 : 1)),
   }
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+/** Only the person who raised the request may re-prioritise it. */
+export const canSetPriority = (request: { created_by: string }, userId: string) =>
+  request.created_by === userId
 
 export const NOTIFICATION_TYPES = {
   created:  'request_created',
@@ -171,4 +187,32 @@ export const NOTIFICATION_TYPES = {
   deadline: 'request_deadline',
   note:     'request_note',
   updated:  'request_updated',
+  review:   'request_review',
 } as const
+
+// --- Journal --------------------------------------------------------------
+
+export type RequestEventType =
+  | 'created' | 'status' | 'priority' | 'deadline'
+  | 'description' | 'note' | 'assignees' | 'confirmed' | 'returned'
+
+export const EVENT_META: Record<RequestEventType, { label: string; icon: string }> = {
+  created:     { label: 'створив запит',            icon: '✚' },
+  status:      { label: 'змінив статус',            icon: '↻' },
+  priority:    { label: 'змінив пріоритет',         icon: '⚑' },
+  deadline:    { label: 'змінив дедлайн',           icon: '◷' },
+  description: { label: 'змінив опис',              icon: '✎' },
+  note:        { label: 'додав нотатку',            icon: '✎' },
+  assignees:   { label: 'змінив виконавців',        icon: '◉' },
+  confirmed:   { label: 'підтвердив виконання',     icon: '✓' },
+  returned:    { label: 'повернув на доопрацювання', icon: '↩' },
+}
+
+/** Renders a stored value for the journal — raw keys mean nothing to a reader. */
+export function eventValue(type: string, value: string | null): string | null {
+  if (!value) return null
+  if (type === 'status') return STATUS_META[value as RequestStatus]?.label ?? value
+  if (type === 'priority') return PRIORITY_META[value as RequestPriority]?.label ?? value
+  if (type === 'deadline') return new Date(value + 'T00:00:00').toLocaleDateString('uk-UA')
+  return value
+}
