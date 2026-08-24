@@ -76,15 +76,20 @@ function buildAddress(delivery: any): string {
   return parts.filter(Boolean).join(', ')
 }
 
-/** Full branch label, e.g. "Нова Пошта: Відділення №7" */
+/** Full branch label, e.g. "Нова Пошта: Відділення №7".
+ *  delivery_service_name is "Нова Пошта" or "Нова Пошта (поштомати)" — the
+ *  parenthetical marks the type, so move it into the label instead. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildBranch(delivery: any): string | null {
   if (!delivery) return null
-  const service = delivery.delivery_service_name || null
-  const num = delivery.place_number || null
-  if (!num) return service
-  const label = `Відділення №${num}`
-  return service ? `${service}: ${label}` : label
+  const service: string = delivery.delivery_service_name || ''
+  const num: string = String(delivery.place_number ?? '').trim()
+  // No pickup point — courier delivery to a street address
+  if (!num) return service ? `${service}: Кур'єр` : "Кур'єр"
+  const isPostomat = /поштомат/i.test(service)
+  const provider = service.replace(/\s*\([^)]*\)\s*$/, '').trim()
+  const label = `${isPostomat ? 'Поштомат' : 'Відділення'} №${num}`
+  return provider ? `${provider}: ${label}` : label
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -53,9 +53,16 @@ const PROVIDER_NAMES: Record<string, string> = {
  *  — everything before the first ":" is the branch itself. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildBranch(delivery_address: any): string | null {
-  const wh = delivery_address?.warehouse
+  if (!delivery_address) return null
+  const wh = delivery_address.warehouse
   const name = str(wh?.name)
-  if (!name) return null
+  // No warehouse — courier delivery straight to a street address
+  if (!name) {
+    const provider = PROVIDER_NAMES[
+      delivery_address.city?.external_ids?.[0]?.delivery_provider as string
+    ]
+    return provider ? `${provider}: Кур'єр` : "Кур'єр"
+  }
   const label = name.split(':')[0].trim()
   if (!label) return null
   const provider = PROVIDER_NAMES[wh?.delivery_provider as string]
