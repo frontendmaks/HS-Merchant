@@ -29,7 +29,7 @@ export async function GET() {
   const service = createServiceClient()
   const { data, error } = await service
     .from('notifications')
-    .select('id, type, title, body, is_read, created_at, request_id')
+    .select('id, type, title, body, is_read, created_at, request_id, link')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(50)

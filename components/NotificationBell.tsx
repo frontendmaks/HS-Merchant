@@ -11,6 +11,7 @@ interface Notification {
   is_read: boolean
   created_at: string
   request_id: string | null
+  link: string | null
 }
 
 const POLL_MS = 20_000
@@ -24,6 +25,7 @@ const ICONS: Record<string, string> = {
   request_note:     '✎',
   request_updated:  '↻',
   request_review:   '⏳',
+  order_new:        '🛒',
 }
 
 function ago(iso: string) {
@@ -104,7 +106,8 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
         })
         notif.onclick = () => {
           window.focus()
-          router.push('/requests')
+          const target = n.link ?? (n.request_id ? '/requests' : null)
+          if (target) router.push(target)
           notif.close()
         }
       } catch { /* banner blocked — badge and sound still fire */ }
@@ -197,10 +200,13 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
     })
   }
 
+  const targetOf = (n: Notification) => n.link ?? (n.request_id ? '/requests' : null)
+
   async function openNotification(n: Notification) {
     if (!n.is_read) await markRead(n.id)
     setOpen(false)
-    if (n.request_id) router.push('/requests')
+    const target = targetOf(n)
+    if (target) router.push(target)
   }
 
   if (!enabled) return null

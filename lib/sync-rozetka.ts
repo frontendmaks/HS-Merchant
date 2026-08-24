@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/service'
+import { notifyNewOrders } from '@/lib/order-notifications'
 
 const BASE = process.env.ROZETKA_BASE!
 const TOKEN = process.env.ROZETKA_TOKEN!
@@ -212,18 +213,24 @@ export async function syncRozetka(mode: SyncMode = 'full'): Promise<{ synced: nu
   const rows = Array.from(merged.values())
 
   if (rows.length > 0) {
-    // For Rozetka: cancel_reason is derived from the numeric status ID (ROZETKA_CANCEL_REASON_MAP).
-    // For non-canceled orders (where r.cancel_reason is null): preserve any manually-set reason.
+    // One read serves two purposes: which orders we already know about (so the
+    // rest can be announced), and their cancel_reason. Rozetka derives the
+    // reason from the numeric status; for non-canceled orders we keep whatever
+    // was set by hand.
     const externalIds = rows.map(r => r.external_id)
     const { data: existing } = await supabase
       .from('orders')
       .select('external_id, cancel_reason')
       .in('external_id', externalIds)
       .eq('platform', 'rozetka')
-      .not('cancel_reason', 'is', null)
+
+    const known = new Set((existing ?? []).map(r => r.external_id as string))
+    const freshOrders = rows.filter(r => !known.has(r.external_id))
 
     const existingReasons = new Map(
-      (existing ?? []).map(r => [r.external_id as string, r.cancel_reason as string])
+      (existing ?? [])
+        .filter(r => r.cancel_reason != null)
+        .map(r => [r.external_id as string, r.cancel_reason as string])
     )
 
     const rowsToUpsert = rows.map(r => ({
@@ -235,6 +242,9 @@ export async function syncRozetka(mode: SyncMode = 'full'): Promise<{ synced: nu
       .from('orders')
       .upsert(rowsToUpsert, { onConflict: 'external_id,platform' })
     if (error) throw error
+
+    // Only after the rows are safely stored
+    await notifyNewOrders(supabase, 'rozetka', freshOrders)
   }
 
   return { synced: rows.length }

@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt } from '@/lib/maudau'
+import { notifyNewOrders } from '@/lib/order-notifications'
 
 const BASE = process.env.MAUDAU_BASE!
 
@@ -168,18 +169,23 @@ export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: num
   const rows = Array.from(merged.values())
 
   if (rows.length > 0) {
-    // Preserve existing cancel_reason — MauDau API never returns it,
-    // so upsert would overwrite reasons we set ourselves.
+    // One read serves two purposes: which orders we already know about (so the
+    // rest can be announced), and their cancel_reason — MauDau never returns
+    // that field, so a blind upsert would wipe reasons we set ourselves.
     const externalIds = rows.map(r => r.external_id)
     const { data: existing } = await supabase
       .from('orders')
       .select('external_id, cancel_reason')
       .in('external_id', externalIds)
       .eq('platform', 'maudau')
-      .not('cancel_reason', 'is', null)
+
+    const known = new Set((existing ?? []).map(r => r.external_id as string))
+    const freshOrders = rows.filter(r => !known.has(r.external_id))
 
     const existingReasons = new Map(
-      (existing ?? []).map(r => [r.external_id as string, r.cancel_reason as string])
+      (existing ?? [])
+        .filter(r => r.cancel_reason != null)
+        .map(r => [r.external_id as string, r.cancel_reason as string])
     )
 
     const rowsToUpsert = rows.map(r => ({
@@ -191,6 +197,9 @@ export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: num
       .from('orders')
       .upsert(rowsToUpsert, { onConflict: 'external_id,platform' })
     if (error) throw error
+
+    // Only after the rows are safely stored
+    await notifyNewOrders(supabase, 'maudau', freshOrders)
   }
 
   return { synced: rows.length }
