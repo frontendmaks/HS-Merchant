@@ -76,6 +76,17 @@ function buildAddress(delivery: any): string {
   return parts.filter(Boolean).join(', ')
 }
 
+/** Full branch label, e.g. "Нова Пошта: Відділення №7" */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildBranch(delivery: any): string | null {
+  if (!delivery) return null
+  const service = delivery.delivery_service_name || null
+  const num = delivery.place_number || null
+  if (!num) return service
+  const label = `Відділення №${num}`
+  return service ? `${service}: ${label}` : label
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildItems(purchases: any[]): string {
   if (!purchases?.length) return ''
@@ -122,6 +133,7 @@ function orderToRow(order: any) {
     customer_name: customerName || null,
     customer_phone: order.delivery?.recipient_phone || order.user_phone || null,
     address: buildAddress(order.delivery),
+    branch: buildBranch(order.delivery),
     items: buildItems(order.purchases || []),
     total: Number(order.cost_with_discount || order.cost || 0),
     commission: commissionSum,

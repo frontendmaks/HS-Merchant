@@ -300,6 +300,7 @@ export default async function OrdersPage({
                     customer_name={order.customer_name}
                     customer_phone={order.customer_phone}
                     address={order.address}
+                    branch={order.branch}
                     items={order.items}
                     total={order.total}
                     commission={order.commission}

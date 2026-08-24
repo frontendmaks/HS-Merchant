@@ -42,6 +42,26 @@ function buildAddress(delivery_address: any): string {
   return [city, street, building].filter(Boolean).join(', ')
 }
 
+const PROVIDER_NAMES: Record<string, string> = {
+  nova_poshta: 'Нова Пошта',
+  ukrposhta: 'Укрпошта',
+  meest: 'Meest',
+}
+
+/** Full branch label, e.g. "Нова Пошта: Відділення №7 (до 30 кг)".
+ *  warehouse.name looks like "Відділення №7 (до 30 кг): вул. Академіка Шалімова, 67В"
+ *  — everything before the first ":" is the branch itself. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildBranch(delivery_address: any): string | null {
+  const wh = delivery_address?.warehouse
+  const name = str(wh?.name)
+  if (!name) return null
+  const label = name.split(':')[0].trim()
+  if (!label) return null
+  const provider = PROVIDER_NAMES[wh?.delivery_provider as string]
+  return provider ? `${provider}: ${label}` : label
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildItems(parcels: any[]): string {
   if (!parcels?.length) return ''
@@ -68,6 +88,7 @@ function orderToRow(order: any) {
       : null,
     customer_phone: order.recipient?.phone || null,
     address: buildAddress(order.delivery_address),
+    branch: buildBranch(order.delivery_address),
     items: buildItems(order.parcels || []),
     total: (order.total_price || 0) / 100,
     commission: (order.merchant_commission_amount || 0) / 100,

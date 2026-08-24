@@ -62,15 +62,6 @@ function platformBadge(platform: string | null) {
   )
 }
 
-function extractBranch(address: string | null): string | null {
-  if (!address) return null
-  // "Нова Пошта: Відділення №7 (до 30 кг): вул. ..."
-  // Captures everything between "Нова Пошта: " and the next ":"
-  const m = address.match(/Нова Пошта:\s*([^:]+?):/i)
-  if (m) return m[1].trim()
-  return null
-}
-
 function fmt(n: number) {
   return n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -83,6 +74,7 @@ interface OrderRowProps {
   customer_name: string | null
   customer_phone: string | null
   address: string | null
+  branch: string | null
   items: string | null
   total: number | null
   commission: number | null
@@ -230,8 +222,8 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
       <td className="px-3 py-2 text-zinc-400 text-xs min-w-[160px] max-w-[220px] break-words">
         {props.address || '—'}
       </td>
-      <td className="px-3 py-2 whitespace-nowrap text-zinc-300 text-xs">
-        {extractBranch(props.address) || '—'}
+      <td className="px-3 py-2 text-zinc-300 text-xs min-w-[150px] max-w-[210px] break-words">
+        {props.branch || '—'}
       </td>
       <td className="px-3 py-2 text-zinc-400 text-xs min-w-[280px] max-w-[380px]">
         {props.items
