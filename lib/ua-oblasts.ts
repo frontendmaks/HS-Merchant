@@ -12,6 +12,13 @@ export interface OblastShape {
 
 export const MAP_VIEWBOX = '0 0 1000 665'
 
+/** The projection used to draw the paths, so callers can place points on it. */
+export const MAP_BOUNDS = {
+  minLon: 22.150756, maxLat: 52.36815899999999,
+  spanX: 12.000782965678864, spanY: 7.986051999999859,
+  k: 0.6642507027274531, width: 1000, height: 665,
+}
+
 export const OBLAST_SHAPES: OblastShape[] = [
   {
     "code": "KR",

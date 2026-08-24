@@ -1,6 +1,7 @@
 'use client'
 
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import UkraineMap from './UkraineMap'
 import type {
   Totals, DayBucket, ProductStat, CategoryStat, CustomerStat, RegionStat,
@@ -47,19 +48,22 @@ function Panel({ title, subtitle, children, right }: {
   )
 }
 
+type ChartMetric = 'count' | 'revenue'
+
 /** Bar chart of orders per day, drawn with plain divs. */
-function DailyChart({ data }: { data: DayBucket[] }) {
+function DailyChart({ data, metric }: { data: DayBucket[]; metric: ChartMetric }) {
   if (!data.length) {
     return <div className="px-5 py-10 text-center text-zinc-600 text-sm">Немає даних</div>
   }
-  const max = Math.max(...data.map(d => d.count))
-  const avg = data.reduce((s, d) => s + d.count, 0) / data.length
+  const valueOf = (d: DayBucket) => metric === 'count' ? d.count : d.revenue
+  const max = Math.max(...data.map(valueOf))
+  const avg = data.reduce((s, d) => s + valueOf(d), 0) / data.length
 
   return (
     <div className="p-5">
       <div className="flex items-end gap-[2px] h-40" style={{ minHeight: '10rem' }}>
         {data.map(d => {
-          const h = max ? (d.count / max) * 100 : 0
+          const h = max ? (valueOf(d) / max) * 100 : 0
           return (
             <div
               key={d.date}
@@ -77,8 +81,15 @@ function DailyChart({ data }: { data: DayBucket[] }) {
       <div className="flex items-center justify-between mt-3 text-xs text-zinc-500">
         <span>{dayMonth(data[0].date)}</span>
         <span className="text-zinc-400">
-          У середньому <span className="text-white font-medium">{avg.toFixed(1)}</span> замовлень/день
-          {' · '}пік <span className="text-white font-medium">{max}</span>
+          У середньому{' '}
+          <span className="text-white font-medium">
+            {metric === 'count' ? avg.toFixed(1) : moneyShort(avg)}
+          </span>
+          {metric === 'count' ? ' замовлень/день' : ' /день'}
+          {' · '}пік{' '}
+          <span className="text-white font-medium">
+            {metric === 'count' ? max : moneyShort(max)}
+          </span>
         </span>
         <span>{dayMonth(data[data.length - 1].date)}</span>
       </div>
@@ -119,10 +130,92 @@ function RankedList({ rows, valueOf, labelOf, metaOf, max }: {
   )
 }
 
+// Local date parts — toISOString() would shift midnight back a day in UTC+N
+const iso = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const monthLabel = (from: string) => {
+  const MONTHS = ['Січень','Лютий','Березень','Квітень','Травень','Червень',
+                  'Липень','Серпень','Вересень','Жовтень','Листопад','Грудень']
+  const [y, m] = from.split('-').map(Number)
+  return `${MONTHS[m - 1]} ${y}`
+}
+
+/** Whole calendar month containing `anchor`, shifted by `offset` months. */
+function monthRange(anchor: string, offset = 0) {
+  const [y, m] = anchor.split('-').map(Number)
+  const first = new Date(y, m - 1 + offset, 1)
+  const last = new Date(y, m + offset, 0)
+  return { from: iso(first), to: iso(last) }
+}
+
+function PeriodPicker({ from, to, onChange }: {
+  from: string
+  to: string
+  onChange: (from: string, to: string) => void
+}) {
+  const openPicker = (el: HTMLInputElement) => {
+    try { el.showPicker?.() } catch { /* needs a user gesture */ }
+  }
+  const thisMonth = monthRange(iso(new Date()))
+  const isWholeMonth = (() => {
+    const r = monthRange(from)
+    return r.from === from && r.to === to
+  })()
+
+  const field = 'bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-red-500 cursor-pointer'
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {isWholeMonth && (
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => { const r = monthRange(from, -1); onChange(r.from, r.to) }}
+            title="Попередній місяць"
+            className="px-2 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+          >
+            ‹
+          </button>
+          <span className="text-zinc-300 text-xs min-w-[110px] text-center">{monthLabel(from)}</span>
+          <button
+            onClick={() => { const r = monthRange(from, 1); onChange(r.from, r.to) }}
+            disabled={from >= thisMonth.from}
+            title="Наступний місяць"
+            className="px-2 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-400 hover:text-white disabled:opacity-30 transition-colors"
+          >
+            ›
+          </button>
+        </div>
+      )}
+
+      <input
+        type="date" value={from} max={to} className={field}
+        onChange={e => onChange(e.target.value, to)}
+        onClick={e => openPicker(e.currentTarget)}
+        onFocus={e => openPicker(e.currentTarget)}
+      />
+      <span className="text-zinc-600 text-xs">—</span>
+      <input
+        type="date" value={to} min={from} className={field}
+        onChange={e => onChange(from, e.target.value)}
+        onClick={e => openPicker(e.currentTarget)}
+        onFocus={e => openPicker(e.currentTarget)}
+      />
+
+      <button
+        onClick={() => onChange(thisMonth.from, thisMonth.to)}
+        className="px-2.5 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+      >
+        Цей місяць
+      </button>
+    </div>
+  )
+}
+
 export default function AnalyticsClient({
-  months, totals: t, perDay, products, categories, customers, customerSummary, regions,
+  from, to, totals: t, perDay, products, categories, customers, customerSummary, regions,
 }: {
-  months: number
+  from: string
+  to: string
   totals: Totals
   perDay: DayBucket[]
   products: ProductStat[]
@@ -137,14 +230,10 @@ export default function AnalyticsClient({
   }
   regions: RegionStat[]
 }) {
+  const [chartMetric, setChartMetric] = useState<ChartMetric>('count')
   const router = useRouter()
-  const params = useSearchParams()
-
-  const setMonths = (m: number) => {
-    const p = new URLSearchParams(params.toString())
-    p.set('months', String(m))
-    router.push(`/analytics?${p.toString()}`)
-  }
+  const setRange = (f: string, t2: string) =>
+    router.push(`/analytics?from=${f}&to=${t2}`)
 
   const maxProductQty = Math.max(1, ...products.map(p => p.qty))
   const maxCategoryRevenue = Math.max(1, ...categories.map(c => c.revenue))
@@ -155,22 +244,10 @@ export default function AnalyticsClient({
         <div>
           <h1 className="text-2xl font-bold text-white">Аналітика</h1>
           <p className="text-zinc-400 text-sm mt-0.5">
-            За останні {months} міс. · {t.orders} замовлень
+            {dayMonth(from)} — {dayMonth(to)} · {t.orders} замовлень
           </p>
         </div>
-        <div className="flex gap-1">
-          {[1, 3, 6, 12].map(m => (
-            <button
-              key={m}
-              onClick={() => setMonths(m)}
-              className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${
-                months === m ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'
-              }`}
-            >
-              {m} міс.
-            </button>
-          ))}
-        </div>
+        <PeriodPicker from={from} to={to} onChange={setRange} />
       </div>
 
       {/* Money */}
@@ -194,8 +271,26 @@ export default function AnalyticsClient({
         <Card label="В процесі" value={String(t.inFlight)} tone="cyan" />
       </div>
 
-      <Panel title="Замовлення по днях" subtitle="Наведіть на стовпець для деталей">
-        <DailyChart data={perDay} />
+      <Panel
+        title="Замовлення по днях"
+        subtitle="Наведіть на стовпець для деталей"
+        right={
+          <div className="flex gap-1 shrink-0">
+            {([['count', 'Кількість'], ['revenue', 'Сума']] as const).map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setChartMetric(k)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
+                  chartMetric === k ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        }
+      >
+        <DailyChart data={perDay} metric={chartMetric} />
       </Panel>
 
       <UkraineMap regions={regions} />
@@ -256,6 +351,7 @@ export default function AnalyticsClient({
                 <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
                   <th className="text-left px-5 py-2.5">Клієнт</th>
                   <th className="text-left px-5 py-2.5 whitespace-nowrap">Телефон</th>
+                  <th className="text-left px-5 py-2.5">Адреса</th>
                   <th className="text-right px-5 py-2.5 whitespace-nowrap">Замовлень</th>
                   <th className="text-right px-5 py-2.5 whitespace-nowrap">Доставлено</th>
                   <th className="text-right px-5 py-2.5 whitespace-nowrap">LTV</th>
@@ -267,6 +363,9 @@ export default function AnalyticsClient({
                   <tr key={c.key} className="hover:bg-zinc-800/30 transition-colors">
                     <td className="px-5 py-2.5 text-white text-xs">{c.name}</td>
                     <td className="px-5 py-2.5 text-zinc-400 text-xs whitespace-nowrap">{c.phone ?? '—'}</td>
+                    <td className="px-5 py-2.5 text-zinc-400 text-xs max-w-[280px] truncate" title={c.address ?? ''}>
+                      {c.address ?? '—'}
+                    </td>
                     <td className="px-5 py-2.5 text-right text-zinc-300 text-xs">{c.orders}</td>
                     <td className="px-5 py-2.5 text-right text-emerald-400 text-xs">{c.delivered}</td>
                     <td className="px-5 py-2.5 text-right text-white text-xs whitespace-nowrap">{moneyShort(c.revenue)}</td>

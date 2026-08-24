@@ -6,6 +6,7 @@ import { isClosed } from '@/lib/requests'
 export interface OrderRow {
   external_id: string
   platform: string
+  address?: string | null
   order_date: string | null
   customer_name: string | null
   customer_phone: string | null
@@ -42,6 +43,17 @@ const POSTAL_RANGES: [number, number, string][] = [
 ]
 
 export const UNKNOWN_OBLAST = 'Не визначено'
+
+/** name -> [oblast, lat, lon], from lib/ua-settlements.json (server only). */
+export type Gazetteer = Record<string, [string, number, number]>
+
+/** Apostrophes and spacing vary between sources — match on a normalised key. */
+export const placeKey = (s: string) => s
+  .toLowerCase()
+  .replace(/['’ʼ`´]/g, "'")
+  .replace(/[–—]/g, '-')
+  .replace(/\s+/g, ' ')
+  .trim()
 
 /** Oblast centres are unambiguous, and they carry most of the volume. Trusting
  *  them outright protects against the odd wrong postal index in the source
@@ -108,10 +120,28 @@ export function learnCityOblasts(orders: OrderRow[]): Map<string, string> {
   return map
 }
 
-export function resolveOblast(o: OrderRow, learned: Map<string, string>): string {
+export function resolveOblast(
+  o: OrderRow,
+  learned: Map<string, string>,
+  gazetteer?: Gazetteer,
+): string {
   const city = cityOf(o)
   if (city && OBLAST_CENTRES[city]) return OBLAST_CENTRES[city]
-  return directOblast(o) || (city ? learned.get(city) : null) || UNKNOWN_OBLAST
+
+  const direct = directOblast(o)
+  if (direct) return direct
+
+  // Courier orders carry no branch, so fall back to the settlement directory
+  const g = city && gazetteer?.[placeKey(city)]
+  if (g) return g[0]
+
+  return (city ? learned.get(city) : null) || UNKNOWN_OBLAST
+}
+
+export const cityCoords = (city: string, gazetteer?: Gazetteer):
+  { lat: number; lon: number } | null => {
+  const g = gazetteer?.[placeKey(city)]
+  return g ? { lat: g[1], lon: g[2] } : null
 }
 
 // --- Helpers --------------------------------------------------------------
@@ -247,6 +277,8 @@ export interface CustomerStat {
   key: string
   name: string
   phone: string | null
+  /** "Область, вулиця…" from the customer's most recent order */
+  address: string | null
   orders: number
   delivered: number
   revenue: number
@@ -256,7 +288,11 @@ export interface CustomerStat {
   cadenceDays: number | null
 }
 
-export function customers(orders: OrderRow[]): CustomerStat[] {
+export function customers(
+  orders: OrderRow[],
+  learned?: Map<string, string>,
+  gazetteer?: Gazetteer,
+): CustomerStat[] {
   const map = new Map<string, { rows: OrderRow[] }>()
   for (const o of orders) {
     // Phone identifies a person far better than a typed-in name
@@ -276,10 +312,23 @@ export function customers(orders: OrderRow[]): CustomerStat[] {
       cadence = Math.round((last - first) / 86_400_000 / (dates.length - 1))
     }
     const delivered = rows.filter(isDelivered)
+
+    // Most recent order decides the address we show
+    const latest = [...rows].sort((a, b) =>
+      (b.order_date ?? '').localeCompare(a.order_date ?? ''))[0]
+    const oblast = latest && learned
+      ? resolveOblast(latest, learned, gazetteer)
+      : null
+    const rest = latest?.address?.trim() || null
+    const address = rest
+      ? (oblast && oblast !== UNKNOWN_OBLAST ? `${oblast}, ${rest}` : rest)
+      : (oblast && oblast !== UNKNOWN_OBLAST ? oblast : null)
+
     return {
       key,
       name: rows.find(r => r.customer_name)?.customer_name ?? key,
       phone: rows.find(r => r.customer_phone)?.customer_phone ?? null,
+      address,
       orders: rows.length,
       delivered: delivered.length,
       revenue: delivered.reduce((s, o) => s + num(o.total), 0),
@@ -290,24 +339,39 @@ export function customers(orders: OrderRow[]): CustomerStat[] {
   }).sort((a, b) => b.revenue - a.revenue)
 }
 
+export interface RegionCity {
+  city: string
+  orders: number
+  revenue: number
+  /** Null when the settlement is not in the directory — no pin is drawn */
+  lat: number | null
+  lon: number | null
+}
+
 export interface RegionStat {
   oblast: string
   orders: number
   delivered: number
   canceled: number
+  inFlight: number
   revenue: number
   byPlatform: Record<string, number>
-  cities: { city: string; orders: number; revenue: number }[]
-  /** Median days between repeat orders from this oblast */
+  cities: RegionCity[]
+  products: ProductStat[]
+  /** Average days between repeat orders from this oblast */
   cadenceDays: number | null
 }
 
-export function byRegion(orders: OrderRow[], learned: Map<string, string>): RegionStat[] {
+export function byRegion(
+  orders: OrderRow[],
+  learned: Map<string, string>,
+  gazetteer?: Gazetteer,
+): RegionStat[] {
   type CityStat = { city: string; orders: number; revenue: number }
   const map = new Map<string, { rows: OrderRow[]; cities: Map<string, CityStat> }>()
 
   for (const o of orders) {
-    const oblast = resolveOblast(o, learned)
+    const oblast = resolveOblast(o, learned, gazetteer)
     const e = map.get(oblast)
       ?? { rows: [] as OrderRow[], cities: new Map<string, CityStat>() }
     e.rows.push(o)
@@ -331,14 +395,21 @@ export function byRegion(orders: OrderRow[], learned: Map<string, string>): Regi
       ? Math.round(cadences.reduce((a, b) => a + b, 0) / cadences.length)
       : null
 
+    const delivered = rows.filter(isDelivered).length
+    const canceled = rows.filter(isCanceled).length
+
     return {
       oblast,
       orders: rows.length,
-      delivered: rows.filter(isDelivered).length,
-      canceled: rows.filter(isCanceled).length,
+      delivered,
+      canceled,
+      inFlight: rows.length - delivered - canceled,
       revenue: rows.filter(isDelivered).reduce((s, o) => s + num(o.total), 0),
       byPlatform,
-      cities: [...cities.values()].sort((a, b) => b.orders - a.orders),
+      cities: [...cities.values()]
+        .sort((a, b) => b.orders - a.orders)
+        .map(c => ({ ...c, ...(cityCoords(c.city, gazetteer) ?? { lat: null, lon: null }) })),
+      products: popularProducts(rows, 8),
       cadenceDays,
     }
   }).sort((a, b) => b.orders - a.orders)

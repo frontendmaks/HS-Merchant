@@ -105,6 +105,13 @@ export interface OblastShape {
 
 export const MAP_VIEWBOX = '0 0 ${W} ${H}'
 
+/** The projection used to draw the paths, so callers can place points on it. */
+export const MAP_BOUNDS = {
+  minLon: ${minLon}, maxLat: ${maxLat},
+  spanX: ${spanX}, spanY: ${spanY},
+  k: ${k}, width: ${W}, height: ${H},
+}
+
 export const OBLAST_SHAPES: OblastShape[] = ${JSON.stringify(regions, null, 2)}
 `
 

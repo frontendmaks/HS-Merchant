@@ -3,34 +3,49 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
 import {
   learnCityOblasts, totals, ordersPerDay, popularProducts, popularCategories,
-  customers, byRegion, normalizeTitle, type OrderRow,
+  customers, byRegion, normalizeTitle, type OrderRow, type Gazetteer,
 } from '@/lib/analytics'
+import gazetteerJson from '@/lib/ua-settlements.json'
 import AnalyticsClient from './AnalyticsClient'
 
 export const dynamic = 'force-dynamic'
 
+/** 24k settlements — stays on the server, only resolved values reach the client */
+const gazetteer = gazetteerJson as unknown as Gazetteer
+
+// Local date parts — toISOString() would shift midnight back a day in UTC+N
+const iso = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+function defaultRange() {
+  const now = new Date()
+  const first = new Date(now.getFullYear(), now.getMonth(), 1)
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+  return { from: iso(first), to: iso(last) }
+}
+
 export default async function AnalyticsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ months?: string }>
+  searchParams: Promise<{ from?: string; to?: string }>
 }) {
   const role = await getCurrentRole()
   if (!canAccess('analytics', role)) redirect('/orders')
 
   const sp = await searchParams
-  const months = Math.min(Math.max(Number(sp.months) || 6, 1), 24)
-
-  const from = new Date()
-  from.setMonth(from.getMonth() - months)
-  const fromDate = from.toISOString().slice(0, 10)
+  const fallback = defaultRange()
+  const valid = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null)
+  const from = valid(sp.from) ?? fallback.from
+  const to = valid(sp.to) ?? fallback.to
 
   const supabase = createServiceClient()
 
   const [{ data: orderRows }, { data: productRows }] = await Promise.all([
     supabase
       .from('orders')
-      .select('external_id, platform, order_date, customer_name, customer_phone, items, total, commission, status, created_at, raw')
-      .gte('order_date', fromDate)
+      .select('external_id, platform, order_date, customer_name, customer_phone, address, items, total, commission, status, created_at, raw')
+      .gte('order_date', from)
+      .lte('order_date', to)
       .order('order_date', { ascending: false })
       .limit(20000),
     // Only needed to put order lines into categories
@@ -47,11 +62,12 @@ export default async function AnalyticsPage({
   }
 
   const learned = learnCityOblasts(orders)
-  const allCustomers = customers(orders)
+  const allCustomers = customers(orders, learned, gazetteer)
 
   return (
     <AnalyticsClient
-      months={months}
+      from={from}
+      to={to}
       totals={totals(orders)}
       perDay={ordersPerDay(orders)}
       products={popularProducts(orders)}
@@ -71,7 +87,7 @@ export default async function AnalyticsPage({
           return c.length ? Math.round(c.reduce((a, b) => a + b, 0) / c.length) : null
         })(),
       }}
-      regions={byRegion(orders, learned)}
+      regions={byRegion(orders, learned, gazetteer)}
     />
   )
 }

@@ -3,11 +3,21 @@
 import { useMemo, useState } from 'react'
 import { MAP_VIEWBOX, OBLAST_SHAPES } from '@/lib/ua-oblasts'
 import type { RegionStat } from '@/lib/analytics'
+import { MAP_BOUNDS } from '@/lib/ua-oblasts'
 import { moneyShort as money } from '@/lib/format'
 
 const PLATFORM_LABELS: Record<string, string> = { maudau: 'MauDau', rozetka: 'Rozetka' }
 
 
+
+/** Same projection the path generator used, so pins land on the right spot. */
+function project(lat: number, lon: number): { x: number; y: number } {
+  const { minLon, maxLat, spanX, spanY, k, width, height } = MAP_BOUNDS
+  return {
+    x: ((lon - minLon) * k) / spanX * width,
+    y: (maxLat - lat) / spanY * height,
+  }
+}
 
 /** Path bounds, so a selected oblast can be zoomed into. */
 function boundsOf(d: string): { x: number; y: number; w: number; h: number } {
@@ -43,8 +53,14 @@ export default function UkraineMap({ regions }: { regions: RegionStat[] }) {
     const shape = OBLAST_SHAPES.find(s => s.name === selected)
     if (!shape) return MAP_VIEWBOX
     const b = boundsOf(shape.d)
-    const pad = Math.max(b.w, b.h) * 0.15
-    return `${b.x - pad} ${b.y - pad} ${b.w + pad * 2} ${b.h + pad * 2}`
+    // Never zoom past 3x — a small oblast would otherwise fill the whole panel
+    const minSpan = MAP_BOUNDS.width / 3
+    const w = Math.max(b.w, minSpan)
+    const h = Math.max(b.h, minSpan * MAP_BOUNDS.height / MAP_BOUNDS.width)
+    const cx = b.x + b.w / 2
+    const cy = b.y + b.h / 2
+    const pad = 1.15
+    return `${cx - w * pad / 2} ${cy - h * pad / 2} ${w * pad} ${h * pad}`
   }, [selected])
 
   const active = selected ?? hovered
@@ -103,6 +119,30 @@ export default function UkraineMap({ regions }: { regions: RegionStat[] }) {
                 </path>
               )
             })}
+
+            {/* Pins for the pinned oblast, sized by order volume */}
+            {selectedStat?.cities.map(c => {
+              if (c.lat == null || c.lon == null) return null
+              const { x, y } = project(c.lat, c.lon)
+              const maxCity = Math.max(1, ...selectedStat.cities.map(x2 => x2.orders))
+              const r = 2.5 + (c.orders / maxCity) * 4
+              return (
+                <g key={c.city} className="pointer-events-none">
+                  <circle cx={x} cy={y} r={r + 2.5} fill="rgba(250,250,250,0.25)" />
+                  <circle cx={x} cy={y} r={r} fill="#fafafa" />
+                  <text
+                    x={x} y={y - r - 3}
+                    textAnchor="middle"
+                    fill="#fafafa"
+                    style={{ fontSize: Math.max(7, MAP_BOUNDS.width / 90), paintOrder: 'stroke' }}
+                    stroke="rgba(0,0,0,0.7)"
+                    strokeWidth={2}
+                  >
+                    {c.city}
+                  </text>
+                </g>
+              )
+            })}
           </svg>
         </div>
 
@@ -123,7 +163,7 @@ export default function UkraineMap({ regions }: { regions: RegionStat[] }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <div className="bg-zinc-800/40 rounded-lg px-3 py-2">
                   <div className="text-emerald-400 text-lg font-bold">{activeStat.delivered}</div>
                   <div className="text-zinc-500 text-xs">доставлено</div>
@@ -131,6 +171,10 @@ export default function UkraineMap({ regions }: { regions: RegionStat[] }) {
                 <div className="bg-zinc-800/40 rounded-lg px-3 py-2">
                   <div className="text-red-400 text-lg font-bold">{activeStat.canceled}</div>
                   <div className="text-zinc-500 text-xs">скасовано</div>
+                </div>
+                <div className="bg-zinc-800/40 rounded-lg px-3 py-2">
+                  <div className="text-cyan-400 text-lg font-bold">{activeStat.inFlight}</div>
+                  <div className="text-zinc-500 text-xs">в процесі</div>
                 </div>
               </div>
 
@@ -167,12 +211,32 @@ export default function UkraineMap({ regions }: { regions: RegionStat[] }) {
                   <div className="text-zinc-400 text-xs mb-1.5">
                     Міста ({selectedStat.cities.length})
                   </div>
-                  <div className="max-h-64 overflow-y-auto divide-y divide-zinc-800/60">
+                  <div className="max-h-48 overflow-y-auto divide-y divide-zinc-800/60">
                     {selectedStat.cities.map(c => (
                       <div key={c.city} className="flex items-center justify-between py-1.5 text-xs">
-                        <span className="text-zinc-300 truncate pr-2">{c.city}</span>
+                        <span className="text-zinc-300 truncate pr-2">
+                          {c.lat == null && <span className="text-zinc-600" title="Немає в довіднику — без піна">◌ </span>}
+                          {c.city}
+                        </span>
                         <span className="text-zinc-500 whitespace-nowrap">
                           {c.orders} · {money(c.revenue)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selectedStat && selectedStat.oblast === activeStat.oblast
+                && selectedStat.products.length > 0 && (
+                <div>
+                  <div className="text-zinc-400 text-xs mb-1.5">Товари</div>
+                  <div className="max-h-48 overflow-y-auto divide-y divide-zinc-800/60">
+                    {selectedStat.products.map(p => (
+                      <div key={p.title} className="flex items-baseline justify-between gap-2 py-1.5 text-xs">
+                        <span className="text-zinc-300 truncate">{p.title}</span>
+                        <span className="text-zinc-500 whitespace-nowrap">
+                          {Math.round(p.qty)} шт · {money(p.revenue)}
                         </span>
                       </div>
                     ))}
