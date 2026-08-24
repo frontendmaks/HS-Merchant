@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { assignableRoles, canManageUser, ROLE_LABELS as ROLE_NAMES, type UserRole } from '@/lib/roles'
-import { useOnlineUsers } from '@/lib/presence'
+import { usePresence } from '@/lib/presence'
 
 interface Profile {
   id: string
@@ -38,7 +38,7 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
 }) {
   const router = useRouter()
   const [users, setUsers] = useState(initial)
-  const onlineUsers = useOnlineUsers()
+  const onlineUsers = usePresence(currentUserId)
   // Roles this user may hand out, and users they outrank — see lib/roles.ts
   const grantable = assignableRoles(currentRole)
   const canManage = (targetRole: string) => canManageUser(currentRole, targetRole)

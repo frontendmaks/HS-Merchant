@@ -4,7 +4,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { useEffect, useState } from 'react'
 import { PAGE_ROLES, ROLE_LABELS } from '@/lib/roles'
-import { useTrackPresence } from '@/lib/presence'
+import { usePresence } from '@/lib/presence'
 
 // Access per nav item comes from lib/roles.ts, shared with the page guards
 const nav = [
@@ -30,7 +30,7 @@ export default function Sidebar() {
   const [loaded, setLoaded] = useState(false)
 
   // Marks this user online on every page for as long as the tab is open
-  useTrackPresence(userId)
+  usePresence(userId)
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

@@ -1,61 +1,82 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 
 /** Shared Realtime channel every signed-in tab joins. */
 export const PRESENCE_CHANNEL = 'online-users'
 
-type PresenceRow = { user_id: string }
+type Listener = (ids: Set<string>) => void
 
-/** Announce this tab as online for as long as it stays open.
- *  Mount once app-wide (Sidebar) — closing the tab drops the socket and
- *  Realtime removes the entry, so no heartbeat or cleanup job is needed. */
-export function useTrackPresence(userId: string | null | undefined) {
-  useEffect(() => {
-    if (!userId) return
-    const supabase = createClient()
-    const channel = supabase.channel(PRESENCE_CHANNEL, {
-      config: { presence: { key: userId } },
-    })
+// One channel per tab, shared by every consumer. Two channels on the same topic
+// would fight over the socket, so the same subscription both announces this user
+// and reports everyone else — which is also why you can see yourself online.
+let client: SupabaseClient | null = null
+let channel: RealtimeChannel | null = null
+let channelUserId: string | null = null
+let refs = 0
+let online: Set<string> = new Set()
+const listeners = new Set<Listener>()
 
-    channel.subscribe(status => {
-      if (status === 'SUBSCRIBED') {
-        channel.track({ user_id: userId } satisfies PresenceRow)
-      }
-    })
-
-    return () => { supabase.removeChannel(channel) }
-  }, [userId])
+function sync() {
+  if (!channel) return
+  // presence key is the user id
+  online = new Set(Object.keys(channel.presenceState()))
+  const snapshot = new Set(online)
+  listeners.forEach(fn => fn(snapshot))
 }
 
-/** Read-only view of who is currently online. */
-export function useOnlineUsers(): Set<string> {
-  const [online, setOnline] = useState<Set<string>>(new Set())
+function open(userId: string) {
+  client = createClient()
+  channelUserId = userId
+  const ch = client.channel(PRESENCE_CHANNEL, {
+    config: { presence: { key: userId } },
+  })
+  channel = ch
+  ch.on('presence', { event: 'sync' }, sync)
+    .on('presence', { event: 'join' }, sync)
+    .on('presence', { event: 'leave' }, sync)
+    .subscribe(status => {
+      if (status === 'SUBSCRIBED') {
+        ch.track({ user_id: userId, online_at: new Date().toISOString() })
+      }
+    })
+}
+
+function close() {
+  if (client && channel) client.removeChannel(channel)
+  client = null
+  channel = null
+  channelUserId = null
+  online = new Set()
+}
+
+/** Marks `userId` online while mounted, and returns everyone currently online.
+ *  Mount it in the Sidebar so presence follows the user across every page;
+ *  other components may call it too — they all share the one channel. */
+export function usePresence(userId: string | null | undefined): Set<string> {
+  const [ids, setIds] = useState<Set<string>>(() => new Set(online))
 
   useEffect(() => {
-    const supabase = createClient()
-    const channel = supabase.channel(PRESENCE_CHANNEL)
+    if (!userId) return
+    listeners.add(setIds)
+    refs++
 
-    const sync = () => {
-      const state = channel.presenceState<PresenceRow>()
-      const ids = new Set<string>()
-      for (const [key, entries] of Object.entries(state)) {
-        // presence key is the user id; fall back to the tracked payload
-        ids.add(key || entries[0]?.user_id)
-      }
-      ids.delete(undefined as unknown as string)
-      setOnline(ids)
+    if (!channel || channelUserId !== userId) {
+      close()
+      open(userId)
+    } else {
+      setIds(new Set(online))
     }
 
-    channel
-      .on('presence', { event: 'sync' }, sync)
-      .on('presence', { event: 'join' }, sync)
-      .on('presence', { event: 'leave' }, sync)
-      .subscribe()
+    return () => {
+      listeners.delete(setIds)
+      refs = Math.max(0, refs - 1)
+      // Sidebar keeps a ref for the whole session, so this only fires on sign-out
+      if (refs === 0) close()
+    }
+  }, [userId])
 
-    return () => { supabase.removeChannel(channel) }
-  }, [])
-
-  return online
+  return ids
 }
