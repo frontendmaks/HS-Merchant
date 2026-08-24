@@ -3,6 +3,11 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { syncMaudau } from '@/lib/sync-maudau'
 import { syncRozetka } from '@/lib/sync-rozetka'
 
+// String(err) on an Error prefixes "Error: " — the platform name is already
+// in front of it, so take the message alone.
+const reasonText = (reason: unknown) =>
+  reason instanceof Error ? reason.message : String(reason)
+
 // ?mode=quick — only what changed in the last day, cheap enough to run every
 // few minutes. ?mode=full (default) also re-reads the year.
 export async function GET(req: NextRequest) {
@@ -27,14 +32,14 @@ export async function GET(req: NextRequest) {
 
     if (maudau.status === 'fulfilled') {
       maudauSynced = maudau.value.synced ?? 0
-    } else if (maudau.status === 'rejected') {
-      errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'MauDau: ' + String((maudau as PromiseRejectedResult).reason)
+    } else {
+      errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'MauDau: ' + reasonText(maudau.reason)
     }
 
     if (rozetka.status === 'fulfilled') {
       rozetkasynced = rozetka.value.synced ?? 0
-    } else if (rozetka.status === 'rejected') {
-      errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'Rozetka: ' + String((rozetka as PromiseRejectedResult).reason)
+    } else {
+      errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'Rozetka: ' + reasonText(rozetka.reason)
     }
   } catch (err) {
     errorMsg = String(err)
