@@ -62,6 +62,13 @@ function platformBadge(platform: string | null) {
   )
 }
 
+function extractBranch(address: string | null): string | null {
+  if (!address) return null
+  // "Нова Пошта: Відділення №156 (до 10 кг): ..."  OR  "Відділення №23"
+  const m = address.match(/(?:Відділення|відділення)\s*(№\d+)/)
+  return m ? m[1] : null
+}
+
 function fmt(n: number) {
   return n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -220,6 +227,9 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
       <td className="px-3 py-2 whitespace-nowrap text-zinc-400 text-xs">{props.customer_phone || '—'}</td>
       <td className="px-3 py-2 text-zinc-400 text-xs min-w-[160px] max-w-[220px] break-words">
         {props.address || '—'}
+      </td>
+      <td className="px-3 py-2 whitespace-nowrap text-zinc-300 text-xs">
+        {extractBranch(props.address) || '—'}
       </td>
       <td className="px-3 py-2 text-zinc-400 text-xs min-w-[280px] max-w-[380px]">
         {props.items

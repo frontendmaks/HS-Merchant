@@ -273,6 +273,7 @@ export default async function OrdersPage({
                 <th className="text-left px-3 py-2 whitespace-nowrap">ПІБ</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Телефон</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Адреса</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">Відділення</th>
                 <th className="text-left px-3 py-2">Товари</th>
                 <th className="text-right px-3 py-2 whitespace-nowrap">Сума</th>
                 <th className="text-right px-3 py-2 whitespace-nowrap">Комісія</th>
