@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/service'
+import CollapsibleLog from './CollapsibleLog'
 import SyncTrigger from './SyncTrigger'
 import MarketplaceSyncTrigger from './MarketplaceSyncTrigger'
 
@@ -123,7 +124,7 @@ export default async function SyncsPage() {
         </div>
 
         {/* WC log table */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+        <CollapsibleLog title="Журнал синків товарів" count={wcEntries.length}>
           <div className="grid gap-4 px-6 py-3 border-b border-zinc-800 bg-zinc-800/50"
             style={{ gridTemplateColumns: '160px 150px 80px 90px 90px 90px 90px 80px 1fr' }}>
             <div className="text-xs text-zinc-500 uppercase tracking-wide">Час</div>
@@ -170,7 +171,7 @@ export default async function SyncsPage() {
               </div>
             ))}
           </div>
-        </div>
+        </CollapsibleLog>
       </section>
 
       {/* ── ЗАМОВЛЕННЯ (MauDau + Rozetka) ── */}
@@ -263,7 +264,7 @@ export default async function SyncsPage() {
         </div>
 
         {/* Orders log table */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+        <CollapsibleLog title="Журнал синків замовлень" count={orderEntries.length}>
           <div className="grid gap-4 px-6 py-3 border-b border-zinc-800 bg-zinc-800/50"
             style={{ gridTemplateColumns: '160px 150px 80px 100px 100px 80px 1fr' }}>
             <div className="text-xs text-zinc-500 uppercase tracking-wide">Час</div>
@@ -314,7 +315,7 @@ export default async function SyncsPage() {
               </div>
             ))}
           </div>
-        </div>
+        </CollapsibleLog>
       </section>
 
     </div>
