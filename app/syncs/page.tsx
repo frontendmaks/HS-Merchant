@@ -45,9 +45,14 @@ export default async function SyncsPage() {
 
   const dayAgo = Date.now() - 24 * 60 * 60 * 1000
   const autoRecent = autoLogs.filter(l => new Date(l.created_at).getTime() > dayAgo)
+  const autoLastRun = autoLogs[0]
   const autoLastSuccess = autoLogs.find(l => l.status === 'success')
   const autoFailed24h = autoRecent.filter(l => l.status === 'error').length
   const autoLastError = autoLogs.find(l => l.status === 'error')
+  // A run that failed on one marketplace still proves the schedule is alive,
+  // so liveness is judged by recency and reported separately from failures.
+  const autoAliveMs = autoLastRun ? Date.now() - new Date(autoLastRun.created_at).getTime() : Infinity
+  const autoAlive = autoAliveMs < 15 * 60 * 1000
 
   // WC stats
   const wcLastSuccess = wcEntries.find(l => l.status === 'success')
@@ -55,6 +60,7 @@ export default async function SyncsPage() {
   const wcAvgDuration = wcEntries.filter(l => l.duration_ms).reduce((s, l, _, a) => s + l.duration_ms / a.length, 0)
 
   // Orders stats
+  const ordLastRun = allOrderLogs[0]
   const ordLastSuccess = allOrderLogs.find(l => l.status === 'success')
   const ordFailed = allOrderLogs.filter(l => l.status === 'error').length
   const ordAvgDuration = orderEntries.filter(l => l.duration_ms).reduce((s, l, _, a) => s + l.duration_ms / a.length, 0)
@@ -220,9 +226,14 @@ export default async function SyncsPage() {
           </div>
           <div className="bg-zinc-900 border border-emerald-900/40 rounded-xl p-5">
             <div className="text-2xl font-bold text-emerald-400">
-              {ordLastSuccess ? timeAgo(ordLastSuccess.created_at) : 'ніколи'}
+              {ordLastRun ? timeAgo(ordLastRun.created_at) : 'ніколи'}
             </div>
-            <div className="text-xs text-zinc-500 mt-1">Останній успішний</div>
+            <div className="text-xs text-zinc-500 mt-1">Останній запуск</div>
+            {ordLastSuccess && ordLastSuccess !== ordLastRun && (
+              <div className="text-xs text-zinc-600 mt-0.5">
+                без помилок — {timeAgo(ordLastSuccess.created_at)}
+              </div>
+            )}
           </div>
           <div className={`bg-zinc-900 border rounded-xl p-5 ${ordFailed > 0 ? 'border-red-900/40' : 'border-zinc-800'}`}>
             <div className={`text-2xl font-bold ${ordFailed > 0 ? 'text-red-400' : 'text-zinc-400'}`}>{ordFailed}</div>
@@ -239,16 +250,25 @@ export default async function SyncsPage() {
         {/* Automatic runs get a summary rather than flooding the journal */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-5 py-4 flex flex-wrap items-center gap-x-8 gap-y-2">
           <div className="flex items-center gap-2.5">
-            <span className={`w-2 h-2 rounded-full ${
-              autoFailed24h === 0 ? 'bg-emerald-400' : 'bg-red-500'
-            }`} />
+            <span className={`w-2 h-2 rounded-full ${autoAlive ? 'bg-emerald-400' : 'bg-red-500'}`} />
             <span className="text-sm text-white font-medium">Автосинк кожні 5 хв</span>
+            <span className={`text-xs ${autoAlive ? 'text-emerald-400' : 'text-red-400'}`}>
+              {autoAlive ? 'працює' : 'не запускався'}
+            </span>
           </div>
           <div className="text-xs text-zinc-500">
-            Останній успішний:{' '}
+            Останній запуск:{' '}
+            <span className="text-zinc-300">
+              {autoLastRun
+                ? `${new Date(autoLastRun.created_at).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })} · ${timeAgo(autoLastRun.created_at)}`
+                : '—'}
+            </span>
+          </div>
+          <div className="text-xs text-zinc-500">
+            Без помилок:{' '}
             <span className="text-zinc-300">
               {autoLastSuccess
-                ? new Date(autoLastSuccess.created_at).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                ? `${new Date(autoLastSuccess.created_at).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`
                 : '—'}
             </span>
           </div>
