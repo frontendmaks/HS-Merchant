@@ -119,8 +119,9 @@ async function fetchAllPages(jwt: string, queryParam: string): Promise<Map<strin
       headers: { Authorization: `Bearer ${jwt}` },
     })
     if (!res.ok) {
-      console.error('MauDau orders fetch failed', res.status, url)
-      break
+      throw new Error(
+        `MauDau API ${res.status} on page ${page} [${queryParam}]: ${(await res.text()).slice(0, 200)}`
+      )
     }
     const raw = await res.json()
     // API ignores per_page and returns ~15 per page as a bare array

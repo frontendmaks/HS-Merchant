@@ -161,9 +161,18 @@ async function fetchPages(dateParam: string): Promise<Map<string, ReturnType<typ
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${TOKEN}` },
     })
-    if (!res.ok) break
+    // Fail loudly. Swallowing this once let an expired token look like
+    // "0 orders synced, success" for weeks.
+    if (!res.ok) {
+      throw new Error(`Rozetka API ${res.status} on page ${page}: ${(await res.text()).slice(0, 200)}`)
+    }
     const data = await res.json()
-    if (!data.success) break
+    if (!data.success) {
+      const e = data.errors
+      throw new Error(
+        `Rozetka API error${e?.code ? ` ${e.code}` : ''}: ${e?.description || e?.message || JSON.stringify(e).slice(0, 200)}`
+      )
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const orders: any[] = data.content?.orders || []

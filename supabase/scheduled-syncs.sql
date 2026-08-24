@@ -7,8 +7,11 @@
 -- This file documents what is already applied to the database. Re-running it is
 -- safe: cron.schedule() upserts a job by name.
 --
---   orders-quick-sync  */5 * * * *   ~4 marketplace requests, ~2s
---   orders-full-sync   0 */3 * * *   ~26 requests, ~8s (re-reads the year)
+--   orders-quick-sync         */5 * * * *   ~4 marketplace requests, ~2s
+--   orders-full-sync          2 */3 * * *   ~26 requests, ~8s (re-reads the year)
+--   order-sync-logs-cleanup   30 4 * * *    drops auto logs older than 7 days
+--
+-- The full run is offset by two minutes so it never coincides with a quick run.
 --
 -- The Vercel cron in vercel.json (04:00 daily, full) stays as a backstop in
 -- case pg_cron or the database is unavailable.
@@ -55,7 +58,15 @@ $$;
 REVOKE ALL ON FUNCTION public.trigger_order_sync(text) FROM PUBLIC, anon, authenticated;
 
 SELECT cron.schedule('orders-quick-sync', '*/5 * * * *', $$SELECT public.trigger_order_sync('quick')$$);
-SELECT cron.schedule('orders-full-sync',  '0 */3 * * *', $$SELECT public.trigger_order_sync('full')$$);
+SELECT cron.schedule('orders-full-sync',  '2 */3 * * *', $$SELECT public.trigger_order_sync('full')$$);
+
+SELECT cron.schedule(
+  'order-sync-logs-cleanup', '30 4 * * *',
+  $$DELETE FROM public.order_sync_logs
+    WHERE trigger = 'auto'
+      AND status = 'success'
+      AND created_at < now() - interval '7 days'$$
+);
 
 -- Handy checks -------------------------------------------------------------
 -- Schedules:      SELECT jobname, schedule, active FROM cron.job;

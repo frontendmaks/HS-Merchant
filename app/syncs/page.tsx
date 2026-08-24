@@ -31,11 +31,22 @@ export default async function SyncsPage() {
 
   const [{ data: wcLogs }, { data: orderLogs }] = await Promise.all([
     supabase.from('sync_logs').select('*').order('created_at', { ascending: false }).limit(30),
-    supabase.from('order_sync_logs').select('*').order('created_at', { ascending: false }).limit(30),
+    supabase.from('order_sync_logs').select('*').order('created_at', { ascending: false }).limit(400),
   ])
 
   const wcEntries = wcLogs ?? []
-  const orderEntries = orderLogs ?? []
+  const allOrderLogs = orderLogs ?? []
+
+  // The 5-minute auto sync would otherwise bury every manual and full run,
+  // so it gets a summary line instead of 288 journal rows a day.
+  const autoLogs = allOrderLogs.filter(l => l.trigger === 'auto')
+  const orderEntries = allOrderLogs.filter(l => l.trigger !== 'auto').slice(0, 30)
+
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000
+  const autoRecent = autoLogs.filter(l => new Date(l.created_at).getTime() > dayAgo)
+  const autoLastSuccess = autoLogs.find(l => l.status === 'success')
+  const autoFailed24h = autoRecent.filter(l => l.status === 'error').length
+  const autoLastError = autoLogs.find(l => l.status === 'error')
 
   // WC stats
   const wcLastSuccess = wcEntries.find(l => l.status === 'success')
@@ -43,8 +54,8 @@ export default async function SyncsPage() {
   const wcAvgDuration = wcEntries.filter(l => l.duration_ms).reduce((s, l, _, a) => s + l.duration_ms / a.length, 0)
 
   // Orders stats
-  const ordLastSuccess = orderEntries.find(l => l.status === 'success')
-  const ordFailed = orderEntries.filter(l => l.status === 'error').length
+  const ordLastSuccess = allOrderLogs.find(l => l.status === 'success')
+  const ordFailed = allOrderLogs.filter(l => l.status === 'error').length
   const ordAvgDuration = orderEntries.filter(l => l.duration_ms).reduce((s, l, _, a) => s + l.duration_ms / a.length, 0)
 
   return (
@@ -179,14 +190,15 @@ export default async function SyncsPage() {
             <div>
               <div className="text-sm font-medium text-white">Автоматичний розклад</div>
               <div className="text-xs text-zinc-500 mt-0.5">
-                Vercel Cron запускає синк щодня о 04:00: <span className="font-mono text-zinc-400">0 4 * * *</span>
+                Швидкий синк кожні 5 хв, повний — кожні 3 год{' '}
+                <span className="font-mono text-zinc-400">(Supabase cron)</span>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-6 text-center shrink-0">
             <div>
               <div className="text-xs text-zinc-500">Розклад</div>
-              <div className="text-sm text-purple-400 font-medium mt-0.5">Щодня о 04:00</div>
+              <div className="text-sm text-purple-400 font-medium mt-0.5">5 хв / 3 год</div>
             </div>
             <div>
               <div className="text-xs text-zinc-500">Платформи</div>
@@ -221,6 +233,33 @@ export default async function SyncsPage() {
             </div>
             <div className="text-xs text-zinc-500 mt-1">Середній час</div>
           </div>
+        </div>
+
+        {/* Automatic runs get a summary rather than flooding the journal */}
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-5 py-4 flex flex-wrap items-center gap-x-8 gap-y-2">
+          <div className="flex items-center gap-2.5">
+            <span className={`w-2 h-2 rounded-full ${
+              autoFailed24h === 0 ? 'bg-emerald-400' : 'bg-red-500'
+            }`} />
+            <span className="text-sm text-white font-medium">Автосинк кожні 5 хв</span>
+          </div>
+          <div className="text-xs text-zinc-500">
+            Останній успішний:{' '}
+            <span className="text-zinc-300">
+              {autoLastSuccess
+                ? new Date(autoLastSuccess.created_at).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                : '—'}
+            </span>
+          </div>
+          <div className="text-xs text-zinc-500">
+            Помилок за 24 год:{' '}
+            <span className={autoFailed24h === 0 ? 'text-emerald-400' : 'text-red-400'}>{autoFailed24h}</span>
+          </div>
+          {autoLastError?.error && (
+            <div className="text-xs text-red-400 basis-full break-words">
+              Остання помилка: {autoLastError.error}
+            </div>
+          )}
         </div>
 
         {/* Orders log table */}
