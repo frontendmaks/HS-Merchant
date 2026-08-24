@@ -12,6 +12,7 @@ const nav = [
   { href: '/',         label: 'Дашборд',       icon: '▦', roles: PAGE_ROLES.dashboard },
   { href: '/products', label: 'Товари',         icon: '◈', roles: PAGE_ROLES.products },
   { href: '/feeds',    label: 'Фіди',           icon: '⊞', roles: PAGE_ROLES.feeds },
+  { href: '/analytics', label: 'Аналітика',     icon: '◑', roles: PAGE_ROLES.analytics },
   { href: '/syncs',    label: 'Синхронізації',  icon: '↻', roles: PAGE_ROLES.syncs },
   { href: '/orders',   label: 'Замовлення',     icon: '◷', roles: PAGE_ROLES.orders },
   { href: '/requests', label: 'Запити',         icon: '✉', roles: PAGE_ROLES.requests },

@@ -45,10 +45,6 @@ function platformBadge(platform: string | null) {
   )
 }
 
-function fmt(n: number) {
-  return n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
 function pct(part: number, total: number) {
   if (!total) return '0%'
   return (part / total * 100).toFixed(1) + '%'
@@ -96,27 +92,6 @@ export default async function OrdersPage({
   const inProgress = orders.filter(o => isInProgress(o.status))
   const shipping = orders.filter(o => isShipping(o.status))
 
-  const revenue = delivered.reduce((s, o) => s + Number(o.total || 0), 0)
-  const commissionSum = delivered.reduce((s, o) => s + Number(o.commission || 0), 0)
-  const netRevenue = revenue - commissionSum
-
-  const platforms = platform ? [platform] : ['maudau', 'rozetka']
-  const breakdown = platforms.map(pl => {
-    const pOrders = allOrders2.filter(o => o.platform === pl)
-    const pDelivered = pOrders.filter(o => o.status === 'Доставлено')
-    const pCanceled = pOrders.filter(o => o.status === 'Скасовано')
-    const pRevenue = pDelivered.reduce((s, o) => s + Number(o.total || 0), 0)
-    const pCommission = pDelivered.reduce((s, o) => s + Number(o.commission || 0), 0)
-    return {
-      platform: pl,
-      total: pOrders.length,
-      delivered: pDelivered.length,
-      canceled: pCanceled.length,
-      revenue: pRevenue,
-      commission: pCommission,
-      net: pRevenue - pCommission,
-    }
-  })
 
   let query = supabase
     .from('orders')
@@ -206,63 +181,6 @@ export default async function OrdersPage({
         </div>
       </div>
 
-      {/* Revenue cards */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
-          <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Загальний дохід</div>
-          <div className="text-2xl font-bold text-white">₴{fmt(revenue)}</div>
-          <div className="text-zinc-500 text-xs mt-0.5">По доставлених замовленнях</div>
-        </div>
-        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
-          <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Комісія</div>
-          <div className="text-2xl font-bold text-amber-400">₴{fmt(commissionSum)}</div>
-          <div className="text-zinc-500 text-xs mt-0.5">По доставлених замовленнях</div>
-        </div>
-        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
-          <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Чистий дохід</div>
-          <div className="text-2xl font-bold text-emerald-400">₴{fmt(netRevenue)}</div>
-          <div className="text-zinc-500 text-xs mt-0.5">Дохід мінус комісія</div>
-        </div>
-      </div>
-
-      {/* Platform breakdown */}
-      <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-800">
-          <h2 className="text-sm font-semibold text-zinc-300">По платформах</h2>
-        </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
-              <th className="text-left px-4 py-2">Платформа</th>
-              <th className="text-right px-4 py-2">Всього</th>
-              <th className="text-right px-4 py-2">Доставлено</th>
-              <th className="text-right px-4 py-2">% дост.</th>
-              <th className="text-right px-4 py-2">Скасовано</th>
-              <th className="text-right px-4 py-2">% скас.</th>
-              <th className="text-right px-4 py-2">Виторг</th>
-              <th className="text-right px-4 py-2">Комісія</th>
-              <th className="text-right px-4 py-2">Чистий</th>
-            </tr>
-          </thead>
-          <tbody>
-            {breakdown.map(b => (
-              <tr key={b.platform} className="border-b border-zinc-800/50">
-                <td className="px-4 py-2.5">{platformBadge(b.platform)}</td>
-                <td className="text-right px-4 py-2.5 text-zinc-300">{b.total}</td>
-                <td className="text-right px-4 py-2.5 text-emerald-400">{b.delivered}</td>
-                <td className="text-right px-4 py-2.5 text-zinc-400">{pct(b.delivered, b.total)}</td>
-                <td className="text-right px-4 py-2.5 text-red-400">{b.canceled}</td>
-                <td className="text-right px-4 py-2.5 text-zinc-400">{pct(b.canceled, b.total)}</td>
-                <td className="text-right px-4 py-2.5 text-zinc-300">₴{fmt(b.revenue)}</td>
-                <td className="text-right px-4 py-2.5 text-amber-400">₴{fmt(b.commission)}</td>
-                <td className="text-right px-4 py-2.5 text-emerald-400">₴{fmt(b.net)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Orders table */}
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-800">
           <h2 className="text-sm font-semibold text-zinc-300">
