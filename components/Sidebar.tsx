@@ -5,6 +5,7 @@ import { createBrowserClient } from '@supabase/ssr'
 import { useEffect, useState } from 'react'
 import { PAGE_ROLES, ROLE_LABELS } from '@/lib/roles'
 import { usePresence } from '@/lib/presence'
+import NotificationBell from '@/components/NotificationBell'
 
 // Access per nav item comes from lib/roles.ts, shared with the page guards
 const nav = [
@@ -13,6 +14,7 @@ const nav = [
   { href: '/feeds',    label: 'Фіди',           icon: '⊞', roles: PAGE_ROLES.feeds },
   { href: '/syncs',    label: 'Синхронізації',  icon: '↻', roles: PAGE_ROLES.syncs },
   { href: '/orders',   label: 'Замовлення',     icon: '◷', roles: PAGE_ROLES.orders },
+  { href: '/requests', label: 'Запити',         icon: '✉', roles: PAGE_ROLES.requests },
   { href: '/users',    label: 'Користувачі',    icon: '◉', roles: PAGE_ROLES.users },
 ]
 
@@ -102,6 +104,7 @@ export default function Sidebar() {
 
       {/* User info + sign out */}
       <div className="px-3 py-4 border-t border-zinc-800 space-y-2">
+        <NotificationBell enabled={loaded && !!profile} />
         {loaded && profile && (
           <div className="px-3 py-2.5 rounded-lg bg-zinc-800/50">
             <div className="flex items-center gap-2.5">

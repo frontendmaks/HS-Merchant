@@ -56,6 +56,7 @@ export const PAGE_ROLES = {
   feeds:     ['super_admin', 'admin', 'viewer'],
   syncs:     ['super_admin', 'admin', 'manager'],
   orders:    ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
+  requests:  ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
   users:     ['super_admin', 'admin', 'manager'],
 } as const
 
