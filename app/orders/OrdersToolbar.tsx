@@ -84,6 +84,7 @@ export default function OrdersToolbar() {
     { value: 'Доставлено', label: 'Доставлено' },
     { value: 'Скасовано', label: 'Скасовано' },
     { value: 'other', label: 'В процесі' },
+    { value: 'shipping', label: 'У доставці' },
   ]
 
   return (

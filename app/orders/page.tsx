@@ -4,6 +4,7 @@ import { Suspense } from 'react'
 import Link from 'next/link'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole } from '@/lib/getRole'
+import { IN_PROGRESS_STATUSES, SHIPPING_STATUSES, isInProgress, isShipping } from '@/lib/order-statuses'
 import OrdersToolbar from './OrdersToolbar'
 import OrderRow from './OrderRow'
 
@@ -92,7 +93,8 @@ export default async function OrdersPage({
   const total = orders.length
   const delivered = orders.filter(o => o.status === 'Доставлено')
   const canceled = orders.filter(o => o.status === 'Скасовано')
-  const inProgress = orders.filter(o => o.status !== 'Доставлено' && o.status !== 'Скасовано')
+  const inProgress = orders.filter(o => isInProgress(o.status))
+  const shipping = orders.filter(o => isShipping(o.status))
 
   const revenue = delivered.reduce((s, o) => s + Number(o.total || 0), 0)
   const commissionSum = delivered.reduce((s, o) => s + Number(o.commission || 0), 0)
@@ -126,7 +128,9 @@ export default async function OrdersPage({
 
   if (platform) query = query.eq('platform', platform)
   if (statusFilter === 'other') {
-    query = query.neq('status', 'Доставлено').neq('status', 'Скасовано')
+    query = query.in('status', IN_PROGRESS_STATUSES)
+  } else if (statusFilter === 'shipping') {
+    query = query.in('status', SHIPPING_STATUSES)
   } else if (statusFilter) {
     query = query.eq('status', statusFilter)
   }
@@ -196,6 +200,9 @@ export default async function OrdersPage({
         <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
           <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">В процесі</div>
           <div className="text-3xl font-bold text-cyan-400">{inProgress.length}</div>
+          {shipping.length > 0 && (
+            <div className="text-zinc-500 text-sm mt-0.5">+{shipping.length} у доставці</div>
+          )}
         </div>
       </div>
 
