@@ -64,14 +64,10 @@ function platformBadge(platform: string | null) {
 
 function extractBranch(address: string | null): string | null {
   if (!address) return null
-  // Explicit "відділення №N" mention (e.g. поштомати hint)
-  const explicit = address.match(/[Вв]ідділення\s*№(\d+)/)
-  if (explicit) return `№${explicit[1]}`
-  // "Місто, Нова Пошта, вул. ..., N" — branch number is the trailing number
-  if (/Нова Пошта/i.test(address) && !/поштомат/i.test(address)) {
-    const m = address.match(/,\s*(\d+)\s*$/)
-    if (m) return `№${m[1]}`
-  }
+  // "Нова Пошта: Відділення №7 (до 30 кг): вул. ..."
+  // Captures everything between "Нова Пошта: " and the next ":"
+  const m = address.match(/Нова Пошта:\s*([^:]+?):/i)
+  if (m) return m[1].trim()
   return null
 }
 
