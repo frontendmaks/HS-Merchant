@@ -3,23 +3,17 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { useEffect, useState } from 'react'
+import { PAGE_ROLES, ROLE_LABELS } from '@/lib/roles'
 
-// Which roles can see each nav item
+// Access per nav item comes from lib/roles.ts, shared with the page guards
 const nav = [
-  { href: '/',         label: 'Дашборд',       icon: '▦', roles: ['super_admin','admin','viewer'] },
-  { href: '/products', label: 'Товари',         icon: '◈', roles: ['super_admin','admin','viewer'] },
-  { href: '/feeds',    label: 'Фіди',           icon: '⊞', roles: ['super_admin','admin','viewer'] },
-  { href: '/syncs',    label: 'Синхронізації',  icon: '↻', roles: ['super_admin','admin'] },
-  { href: '/orders',   label: 'Замовлення',     icon: '◷', roles: ['super_admin','admin','operator','viewer'] },
-  { href: '/users',    label: 'Користувачі',    icon: '◉', roles: ['super_admin','admin'] },
+  { href: '/',         label: 'Дашборд',       icon: '▦', roles: PAGE_ROLES.dashboard },
+  { href: '/products', label: 'Товари',         icon: '◈', roles: PAGE_ROLES.products },
+  { href: '/feeds',    label: 'Фіди',           icon: '⊞', roles: PAGE_ROLES.feeds },
+  { href: '/syncs',    label: 'Синхронізації',  icon: '↻', roles: PAGE_ROLES.syncs },
+  { href: '/orders',   label: 'Замовлення',     icon: '◷', roles: PAGE_ROLES.orders },
+  { href: '/users',    label: 'Користувачі',    icon: '◉', roles: PAGE_ROLES.users },
 ]
-
-const ROLE_LABELS: Record<string, string> = {
-  super_admin: 'Супер адміністратор',
-  admin:       'Адміністратор',
-  operator:    'Оператор',
-  viewer:      'Глядач',
-}
 
 interface Profile {
   full_name: string | null
@@ -63,7 +57,7 @@ export default function Sidebar() {
 
   const role = profile?.role
   const visibleNav = loaded && role
-    ? nav.filter(item => item.roles.includes(role))
+    ? nav.filter(item => (item.roles as readonly string[]).includes(role))
     : []
 
   return (

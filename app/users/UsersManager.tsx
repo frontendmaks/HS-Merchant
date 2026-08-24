@@ -2,22 +2,32 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { assignableRoles, canManageUser, ROLE_LABELS as ROLE_NAMES, type UserRole } from '@/lib/roles'
 
 interface Profile {
   id: string
   email: string
   full_name: string | null
-  role: 'super_admin' | 'admin' | 'operator' | 'viewer'
+  role: 'super_admin' | 'admin' | 'manager' | 'operator' | 'viewer'
   is_active: boolean
   created_at: string
   invite_pending?: boolean
 }
 
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
-  super_admin: { label: 'Супер адмін',  color: 'bg-yellow-900/60 text-yellow-300' },
+  super_admin: { label: 'Супер адмін',   color: 'bg-yellow-900/60 text-yellow-300' },
   admin:       { label: 'Адміністратор', color: 'bg-red-900/60 text-red-300' },
+  manager:     { label: 'Керівник',      color: 'bg-purple-900/60 text-purple-300' },
   operator:    { label: 'Оператор',      color: 'bg-blue-900/60 text-blue-300' },
   viewer:      { label: 'Глядач',        color: 'bg-zinc-700 text-zinc-300' },
+}
+
+const ROLE_HINTS: Record<string, string> = {
+  super_admin: '— необмежений доступ, підтримка системи',
+  admin:       '— управління командою та налаштування',
+  manager:     '— замовлення, синки, запрошення до рівня Оператора',
+  operator:    '— робота із замовленнями та синками',
+  viewer:      '— тільки перегляд',
 }
 
 export default function UsersManager({ users: initial, currentUserId, currentRole }: {
@@ -27,16 +37,15 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
 }) {
   const router = useRouter()
   const [users, setUsers] = useState(initial)
-  const isSuperAdmin = currentRole === 'super_admin'
-  // Admin can only manage users with role < admin (operator, viewer)
-  const canManage = (targetRole: string) =>
-    isSuperAdmin || (currentRole === 'admin' && !['super_admin', 'admin'].includes(targetRole))
+  // Roles this user may hand out, and users they outrank — see lib/roles.ts
+  const grantable = assignableRoles(currentRole)
+  const canManage = (targetRole: string) => canManageUser(currentRole, targetRole)
 
   // Invite form
   const [showInvite, setShowInvite] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteName, setInviteName] = useState('')
-  const [inviteRole, setInviteRole] = useState<'super_admin' | 'admin' | 'operator' | 'viewer'>('operator')
+  const [inviteRole, setInviteRole] = useState<string>('operator')
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteError, setInviteError] = useState('')
   const [inviteSuccess, setInviteSuccess] = useState('')
@@ -155,13 +164,12 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
                 <label className="block text-zinc-400 text-xs mb-1.5">Роль *</label>
                 <select
                   value={inviteRole}
-                  onChange={e => setInviteRole(e.target.value as typeof inviteRole)}
+                  onChange={e => setInviteRole(e.target.value)}
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500"
                 >
-                  {isSuperAdmin && <option value="super_admin">Супер адміністратор</option>}
-                  {isSuperAdmin && <option value="admin">Адміністратор</option>}
-                  <option value="operator">Оператор</option>
-                  <option value="viewer">Глядач</option>
+                  {grantable.map(r => (
+                    <option key={r} value={r!}>{ROLE_NAMES[r!]}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -195,12 +203,7 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
         {Object.entries(ROLE_LABELS).map(([k, v]) => (
           <div key={k} className="flex items-center gap-2">
             <span className={`px-2 py-0.5 rounded text-xs font-medium ${v.color}`}>{v.label}</span>
-            <span className="text-zinc-500 text-xs">
-              {k === 'super_admin' ? '— необмежений доступ, підтримка системи' :
-               k === 'admin'       ? '— управління командою та налаштування' :
-               k === 'operator'    ? '— робота із замовленнями та синками' :
-                                     '— тільки перегляд'}
-            </span>
+            <span className="text-zinc-500 text-xs">{ROLE_HINTS[k]}</span>
           </div>
         ))}
       </div>
@@ -249,10 +252,13 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
                         onChange={e => handleRoleChange(user.id, e.target.value)}
                         className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-red-500"
                       >
-                        {isSuperAdmin && <option value="super_admin">Супер адміністратор</option>}
-                        {isSuperAdmin && <option value="admin">Адміністратор</option>}
-                        <option value="operator">Оператор</option>
-                        <option value="viewer">Глядач</option>
+                        {/* current role stays selectable even if not grantable */}
+                        {!grantable.includes(user.role as UserRole) && (
+                          <option value={user.role}>{ROLE_NAMES[user.role]}</option>
+                        )}
+                        {grantable.map(r => (
+                          <option key={r} value={r!}>{ROLE_NAMES[r!]}</option>
+                        ))}
                       </select>
                     )}
                   </td>

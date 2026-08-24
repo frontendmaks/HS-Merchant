@@ -22,10 +22,10 @@ function formatDate(d: string) {
 }
 
 export default async function SyncsPage() {
-  const { getCurrentRole } = await import('@/lib/getRole')
+  const { getCurrentRole, canAccess } = await import('@/lib/getRole')
   const { redirect } = await import('next/navigation')
   const role = await getCurrentRole()
-  if (!['super_admin', 'admin'].includes(role ?? '')) redirect('/orders')
+  if (!canAccess('syncs', role)) redirect('/orders')
 
   const supabase = createServiceClient()
 

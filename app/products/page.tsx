@@ -4,10 +4,10 @@ import ProductsClient from './ProductsClient'
 export const dynamic = 'force-dynamic'
 
 export default async function ProductsPage() {
-  const { getCurrentRole } = await import('@/lib/getRole')
+  const { getCurrentRole, canAccess } = await import('@/lib/getRole')
   const { redirect } = await import('next/navigation')
   const userRole = await getCurrentRole()
-  if (userRole === 'operator') redirect('/orders')
+  if (!canAccess('products', userRole)) redirect('/orders')
 
   const supabase = createServiceClient()
 

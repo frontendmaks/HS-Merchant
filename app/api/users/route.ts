@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { canManageUsers, canManageUser, canAssignRole } from '@/lib/roles'
 
 async function getCallerProfile() {
   const cookieStore = await cookies()
@@ -27,7 +28,7 @@ async function getCallerProfile() {
 // GET /api/users — list all users (admin only)
 export async function GET() {
   const caller = await getCallerProfile()
-  if (!caller || !['super_admin', 'admin'].includes(caller.role)) {
+  if (!caller || !canManageUsers(caller.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -40,18 +41,21 @@ export async function GET() {
 // POST /api/users — invite new user (admin only)
 export async function POST(request: NextRequest) {
   const caller = await getCallerProfile()
-  if (!caller || !['super_admin', 'admin'].includes(caller.role)) {
+  if (!caller || !canManageUsers(caller.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const { email, full_name, role } = await request.json() as {
     email: string
     full_name: string
-    role: 'admin' | 'operator' | 'viewer'
+    role: string
   }
 
   if (!email || !role) {
     return NextResponse.json({ error: 'Email та роль обовʼязкові' }, { status: 400 })
+  }
+  if (!canAssignRole(caller.role, role)) {
+    return NextResponse.json({ error: 'Ви не можете призначати цю роль' }, { status: 403 })
   }
 
   const service = createServiceClient()
@@ -82,7 +86,7 @@ export async function POST(request: NextRequest) {
 // PATCH /api/users — update role or status (admin only)
 export async function PATCH(request: NextRequest) {
   const caller = await getCallerProfile()
-  if (!caller || !['super_admin', 'admin'].includes(caller.role)) {
+  if (!caller || !canManageUsers(caller.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -99,12 +103,19 @@ export async function PATCH(request: NextRequest) {
   if (id === caller.id && role) {
     return NextResponse.json({ error: 'Не можна змінити власну роль' }, { status: 400 })
   }
-  // Only super_admin can assign super_admin role
-  if (role === 'super_admin' && caller.role !== 'super_admin') {
-    return NextResponse.json({ error: 'Тільки Супер адміністратор може призначати цю роль' }, { status: 403 })
-  }
 
   const service = createServiceClient()
+
+  // The caller must outrank the target's CURRENT role...
+  const { data: target } = await service.from('profiles').select('role').eq('id', id).single()
+  if (!target || !canManageUser(caller.role, target.role)) {
+    return NextResponse.json({ error: 'Недостатньо прав для цього користувача' }, { status: 403 })
+  }
+  // ...and be allowed to hand out the NEW role
+  if (role && !canAssignRole(caller.role, role)) {
+    return NextResponse.json({ error: 'Ви не можете призначати цю роль' }, { status: 403 })
+  }
+
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (role) updates.role = role
   if (is_active !== undefined) updates.is_active = is_active
@@ -119,7 +130,7 @@ export async function PATCH(request: NextRequest) {
 // DELETE /api/users — remove user (admin only)
 export async function DELETE(request: NextRequest) {
   const caller = await getCallerProfile()
-  if (!caller || !['super_admin', 'admin'].includes(caller.role)) {
+  if (!caller || !canManageUsers(caller.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -128,6 +139,12 @@ export async function DELETE(request: NextRequest) {
   if (id === caller.id) return NextResponse.json({ error: 'Не можна видалити себе' }, { status: 400 })
 
   const service = createServiceClient()
+
+  const { data: target } = await service.from('profiles').select('role').eq('id', id).single()
+  if (!target || !canManageUser(caller.role, target.role)) {
+    return NextResponse.json({ error: 'Недостатньо прав для цього користувача' }, { status: 403 })
+  }
+
   const { error } = await service.auth.admin.deleteUser(id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { createServiceClient } from '@/lib/supabase/service'
+import { canManageUsers } from '@/lib/roles'
 import UsersManager from './UsersManager'
 
 export default async function UsersPage() {
@@ -27,7 +28,7 @@ export default async function UsersPage() {
   const service = createServiceClient()
   const { data: profile } = await service.from('profiles').select('*').eq('id', user.id).single()
 
-  if (!profile || !['super_admin', 'admin'].includes(profile.role)) {
+  if (!profile || !canManageUsers(profile.role)) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
