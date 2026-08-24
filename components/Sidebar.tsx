@@ -4,6 +4,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { useEffect, useState } from 'react'
 import { PAGE_ROLES, ROLE_LABELS } from '@/lib/roles'
+import { useTrackPresence } from '@/lib/presence'
 
 // Access per nav item comes from lib/roles.ts, shared with the page guards
 const nav = [
@@ -25,7 +26,11 @@ export default function Sidebar() {
   const path = usePathname()
   const router = useRouter()
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+
+  // Marks this user online on every page for as long as the tab is open
+  useTrackPresence(userId)
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -34,7 +39,8 @@ export default function Sidebar() {
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (!session) { setLoaded(true); return }
+      if (!session) { setUserId(null); setLoaded(true); return }
+      setUserId(session.user.id)
       const { data } = await supabase
         .from('profiles')
         .select('full_name,email,role')

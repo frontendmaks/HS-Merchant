@@ -40,3 +40,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 HS-Merchant
+
+# Local dev server config (machine-specific ports)
+.claude/launch.json

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { assignableRoles, canManageUser, ROLE_LABELS as ROLE_NAMES, type UserRole } from '@/lib/roles'
+import { useOnlineUsers } from '@/lib/presence'
 
 interface Profile {
   id: string
@@ -37,6 +38,7 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
 }) {
   const router = useRouter()
   const [users, setUsers] = useState(initial)
+  const onlineUsers = useOnlineUsers()
   // Roles this user may hand out, and users they outrank — see lib/roles.ts
   const grantable = assignableRoles(currentRole)
   const canManage = (targetRole: string) => canManageUser(currentRole, targetRole)
@@ -216,6 +218,7 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
               <th className="text-left px-4 py-3">Користувач</th>
               <th className="text-left px-4 py-3">Email</th>
               <th className="text-left px-4 py-3">Роль</th>
+              <th className="text-left px-4 py-3">В мережі</th>
               <th className="text-left px-4 py-3">Статус</th>
               <th className="text-left px-4 py-3">Доданий</th>
               <th className="px-4 py-3"></th>
@@ -261,6 +264,21 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
                         ))}
                       </select>
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const isOnline = onlineUsers.has(user.id)
+                      return (
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded ${
+                          isOnline ? 'bg-emerald-950/60 text-emerald-400' : 'bg-zinc-800 text-zinc-500'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            isOnline ? 'bg-emerald-400' : 'bg-zinc-600'
+                          }`} />
+                          {isOnline ? 'Online' : 'Offline'}
+                        </span>
+                      )
+                    })()}
                   </td>
                   <td className="px-4 py-3">
                     {user.invite_pending ? (
