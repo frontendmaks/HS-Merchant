@@ -17,10 +17,9 @@ export default function OrdersToolbar() {
     return () => { clearInterval(timer); window.removeEventListener('focus', onFocus) }
   }, [router])
 
-  const [syncingMaudau, setSyncingMaudau] = useState(false)
-  const [syncingRozetka, setSyncingRozetka] = useState(false)
-  const [maudauResult, setMaudauResult] = useState<string | null>(null)
-  const [rozetkaResult, setRozetkaResult] = useState<string | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<string | null>(null)
+  const [syncFailed, setSyncFailed] = useState(false)
 
   const platform = searchParams.get('platform') || ''
   const status = searchParams.get('status') || ''
@@ -34,41 +33,32 @@ export default function OrdersToolbar() {
     router.push(`${pathname}?${params.toString()}`)
   }, [searchParams, pathname, router])
 
-  async function syncMaudau() {
-    setSyncingMaudau(true)
-    setMaudauResult(null)
+  // Omitting `platform` syncs every marketplace; the route already handles
+  // each one independently, so a failure on one still returns the other's count.
+  async function syncAll() {
+    setSyncing(true)
+    setSyncResult(null)
+    setSyncFailed(false)
     try {
       const res = await fetch('/api/sync/orders-manual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform: 'maudau' }),
+        body: JSON.stringify({}),
       })
       const data = await res.json()
-      setMaudauResult(data.success ? `✓ ${data.maudau_synced} замовлень` : `Помилка: ${data.error}`)
+      const total = (data.maudau_synced ?? 0) + (data.rozetka_synced ?? 0)
+      if (data.success) {
+        setSyncResult(`✓ ${total} замовлень`)
+      } else {
+        setSyncFailed(true)
+        setSyncResult(data.error || 'Помилка синхронізації')
+      }
       router.refresh()
     } catch {
-      setMaudauResult('Помилка мережі')
+      setSyncFailed(true)
+      setSyncResult('Помилка мережі')
     } finally {
-      setSyncingMaudau(false)
-    }
-  }
-
-  async function syncRozetka() {
-    setSyncingRozetka(true)
-    setRozetkaResult(null)
-    try {
-      const res = await fetch('/api/sync/orders-manual', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform: 'rozetka' }),
-      })
-      const data = await res.json()
-      setRozetkaResult(data.success ? `✓ ${data.rozetka_synced} замовлень` : `Помилка: ${data.error}`)
-      router.refresh()
-    } catch {
-      setRozetkaResult('Помилка мережі')
-    } finally {
-      setSyncingRozetka(false)
+      setSyncing(false)
     }
   }
 
@@ -128,29 +118,21 @@ export default function OrdersToolbar() {
 
       <div className="flex-1" />
 
-      {/* Sync buttons */}
+      {/* Sync */}
       <div className="flex items-center gap-2">
-        {maudauResult && (
-          <span className="text-xs text-zinc-400">{maudauResult}</span>
+        {syncResult && (
+          <span className={`text-xs ${syncFailed ? 'text-red-400' : 'text-zinc-400'}`}>
+            {syncResult}
+          </span>
         )}
         <button
-          onClick={syncMaudau}
-          disabled={syncingMaudau}
-          className="flex items-center gap-1.5 px-3 py-2 bg-purple-700 hover:bg-purple-600 disabled:opacity-60 text-white text-sm rounded-lg font-medium transition-colors"
+          onClick={syncAll}
+          disabled={syncing}
+          title="Синхронізувати замовлення з усіх маркетплейсів"
+          className="flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white text-sm rounded-lg font-medium transition-colors"
         >
-          <span className={syncingMaudau ? 'animate-spin inline-block' : ''}>↺</span>
-          {syncingMaudau ? 'Синхронізація...' : 'MauDau'}
-        </button>
-        {rozetkaResult && (
-          <span className="text-xs text-zinc-400">{rozetkaResult}</span>
-        )}
-        <button
-          onClick={syncRozetka}
-          disabled={syncingRozetka}
-          className="flex items-center gap-1.5 px-3 py-2 bg-pink-700 hover:bg-pink-600 disabled:opacity-60 text-white text-sm rounded-lg font-medium transition-colors"
-        >
-          <span className={syncingRozetka ? 'animate-spin inline-block' : ''}>↺</span>
-          {syncingRozetka ? 'Синхронізація...' : 'Rozetka'}
+          <span className={syncing ? 'animate-spin inline-block' : ''}>↺</span>
+          {syncing ? 'Оновлення...' : 'Оновити'}
         </button>
       </div>
     </div>
