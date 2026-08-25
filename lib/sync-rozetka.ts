@@ -1,8 +1,8 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import { notifyNewOrders } from '@/lib/order-notifications'
+import { rozetkaToken, invalidateRozetkaToken, isTokenError } from '@/lib/rozetka-auth'
 
 const BASE = process.env.ROZETKA_BASE!
-const TOKEN = process.env.ROZETKA_TOKEN!
 
 const STATUS_MAP: Record<number, string> = {
   1: 'Нове',
@@ -159,20 +159,34 @@ async function fetchPages(dateParam: string): Promise<Map<string, ReturnType<typ
 
   while (page <= pageCount) {
     const url = `${BASE}/orders/search?page=${page}&pageSize=50&sort=-id&types=1&expand=purchases,delivery&${dateParam}`
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${TOKEN}` },
-    })
-    // Fail loudly. Swallowing this once let an expired token look like
-    // "0 orders synced, success" for weeks.
-    if (!res.ok) {
-      throw new Error(`Rozetka API ${res.status} on page ${page}: ${(await res.text()).slice(0, 200)}`)
+
+    // A token can expire mid-run, so one retry with a fresh one before giving up
+    const get = async () => {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${await rozetkaToken()}` },
+      })
+      // Fail loudly. Swallowing this once let an expired token look like
+      // "0 orders synced, success" for weeks.
+      if (!res.ok) {
+        throw new Error(`Rozetka API ${res.status} on page ${page}: ${(await res.text()).slice(0, 200)}`)
+      }
+      const body = await res.json()
+      if (!body.success) {
+        const e = body.errors
+        throw new Error(
+          `Rozetka API error${e?.code ? ` ${e.code}` : ''}: ${e?.description || e?.message || JSON.stringify(e).slice(0, 200)}`
+        )
+      }
+      return body
     }
-    const data = await res.json()
-    if (!data.success) {
-      const e = data.errors
-      throw new Error(
-        `Rozetka API error${e?.code ? ` ${e.code}` : ''}: ${e?.description || e?.message || JSON.stringify(e).slice(0, 200)}`
-      )
+
+    let data
+    try {
+      data = await get()
+    } catch (e) {
+      if (!isTokenError(e)) throw e
+      invalidateRozetkaToken()
+      data = await get()
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

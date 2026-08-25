@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt } from '@/lib/maudau'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
+import { rozetkaToken } from '@/lib/rozetka-auth'
 
 const ROZETKA_CANCEL_IDS = new Set([11, 12, 13, 15, 16, 17, 18, 19, 24, 25, 28, 29, 30, 31, 40, 42, 44, 45, 50])
 // IDs considered "in-progress" or "completed" — not valid cancels
@@ -56,7 +57,7 @@ export async function PATCH(
       const numericId = external_id.replace(/^RZ-/, '')
 
       const detailRes = await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
-        headers: { Authorization: `Bearer ${process.env.ROZETKA_TOKEN}` },
+        headers: { Authorization: `Bearer ${await rozetkaToken()}` },
       })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const detail: any = await detailRes.json()
@@ -74,7 +75,7 @@ export async function PATCH(
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.ROZETKA_TOKEN}`,
+          Authorization: `Bearer ${await rozetkaToken()}`,
         },
         body: JSON.stringify({ status: cancelOption.child_id }),
       })

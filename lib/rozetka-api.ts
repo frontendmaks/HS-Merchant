@@ -1,7 +1,8 @@
 /**
  * Rozetka Seller API — product upload helpers.
  *
- * Auth: uses ROZETKA_TOKEN env var (static Bearer token from the seller cabinet).
+ * Auth: lib/rozetka-auth.ts logs in and caches the 24-hour token. Rozetka
+ * issues no permanent keys, so a token in an env var stops working within a day.
  * Base URL: ROZETKA_BASE env var.
  *
  * Key endpoints used:
@@ -12,28 +13,39 @@
  *   GET  /items-create/values             — lookup allowed values for an attribute
  */
 
+import { rozetkaToken, invalidateRozetkaToken, isTokenError } from '@/lib/rozetka-auth'
+
 const BASE = process.env.ROZETKA_BASE!
-const TOKEN = process.env.ROZETKA_TOKEN!
 
-function headers() {
-  return {
-    Authorization: `Bearer ${TOKEN}`,
-    'Content-Type': 'application/json',
-    'Content-Language': 'uk',
-  }
-}
-
-async function rz<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function once<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: headers(),
+    headers: {
+      Authorization: `Bearer ${await rozetkaToken()}`,
+      'Content-Type': 'application/json',
+      'Content-Language': 'uk',
+    },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   const data = await res.json()
   if (!data.success) {
-    throw new Error(`Rozetka API error: ${data.errors?.message ?? JSON.stringify(data.errors)}`)
+    const e = data.errors
+    throw new Error(
+      `Rozetka API error${e?.code ? ` ${e.code}` : ''}: ${e?.description ?? e?.message ?? JSON.stringify(e)}`,
+    )
   }
   return data.content as T
+}
+
+/** One retry with a fresh token — a 24-hour token can lapse mid-upload. */
+async function rz<T>(method: string, path: string, body?: unknown): Promise<T> {
+  try {
+    return await once<T>(method, path, body)
+  } catch (e) {
+    if (!isTokenError(e)) throw e
+    invalidateRozetkaToken()
+    return once<T>(method, path, body)
+  }
 }
 
 export interface RozetkaCreateItemPayload {

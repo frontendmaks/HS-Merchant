@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt, patchMaudauStatus, patchMaudauTtn } from '@/lib/maudau'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
+import { rozetkaToken } from '@/lib/rozetka-auth'
 
 interface RozetkaStatusEntry {
   child_id: number
@@ -12,7 +13,7 @@ async function fetchRozetkaOrder(numericId: string): Promise<{
   statusAvailable: RozetkaStatusEntry[]
 }> {
   const res = await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
-    headers: { Authorization: `Bearer ${process.env.ROZETKA_TOKEN}` },
+    headers: { Authorization: `Bearer ${await rozetkaToken()}` },
   })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const detail: any = await res.json()
@@ -32,7 +33,7 @@ async function advanceRozetka(
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.ROZETKA_TOKEN}`,
+      Authorization: `Bearer ${await rozetkaToken()}`,
     },
     body: JSON.stringify({ status: entry.child_id }),
   })
@@ -97,7 +98,7 @@ export async function PATCH(
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${process.env.ROZETKA_TOKEN}`,
+            Authorization: `Bearer ${await rozetkaToken()}`,
           },
           body: JSON.stringify({ status: transferEntry.child_id, ttn }),
         })
@@ -107,7 +108,7 @@ export async function PATCH(
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${process.env.ROZETKA_TOKEN}`,
+            Authorization: `Bearer ${await rozetkaToken()}`,
           },
           body: JSON.stringify({ ttn }),
         })

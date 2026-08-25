@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt, patchMaudauStatus } from '@/lib/maudau'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
+import { rozetkaToken } from '@/lib/rozetka-auth'
 
 const MAUDAU_STATUS_MAP: Record<string, string> = {
   'Нове': 'new_order',
@@ -65,7 +66,7 @@ export async function PATCH(
       const numericId = external_id.replace(/^RZ-/, '')
 
       const detailRes = await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
-        headers: { Authorization: `Bearer ${process.env.ROZETKA_TOKEN}` },
+        headers: { Authorization: `Bearer ${await rozetkaToken()}` },
       })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const detail: any = await detailRes.json()
@@ -88,7 +89,7 @@ export async function PATCH(
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.ROZETKA_TOKEN}`,
+          Authorization: `Bearer ${await rozetkaToken()}`,
         },
         body: JSON.stringify({ status: match.child_id }),
       })
