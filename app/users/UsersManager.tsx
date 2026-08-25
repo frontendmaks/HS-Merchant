@@ -12,6 +12,7 @@ interface Profile {
   role: 'super_admin' | 'admin' | 'manager' | 'operator' | 'viewer'
   is_active: boolean
   created_at: string
+  last_seen_at?: string | null
   invite_pending?: boolean
 }
 
@@ -21,6 +22,20 @@ const ROLE_LABELS: Record<string, { label: string; color: string }> = {
   manager:     { label: 'Керівник',      color: 'bg-purple-900/60 text-purple-300' },
   operator:    { label: 'Оператор',      color: 'bg-blue-900/60 text-blue-300' },
   viewer:      { label: 'Глядач',        color: 'bg-zinc-700 text-zinc-300' },
+}
+
+/** "5 хв тому" / "вчора, 14:02" — enough to judge whether someone is around. */
+function lastSeen(iso: string | null | undefined): string {
+  if (!iso) return 'ще не заходив'
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  if (mins < 1) return 'щойно'
+  if (mins < 60) return `${mins} хв тому`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours} год тому`
+  const days = Math.floor(hours / 24)
+  if (days === 1) return 'вчора'
+  if (days < 7) return `${days} дн тому`
+  return new Date(iso).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: '2-digit' })
 }
 
 const ROLE_HINTS: Record<string, string> = {

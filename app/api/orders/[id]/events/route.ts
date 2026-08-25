@@ -1,30 +1,16 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
-
-async function isSignedIn(): Promise<boolean> {
-  try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-    )
-    const { data: { user } } = await supabase.auth.getUser()
-    return !!user
-  } catch {
-    return false
-  }
-}
+import { getCurrentRole, canAccess } from '@/lib/getRole'
 
 // GET /api/orders/[id]/events — the order's journal, oldest first
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  if (!await isSignedIn()) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // The journal names who did what, so it is management-only
+  const role = await getCurrentRole()
+  if (!canAccess('orderJournal', role)) {
+    return NextResponse.json({ error: 'Немає доступу до журналу' }, { status: 403 })
   }
 
   const { id } = await params
@@ -32,7 +18,7 @@ export async function GET(
 
   const { data, error } = await service
     .from('order_events')
-    .select('id, type, old_value, new_value, created_at, actor_id, actor_name')
+    .select('id, type, old_value, new_value, details, created_at, actor_id, actor_name')
     .eq('order_id', id)
     .order('created_at', { ascending: true })
 

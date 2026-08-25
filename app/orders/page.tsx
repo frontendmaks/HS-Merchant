@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 import { Suspense } from 'react'
 import Link from 'next/link'
 import { createServiceClient } from '@/lib/supabase/service'
-import { getCurrentRole } from '@/lib/getRole'
+import { getCurrentRole, canAccess } from '@/lib/getRole'
 import { IN_PROGRESS_STATUSES, SHIPPING_STATUSES, isInProgress, isShipping } from '@/lib/order-statuses'
 import OrdersToolbar from './OrdersToolbar'
 import OrderRow from './OrderRow'
@@ -74,6 +74,7 @@ export default async function OrdersPage({
 
   const role = await getCurrentRole()
   const readOnly = role === 'viewer'
+  const canSeeJournal = canAccess('orderJournal', role)
 
   const supabase = createServiceClient()
 
@@ -233,6 +234,7 @@ export default async function OrdersPage({
                     ttn={order.ttn}
                     cancel_reason={order.cancel_reason}
                     readOnly={readOnly}
+                    canSeeJournal={canSeeJournal}
                   />
                 ))
               )}

@@ -441,3 +441,105 @@ export function byRegion(
 }
 
 export { isClosed }
+
+
+// --- Operator efficiency ----------------------------------------------------
+
+export interface OperatorEventRow {
+  order_id: string
+  actor_id: string | null
+  actor_name: string | null
+  type: string
+  created_at: string
+}
+
+export interface OperatorStat {
+  id: string
+  name: string
+  /** Orders this person touched at least once */
+  orders: number
+  /** Individual actions logged */
+  actions: number
+  /** Value of the orders they handled */
+  revenue: number
+  delivered: number
+  canceled: number
+  /** Median minutes from an order arriving to this person's first action */
+  reactionMins: number | null
+  /** Median minutes from their first to their last action on an order */
+  handlingMins: number | null
+}
+
+const median = (xs: number[]): number | null => {
+  if (!xs.length) return null
+  const s = [...xs].sort((a, b) => a - b)
+  const mid = Math.floor(s.length / 2)
+  return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2)
+}
+
+/**
+ * Efficiency per operator, derived from the order journal.
+ *
+ * Only events with an actor count — a status the marketplace moved on its own
+ * has no actor and must not be credited to anyone.
+ */
+export function operatorStats(
+  events: OperatorEventRow[],
+  orders: { id: string; total: number | null; status: string | null }[],
+): OperatorStat[] {
+  const orderById = new Map(orders.map(o => [o.id, o]))
+  const byActor = new Map<string, { name: string; rows: OperatorEventRow[] }>()
+
+  for (const e of events) {
+    if (!e.actor_id) continue
+    const entry = byActor.get(e.actor_id) ?? { name: e.actor_name?.trim() || 'Користувач', rows: [] }
+    if (e.actor_name?.trim()) entry.name = e.actor_name.trim()
+    entry.rows.push(e)
+    byActor.set(e.actor_id, entry)
+  }
+
+  return [...byActor.entries()].map(([id, { name, rows }]) => {
+    const perOrder = new Map<string, OperatorEventRow[]>()
+    for (const r of rows) {
+      perOrder.set(r.order_id, [...(perOrder.get(r.order_id) ?? []), r])
+    }
+
+    const reaction: number[] = []
+    const handling: number[] = []
+    let revenue = 0, delivered = 0, canceled = 0
+
+    for (const [orderId, evs] of perOrder) {
+      const order = orderById.get(orderId)
+      if (order) {
+        revenue += num(order.total)
+        if (order.status === 'Доставлено') delivered++
+        if (order.status === 'Скасовано') canceled++
+      }
+
+      const times = evs.map(e => new Date(e.created_at).getTime()).sort((a, b) => a - b)
+      // The order's own arrival is the "created" event, which has no actor
+      const arrival = events
+        .filter(e => e.order_id === orderId && e.type === 'created')
+        .map(e => new Date(e.created_at).getTime())[0]
+
+      if (arrival != null && times[0] >= arrival) {
+        reaction.push(Math.round((times[0] - arrival) / 60000))
+      }
+      if (times.length > 1) {
+        handling.push(Math.round((times[times.length - 1] - times[0]) / 60000))
+      }
+    }
+
+    return {
+      id,
+      name,
+      orders: perOrder.size,
+      actions: rows.length,
+      revenue: Math.round(revenue * 100) / 100,
+      delivered,
+      canceled,
+      reactionMins: median(reaction),
+      handlingMins: median(handling),
+    }
+  }).sort((a, b) => b.orders - a.orders)
+}

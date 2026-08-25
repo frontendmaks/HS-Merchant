@@ -59,6 +59,8 @@ export const PAGE_ROLES = {
   orders:    ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
   requests:  ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
   users:     ['super_admin', 'admin', 'manager'],
+  /** The change journal exposes who did what — management only */
+  orderJournal: ['super_admin', 'admin', 'manager'],
 } as const
 
 export const canAccess = (

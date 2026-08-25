@@ -2,14 +2,99 @@
 
 import { useEffect, useState } from 'react'
 
+interface LineChange {
+  title: string
+  unit: string
+  kind: 'added' | 'removed' | 'restored' | 'qty'
+  from: number | null
+  to: number
+  sum_from: number
+  sum_to: number
+}
+
+interface EventDetails {
+  changes?: LineChange[]
+  totals?: { ordered: number; corrected: number; diff: number }
+  push?: { ok: boolean; total?: number; commission?: number; error?: string } | null
+}
+
 export interface OrderEvent {
   id: string
   type: string
   old_value: string | null
   new_value: string | null
+  details: EventDetails | null
   created_at: string
   actor_id: string | null
   actor_name: string | null
+}
+
+const money = (n: number) =>
+  `₴${Number(n).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+const amount = (n: number | null, unit: string) =>
+  n == null ? '—' : `${Number(n).toLocaleString('uk-UA', { maximumFractionDigits: 3 })} ${unit}`
+
+const KIND_LABEL: Record<LineChange['kind'], string> = {
+  added: 'додано', removed: 'прибрано', restored: 'повернуто', qty: '',
+}
+
+/** The per-line breakdown behind a correction, folded away until asked for. */
+function ChangeDetails({ details }: { details: EventDetails }) {
+  const [open, setOpen] = useState(false)
+  const changes = details.changes ?? []
+  if (!changes.length && !details.push) return null
+
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
+      >
+        {open ? '▾' : '▸'} {changes.length ? `${changes.length} позицій` : 'деталі'}
+      </button>
+
+      {open && (
+        <div className="mt-1.5 space-y-1.5 border-l border-zinc-800 pl-2.5">
+          {changes.map((c, i) => (
+            <div key={i} className="text-xs">
+              <div className="text-zinc-300">
+                {c.title}
+                {KIND_LABEL[c.kind] && (
+                  <span className="text-zinc-500"> · {KIND_LABEL[c.kind]}</span>
+                )}
+              </div>
+              <div className="text-zinc-500">
+                {amount(c.from, c.unit)} → <span className="text-zinc-300">{amount(c.to, c.unit)}</span>
+                {'  ·  '}
+                {money(c.sum_from)} → <span className="text-zinc-300">{money(c.sum_to)}</span>
+              </div>
+            </div>
+          ))}
+
+          {details.totals && (
+            <div className="text-xs text-zinc-400 pt-1 border-t border-zinc-800/60">
+              Разом: {money(details.totals.ordered)} → <span className="text-white">{money(details.totals.corrected)}</span>
+              {Math.abs(details.totals.diff) >= 0.01 && (
+                <span className={details.totals.diff > 0 ? ' text-emerald-400' : ' text-amber-400'}>
+                  {' '}({details.totals.diff > 0 ? '+' : ''}{money(details.totals.diff)})
+                </span>
+              )}
+            </div>
+          )}
+
+          {details.push && (
+            <div className={`text-xs ${details.push.ok ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {details.push.ok
+                ? `Маркетплейс: сума ${money(details.push.total ?? 0)}, комісія ${money(details.push.commission ?? 0)}`
+                : `На маркетплейс не надіслано: ${details.push.error}`}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 const EVENT_META: Record<string, { label: string; icon: string; tone: string }> = {
@@ -96,6 +181,8 @@ export default function OrderJournal({ orderId }: { orderId: string }) {
                   {e.new_value && <span className="text-zinc-300">{e.new_value}</span>}
                 </div>
               )}
+
+              {e.details && <ChangeDetails details={e.details} />}
 
               <div className="text-zinc-600 text-xs mt-0.5">
                 {fmtTime(e.created_at)}

@@ -52,11 +52,23 @@ function close() {
   online = new Set()
 }
 
+const PING_MS = 3 * 60 * 1000
+
 /** Marks `userId` online while mounted, and returns everyone currently online.
  *  Mount it in the Sidebar so presence follows the user across every page;
  *  other components may call it too — they all share the one channel. */
 export function usePresence(userId: string | null | undefined): Set<string> {
   const [ids, setIds] = useState<Set<string>>(() => new Set(online))
+
+  // Records "last seen" server-side; the channel above only knows who is
+  // connected right now.
+  useEffect(() => {
+    if (!userId) return
+    const ping = () => { void fetch('/api/presence/ping', { method: 'POST' }).catch(() => {}) }
+    ping()
+    const timer = setInterval(ping, PING_MS)
+    return () => clearInterval(timer)
+  }, [userId])
 
   useEffect(() => {
     if (!userId) return

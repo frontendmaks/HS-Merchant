@@ -3,7 +3,8 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
 import {
   learnCityOblasts, totals, ordersPerDay, popularProducts, popularCategories,
-  customers, byRegion, normalizeTitle, type OrderRow, type Gazetteer,
+  customers, byRegion, normalizeTitle, operatorStats,
+  type OrderRow, type Gazetteer, type OperatorEventRow,
 } from '@/lib/analytics'
 import gazetteerJson from '@/lib/ua-settlements.json'
 import AnalyticsClient from './AnalyticsClient'
@@ -61,6 +62,20 @@ export default async function AnalyticsPage({
     }
   }
 
+  // Operator efficiency reads the order journal for the same window
+  const { data: orderIdRows } = await supabase
+    .from('orders').select('id, total, status')
+    .gte('order_date', from).lte('order_date', to).limit(20000)
+
+  const orderIds = (orderIdRows ?? []).map(o => o.id)
+  const { data: eventRows } = orderIds.length
+    ? await supabase
+        .from('order_events')
+        .select('order_id, actor_id, actor_name, type, created_at')
+        .in('order_id', orderIds)
+        .limit(50000)
+    : { data: [] }
+
   const learned = learnCityOblasts(orders)
   const allCustomers = customers(orders, learned, gazetteer)
 
@@ -88,6 +103,10 @@ export default async function AnalyticsPage({
         })(),
       }}
       regions={byRegion(orders, learned, gazetteer)}
+      operators={operatorStats(
+        (eventRows ?? []) as OperatorEventRow[],
+        (orderIdRows ?? []) as { id: string; total: number | null; status: string | null }[],
+      )}
     />
   )
 }

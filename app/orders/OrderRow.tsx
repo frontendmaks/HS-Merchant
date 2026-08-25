@@ -84,6 +84,7 @@ interface OrderRowProps {
   ttn: string | null
   cancel_reason: string | null
   readOnly?: boolean
+  canSeeJournal?: boolean
 }
 
 export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) {
@@ -385,12 +386,14 @@ function OrderDetailModal(
 
               </div>
 
-              <div>
-                <div className="text-zinc-400 text-xs mb-3">Журнал змін</div>
-                <div className="max-h-[420px] overflow-y-auto pr-1">
-                  <OrderJournal orderId={props.id} />
+              {props.canSeeJournal && (
+                <div>
+                  <div className="text-zinc-400 text-xs mb-3">Журнал змін</div>
+                  <div className="max-h-[420px] overflow-y-auto pr-1">
+                    <OrderJournal orderId={props.id} />
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="px-5 pb-5">

@@ -7,6 +7,7 @@ import type {
   Totals, DayBucket, ProductStat, CategoryStat, CustomerStat, RegionStat,
 } from '@/lib/analytics'
 
+import type { OperatorStat } from '@/lib/analytics'
 import { money, moneyShort, pct, num, dayMonth, orderWord } from '@/lib/format'
 
 function Card({ label, value, sub, tone = 'white' }: {
@@ -152,6 +153,15 @@ function RankedList({ rows, valueOf, labelOf, metaOf, max }: {
 }
 
 // Local date parts — toISOString() would shift midnight back a day in UTC+N
+/** 95 -> "1 год 35 хв" */
+function duration(mins: number): string {
+  if (mins < 60) return `${mins} хв`
+  const h = Math.floor(mins / 60), m = mins % 60
+  if (h < 24) return m ? `${h} год ${m} хв` : `${h} год`
+  const d = Math.floor(h / 24)
+  return `${d} дн ${h % 24} год`
+}
+
 const iso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const monthLabel = (from: string) => {
@@ -316,7 +326,7 @@ function CustomersTable({ rows }: { rows: CustomerStat[] }) {
 }
 
 export default function AnalyticsClient({
-  from, to, totals: t, perDay, products, categories, customers, customerSummary, regions,
+  from, to, totals: t, perDay, products, categories, customers, customerSummary, regions, operators,
 }: {
   from: string
   to: string
@@ -333,6 +343,7 @@ export default function AnalyticsClient({
     avgCadence: number | null
   }
   regions: RegionStat[]
+  operators: OperatorStat[]
 }) {
   const [chartMetric, setChartMetric] = useState<ChartMetric>('count')
   const router = useRouter()
@@ -454,14 +465,62 @@ export default function AnalyticsClient({
         title="Ефективність операторів"
         subtitle="Скільки замовлень опрацьовує кожен оператор і як швидко"
       >
-        <div className="px-5 py-8 text-center">
-          <div className="text-zinc-400 text-sm">Дані ще не збираються</div>
-          <div className="text-zinc-600 text-xs mt-1.5 max-w-lg mx-auto">
-            У замовленнях не зберігається, хто саме змінив статус, поставив ТТН чи
-            скасував — тому історії по операторах поки немає. Щойно додамо запис цих
-            дій, блок наповниться автоматично.
+        {operators.length === 0 ? (
+          <div className="px-5 py-8 text-center">
+            <div className="text-zinc-400 text-sm">Ще немає дій за цей період</div>
+            <div className="text-zinc-600 text-xs mt-1.5 max-w-lg mx-auto">
+              Журнал наповнюється з моменту, коли оператор змінює статус, ставить ТТН,
+              скасовує чи коригує замовлення. Зміни, які зробив сам маркетплейс, нікому
+              не зараховуються.
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
+                  <th className="text-left px-5 py-2.5">Оператор</th>
+                  <th className="text-right px-5 py-2.5 whitespace-nowrap">Замовлень</th>
+                  <th className="text-right px-5 py-2.5 whitespace-nowrap">Дій</th>
+                  <th className="text-right px-5 py-2.5 whitespace-nowrap">Сума</th>
+                  <th className="text-right px-5 py-2.5 whitespace-nowrap">Доставлено</th>
+                  <th className="text-right px-5 py-2.5 whitespace-nowrap">Скасовано</th>
+                  <th className="text-right px-5 py-2.5 whitespace-nowrap">Реакція</th>
+                  <th className="text-right px-5 py-2.5 whitespace-nowrap">Опрацювання</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/60">
+                {operators.map(o => (
+                  <tr key={o.id} className="hover:bg-zinc-800/30 transition-colors">
+                    <td className="px-5 py-2.5 text-white text-xs">{o.name}</td>
+                    <td className="px-5 py-2.5 text-right text-zinc-300 text-xs">{o.orders}</td>
+                    <td className="px-5 py-2.5 text-right text-zinc-500 text-xs">{o.actions}</td>
+                    <td className="px-5 py-2.5 text-right text-white text-xs whitespace-nowrap">{moneyShort(o.revenue)}</td>
+                    <td className="px-5 py-2.5 text-right text-xs whitespace-nowrap">
+                      <span className="text-emerald-400">{o.delivered}</span>
+                      <span className="text-zinc-600"> · {pct(o.delivered, o.orders)}</span>
+                    </td>
+                    <td className="px-5 py-2.5 text-right text-xs whitespace-nowrap">
+                      <span className="text-red-400">{o.canceled}</span>
+                      <span className="text-zinc-600"> · {pct(o.canceled, o.orders)}</span>
+                    </td>
+                    <td className="px-5 py-2.5 text-right text-zinc-300 text-xs whitespace-nowrap">
+                      {o.reactionMins != null ? duration(o.reactionMins) : '—'}
+                    </td>
+                    <td className="px-5 py-2.5 text-right text-zinc-300 text-xs whitespace-nowrap">
+                      {o.handlingMins != null ? duration(o.handlingMins) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="px-5 py-2.5 text-zinc-600 text-xs border-t border-zinc-800">
+              Реакція — від надходження замовлення до першої дії оператора.
+              Опрацювання — від першої до останньої його дії. Обидві цифри медіанні,
+              щоб один довгий випадок не спотворював картину.
+            </div>
+          </div>
+        )}
       </Panel>
     </div>
   )

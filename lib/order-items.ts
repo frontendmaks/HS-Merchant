@@ -86,6 +86,8 @@ export interface MarketplaceLine {
 }
 
 export interface OrderLine {
+  /** Present on rows read back from the database, absent on freshly built ones */
+  id?: string
   position: number
   source: 'marketplace' | 'manual'
   marketplace_item_id: string | null

@@ -109,6 +109,13 @@ export async function PATCH(
 
   const service = createServiceClient()
 
+  // Snapshot first — the journal needs before/after per line, not just a total
+  const { data: prior } = await service
+    .from('order_items').select('*').eq('order_id', id).order('position')
+  const beforeById = new Map(
+    ((prior ?? []) as unknown as OrderLine[]).map(l => [l.id!, l])
+  )
+
   // Existing lines: only the two fields an operator may touch
   for (const patch of body.lines ?? []) {
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
@@ -167,10 +174,36 @@ export async function PATCH(
   const lines = (after ?? []) as unknown as OrderLine[]
   const totals = orderTotals(lines)
 
-  await logOrderEvent(service, id, 'items',
-    { old: `₴${totals.ordered}`, new: `₴${totals.corrected}` }, actor)
-
   const push = await pushToMarketplace(service, id, lines, actor)
+
+  // Per-line detail, so a correction can be audited long after the fact
+  const changes = lines.flatMap(l => {
+    const was = beforeById.get(l.id!)
+    const wasQty = was ? effectiveQty(was) : null
+    const nowQty = effectiveQty(l)
+    const added = !was
+    const removedNow = l.removed && !(was?.removed ?? false)
+    const restored = !l.removed && (was?.removed ?? false)
+    if (!added && !removedNow && !restored && wasQty === nowQty) return []
+    return [{
+      title: l.title,
+      unit: l.unit,
+      kind: added ? 'added' : removedNow ? 'removed' : restored ? 'restored' : 'qty',
+      from: wasQty,
+      to: l.removed ? 0 : nowQty,
+      sum_from: was ? correctedTotal(was) : 0,
+      sum_to: correctedTotal(l),
+    }]
+  })
+
+  await logOrderEvent(service, id, 'items',
+    {
+      old: `₴${totals.ordered}`,
+      new: `₴${totals.corrected}`,
+      details: { changes, totals, push: push ?? null },
+    },
+    actor,
+  )
 
   return NextResponse.json({
     lines: lines.map(l => ({ ...l, corrected_total: correctedTotal(l) })),

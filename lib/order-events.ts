@@ -53,7 +53,7 @@ export async function logOrderEvent(
   service: Service,
   orderId: string,
   type: OrderEventType,
-  values: { old?: string | null; new?: string | null },
+  values: { old?: string | null; new?: string | null; details?: unknown },
   actor: { id: string; name: string } | null,
 ): Promise<void> {
   try {
@@ -64,6 +64,7 @@ export async function logOrderEvent(
       type,
       old_value: values.old ?? null,
       new_value: values.new ?? null,
+      details: values.details ?? null,
     })
   } catch (e) {
     console.error('logOrderEvent failed:', e)
