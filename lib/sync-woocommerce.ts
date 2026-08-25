@@ -31,33 +31,46 @@ async function fetchWCPage(page: number) {
   return { data, total }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchWarehouseVariation(productId: number): Promise<{ price: number | null; price_old: number | null; stock: number | null } | null> {
+type WarehouseVariation = { price: number | null; price_old: number | null; stock: number | null }
+
+/**
+ * A failed request and a genuinely absent warehouse variation must stay
+ * distinguishable: `null` means "this product has no stock at our warehouse"
+ * (→ stock 0), while `{ ok: false }` means we simply could not find out. Folding
+ * the second case into the first would let one WooCommerce hiccup zero out the
+ * stock of every product and drop it from the marketplace.
+ */
+async function fetchWarehouseVariation(
+  productId: number,
+): Promise<{ ok: true; value: WarehouseVariation | null } | { ok: false }> {
   try {
-  const res = await wcFetch(`/products/${productId}/variations?per_page=100`)
-  if (!res.ok) return null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const variations: any[] = await res.json()
-
-  const match = variations.find(v =>
+    const res = await wcFetch(`/products/${productId}/variations?per_page=100`)
+    if (!res.ok) return { ok: false }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    v.attributes?.some((a: any) =>
-      (a.name?.includes('Storage') || a.name?.includes('Склад')) &&
-      a.option === WAREHOUSE
+    const variations: any[] = await res.json()
+
+    const match = variations.find(v =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      v.attributes?.some((a: any) =>
+        (a.name?.includes('Storage') || a.name?.includes('Склад')) &&
+        a.option === WAREHOUSE
+      )
     )
-  )
-  if (!match) return null
+    if (!match) return { ok: true, value: null }
 
-  const salePrice = match.sale_price ? parseFloat(match.sale_price) : null
-  const regularPrice = parseFloat(match.regular_price || match.price || '0') || null
+    const salePrice = match.sale_price ? parseFloat(match.sale_price) : null
+    const regularPrice = parseFloat(match.regular_price || match.price || '0') || null
 
-  return {
-    price: salePrice ?? regularPrice,
-    price_old: salePrice && regularPrice && salePrice < regularPrice ? regularPrice : null,
-    stock: match.manage_stock ? (match.stock_quantity ?? 0) : null,
-  }
+    return {
+      ok: true,
+      value: {
+        price: salePrice ?? regularPrice,
+        price_old: salePrice && regularPrice && salePrice < regularPrice ? regularPrice : null,
+        stock: match.manage_stock ? (match.stock_quantity ?? 0) : null,
+      },
+    }
   } catch {
-    return null
+    return { ok: false }
   }
 }
 
@@ -224,19 +237,29 @@ export async function syncWoocommerce(trigger: 'cron' | 'manual' = 'manual', tri
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const variableProducts = allProducts.filter((p: any) => p.type === 'variable')
-    const variationMap = new Map<number, { price: number | null; stock: number | null } | null>()
+    const variationMap = new Map<number, WarehouseVariation | null>()
+    // Products whose variation lookup failed — their price/stock is unknown this
+    // run, so we leave the existing row untouched instead of overwriting it.
+    const unresolvedIds = new Set<number>()
 
     for (let i = 0; i < variableProducts.length; i += 20) {
       const batch = variableProducts.slice(i, i + 20)
       const results = await Promise.all(batch.map((p: { id: number }) => fetchWarehouseVariation(p.id)))
-      batch.forEach((p: { id: number }, idx: number) => variationMap.set(p.id, results[idx]))
+      batch.forEach((p: { id: number }, idx: number) => {
+        const r = results[idx]
+        if (r.ok) variationMap.set(p.id, r.value)
+        else unresolvedIds.add(p.id)
+      })
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mapped = allProducts.map((p: any) => {
-      const variation = variationMap.has(p.id) ? variationMap.get(p.id) : undefined
-      return mapProduct(p, variation, categoryMap)
-    })
+    const mapped = allProducts
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((p: any) => !unresolvedIds.has(p.id))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((p: any) => {
+        const variation = variationMap.has(p.id) ? variationMap.get(p.id) : undefined
+        return mapProduct(p, variation, categoryMap)
+      })
 
     const { error } = await supabase
       .from('products')
@@ -244,23 +267,40 @@ export async function syncWoocommerce(trigger: 'cron' | 'manual' = 'manual', tri
 
     if (error) throw error
 
-    const activeExternalIds = mapped.map(p => p.external_id)
-    const { data: deactivated } = await supabase
-      .from('products')
-      .update({ status: 'inactive' })
-      .eq('status', 'active')
-      .not('external_id', 'in', `(${activeExternalIds.join(',')})`)
-      .select('id')
+    // Skipped products are still live in WooCommerce, so they must count as
+    // active here or the deactivation sweep below would retire them.
+    const activeExternalIds = [
+      ...mapped.map(p => p.external_id),
+      ...[...unresolvedIds].map(String),
+    ]
+
+    // Only sweep when the product list came back whole. A partial fetch (one
+    // failed page) would otherwise read as "these products are gone" and
+    // deactivate every product it never saw.
+    const listIsComplete = total > 0 && allProducts.length >= total
+    let deactivatedCount = 0
+    if (listIsComplete) {
+      const { data: deactivated } = await supabase
+        .from('products')
+        .update({ status: 'inactive' })
+        .eq('status', 'active')
+        .not('external_id', 'in', `(${activeExternalIds.join(',')})`)
+        .select('id')
+      deactivatedCount = deactivated?.length ?? 0
+    } else {
+      console.warn(
+        `sync: fetched ${allProducts.length}/${total} products — skipping deactivation sweep`,
+      )
+    }
 
     const withVariation = [...variationMap.values()].filter(Boolean).length
-    const deactivatedCount = deactivated?.length ?? 0
 
     await supabase.from('sync_logs').insert({
       synced: mapped.length,
       deactivated: deactivatedCount,
       total_wc: total,
       with_warehouse_stock: withVariation,
-      without_variation: variableProducts.length - withVariation,
+      without_variation: variableProducts.length - withVariation - unresolvedIds.size,
       duration_ms: Date.now() - startedAt,
       status: 'success',
       trigger,
@@ -272,7 +312,7 @@ export async function syncWoocommerce(trigger: 'cron' | 'manual' = 'manual', tri
       deactivated: deactivatedCount,
       total,
       with_warehouse_stock: withVariation,
-      without_variation: variableProducts.length - withVariation,
+      without_variation: variableProducts.length - withVariation - unresolvedIds.size,
     }
   } catch (err) {
     try {
