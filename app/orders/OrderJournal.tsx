@@ -19,6 +19,7 @@ const EVENT_META: Record<string, { label: string; icon: string; tone: string }> 
   cancel:        { label: 'скасував замовлення',        icon: '✕', tone: 'text-red-400' },
   cancel_reason: { label: 'вказав причину скасування',  icon: '✎', tone: 'text-amber-400' },
   sync_status:   { label: 'статус змінив маркетплейс',  icon: '⇄', tone: 'text-purple-400' },
+  items:         { label: 'скоригував склад замовлення', icon: '≡', tone: 'text-cyan-400' },
 }
 
 const fmtTime = (iso: string) =>
