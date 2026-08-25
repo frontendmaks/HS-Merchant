@@ -1,0 +1,175 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+
+interface Shipment {
+  order: {
+    external_id: string
+    recipient: string | null
+    phone: string | null
+    branch: string | null
+    address: string | null
+    cost: number
+    ttn: string | null
+  }
+  weight: { computed: number; assumed: string[]; saved: number | null }
+  seats: number
+  recipientRefs: { cityRef: string | null; warehouseRef: string | null }
+  ready: { apiKey: boolean; sender: boolean; cityRef: boolean; warehouseRef: boolean }
+}
+
+const money = (n: number) =>
+  `₴${Number(n).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+const MISSING_LABEL: Record<keyof Shipment['ready'], string> = {
+  apiKey: 'ключ API Нової Пошти (змінна NOVA_POSHTA_API_KEY)',
+  sender: 'дані відправника (таблиця np_settings)',
+  cityRef: 'ідентифікатор міста одержувача',
+  warehouseRef: 'ідентифікатор відділення — замовлення на курʼєрську адресу',
+}
+
+export default function ShipmentDialog({ orderId, onClose }: {
+  orderId: string
+  onClose: () => void
+}) {
+  const [data, setData] = useState<Shipment | null>(null)
+  const [error, setError] = useState('')
+  const [weight, setWeight] = useState('')
+  const [seats, setSeats] = useState('1')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    fetch(`/api/orders/${orderId}/shipment`)
+      .then(r => r.json())
+      .then((d: Shipment & { error?: string }) => {
+        if (d.error) { setError(d.error); return }
+        setData(d)
+        setWeight(String(d.weight.saved ?? d.weight.computed))
+        setSeats(String(d.seats ?? 1))
+      })
+      .catch(() => setError('Не вдалося завантажити дані відправлення'))
+  }, [orderId])
+
+  async function save() {
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/orders/${orderId}/shipment`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          weight: Number(weight.replace(',', '.')),
+          seats: Number(seats),
+        }),
+      })
+      if (res.ok) { setSaved(true); setTimeout(() => setSaved(false), 3000) }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const missing = data
+    ? (Object.keys(data.ready) as (keyof Shipment['ready'])[]).filter(k => !data.ready[k])
+    : []
+
+  const field = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500'
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/70 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
+      <div
+        className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-lg my-12"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
+          <span className="text-white font-semibold">Створити ТТН</span>
+          <button onClick={onClose} className="text-zinc-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+
+        {error && <div className="p-5 text-red-400 text-sm">{error}</div>}
+        {!data && !error && <div className="p-5 text-zinc-600 text-sm">Завантаження...</div>}
+
+        {data && (
+          <div className="p-5 space-y-4">
+            <div className="space-y-1.5 text-sm">
+              <div className="flex justify-between gap-3">
+                <span className="text-zinc-500">Одержувач</span>
+                <span className="text-zinc-200 text-right">{data.order.recipient ?? '—'}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-zinc-500">Телефон</span>
+                <span className="text-zinc-200">{data.order.phone ?? '—'}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-zinc-500">Відділення</span>
+                <span className="text-zinc-200 text-right">{data.order.branch ?? '—'}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-zinc-500">Оголошена вартість</span>
+                <span className="text-zinc-200">{money(data.order.cost)}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-zinc-400 text-xs mb-1.5">Вага, кг</label>
+                <input value={weight} onChange={e => setWeight(e.target.value)} inputMode="decimal" className={field} />
+                <div className="text-zinc-600 text-xs mt-1">
+                  Розраховано з позицій: {data.weight.computed} кг
+                </div>
+              </div>
+              <div>
+                <label className="block text-zinc-400 text-xs mb-1.5">Місць</label>
+                <input value={seats} onChange={e => setSeats(e.target.value)} inputMode="numeric" className={field} />
+              </div>
+            </div>
+
+            {data.weight.assumed.length > 0 && (
+              <div className="text-amber-400/90 text-xs">
+                Вагу припущено для {data.weight.assumed.length} позицій — у їхніх назвах
+                немає ваги. Перевірте цифру перед відправкою.
+              </div>
+            )}
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={save}
+                disabled={saving}
+                className="px-4 py-2 rounded-lg text-sm bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 transition-colors"
+              >
+                {saving ? 'Збереження...' : 'Зберегти вагу'}
+              </button>
+              {saved && <span className="text-emerald-400 text-xs">✓ збережено</span>}
+            </div>
+
+            <div className="border-t border-zinc-800 pt-4">
+              {missing.length === 0 ? (
+                <button
+                  disabled
+                  title="Створення ТТН ще не під'єднано"
+                  className="w-full px-4 py-2.5 rounded-lg text-sm bg-red-600/40 text-white/70 cursor-not-allowed"
+                >
+                  Створити ТТН у Новій Пошті
+                </button>
+              ) : (
+                <div className="bg-amber-950/40 border border-amber-900/60 rounded-lg px-3 py-2.5">
+                  <div className="text-amber-300 text-xs font-medium">
+                    ТТН поки не створюється — бракує:
+                  </div>
+                  <ul className="mt-1.5 space-y-0.5">
+                    {missing.map(k => (
+                      <li key={k} className="text-amber-400/90 text-xs">· {MISSING_LABEL[k]}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="text-zinc-600 text-xs mt-2">
+                Вагу можна зберегти вже зараз — вона підставиться, щойно підключимо
+                Нову Пошту, і доти видна для ручного створення накладної.
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

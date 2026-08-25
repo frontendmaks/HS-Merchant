@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import OrderJournal from './OrderJournal'
 import OrderItemsEditor from './OrderItemsEditor'
+import ShipmentDialog from './ShipmentDialog'
 
 const MAUDAU_STATUSES = ['Нове', 'Прийнято', 'Узгоджено', 'На доставці', 'Прибуло', 'Доставлено', 'Скасовано']
 const ROZETKA_STATUSES = ['Нове', 'Опрацьовується', 'Комплектується', 'Передано в доставку', 'Доставляється', 'Чекає в пункті', 'Доставлено', 'Скасовано']
@@ -348,6 +349,7 @@ function OrderDetailModal(
   props: OrderRowProps & { status: string; ttn: string; cancelReason: string; onClose: () => void },
 ) {
   const { onClose } = props
+  const [shipmentOpen, setShipmentOpen] = useState(false)
   return (
     <tr>
       <td colSpan={13} className="p-0">
@@ -404,7 +406,13 @@ function OrderDetailModal(
               <OrderItemsEditor orderId={props.id} />
             </div>
 
-            <div className="px-5 py-3 border-t border-zinc-800 flex justify-end">
+            <div className="px-5 py-3 border-t border-zinc-800 flex justify-between items-center gap-3">
+              <button
+                onClick={() => setShipmentOpen(true)}
+                className="px-4 py-2 rounded-lg text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+              >
+                ▤ Створити ТТН
+              </button>
               <button
                 onClick={onClose}
                 className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm rounded-lg transition-colors"
@@ -413,6 +421,10 @@ function OrderDetailModal(
               </button>
             </div>
           </div>
+
+          {shipmentOpen && (
+            <ShipmentDialog orderId={props.id} onClose={() => setShipmentOpen(false)} />
+          )}
         </div>
       </td>
     </tr>

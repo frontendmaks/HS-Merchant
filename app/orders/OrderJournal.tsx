@@ -106,6 +106,7 @@ const EVENT_META: Record<string, { label: string; icon: string; tone: string }> 
   sync_status:   { label: 'статус змінив маркетплейс',  icon: '⇄', tone: 'text-purple-400' },
   items:         { label: 'скоригував склад замовлення', icon: '≡', tone: 'text-cyan-400' },
   marketplace_push: { label: 'надіслав зміни на маркетплейс', icon: '⇪', tone: 'text-purple-300' },
+  shipment:      { label: 'вказав вагу відправлення', icon: '⚖', tone: 'text-zinc-300' },
 }
 
 const fmtTime = (iso: string) =>

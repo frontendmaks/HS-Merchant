@@ -173,3 +173,48 @@ export function orderTotals(lines: OrderLine[]): OrderTotals {
   const corrected = round2(lines.reduce((s, l) => s + correctedTotal(l), 0))
   return { ordered, corrected, diff: round2(corrected - ordered) }
 }
+
+
+// --- Shipment weight --------------------------------------------------------
+
+/** Assumed weight of a piece good whose title says nothing, in kg. */
+const UNKNOWN_PIECE_KG = 0.4
+
+export interface WeightBreakdown {
+  /** Total kilograms, rounded to 3 decimals */
+  kg: number
+  /** Lines whose weight had to be assumed rather than read */
+  assumed: string[]
+}
+
+/**
+ * Physical weight of what actually goes in the box, after corrections.
+ *
+ * Weighed lines already carry kilograms. Piece lines carry a count, so the
+ * per-pack weight comes from the title — "Свинина тушкована, 500 г" × 11.
+ */
+export function shipmentWeight(lines: OrderLine[]): WeightBreakdown {
+  let kg = 0
+  const assumed: string[] = []
+
+  for (const l of lines) {
+    if (l.removed) continue
+    const qty = effectiveQty(l)
+
+    if (l.unit === 'кг') {
+      kg += qty
+      continue
+    }
+
+    // unit_weight is 1 for pieces, so fall back to what the title declares
+    const perPiece = l.unit_weight > 1 ? l.unit_weight : weightFromTitle(l.title)
+    if (perPiece == null) {
+      assumed.push(l.title)
+      kg += qty * UNKNOWN_PIECE_KG
+    } else {
+      kg += qty * perPiece
+    }
+  }
+
+  return { kg: round3(kg), assumed }
+}
