@@ -445,6 +445,8 @@ export { isClosed }
 
 // --- Operator efficiency ----------------------------------------------------
 
+import { businessMinutes, WORK_END_HOUR, WORK_START_HOUR } from '@/lib/work-hours'
+
 export interface OperatorEventRow {
   order_id: string
   actor_id: string | null
@@ -462,12 +464,20 @@ export interface OperatorStat {
   actions: number
   /** Value of the orders they handled */
   revenue: number
+  /** Average value of one handled order */
+  avgOrder: number
   delivered: number
   canceled: number
-  /** Median minutes from an order arriving to this person's first action */
+  /** Waybills created */
+  ttn: number
+  /** How the actions split by kind */
+  byType: Record<string, number>
+  /** Median working minutes from an order arriving to this person's first action */
   reactionMins: number | null
-  /** Median minutes from their first to their last action on an order */
+  /** Median working minutes from their first to their last action on an order */
   handlingMins: number | null
+  /** Share of orders answered within the same shift */
+  sameShiftPct: number | null
 }
 
 const median = (xs: number[]): number | null => {
@@ -480,19 +490,30 @@ const median = (xs: number[]): number | null => {
 /**
  * Efficiency per operator, derived from the order journal.
  *
- * Only events with an actor count — a status the marketplace moved on its own
- * has no actor and must not be credited to anyone.
+ * Only people whose role is `operator` are counted — managers and admins touch
+ * orders too, but they are not measured here. Events with no actor came from
+ * the marketplace and belong to nobody.
+ *
+ * Durations count working time only: an order arriving at 22:00 and answered at
+ * 09:30 is ninety minutes of waiting, not eleven and a half hours.
  */
 export function operatorStats(
   events: OperatorEventRow[],
   orders: { id: string; total: number | null; status: string | null }[],
+  operatorIds: Set<string>,
 ): OperatorStat[] {
   const orderById = new Map(orders.map(o => [o.id, o]))
   const byActor = new Map<string, { name: string; rows: OperatorEventRow[] }>()
 
+  // Arrival time per order, taken from the actorless "created" entry
+  const arrivalOf = new Map<string, string>()
   for (const e of events) {
-    if (!e.actor_id) continue
-    const entry = byActor.get(e.actor_id) ?? { name: e.actor_name?.trim() || 'Користувач', rows: [] }
+    if (e.type === 'created' && !arrivalOf.has(e.order_id)) arrivalOf.set(e.order_id, e.created_at)
+  }
+
+  for (const e of events) {
+    if (!e.actor_id || !operatorIds.has(e.actor_id)) continue
+    const entry = byActor.get(e.actor_id) ?? { name: e.actor_name?.trim() || 'Оператор', rows: [] }
     if (e.actor_name?.trim()) entry.name = e.actor_name.trim()
     entry.rows.push(e)
     byActor.set(e.actor_id, entry)
@@ -500,13 +521,17 @@ export function operatorStats(
 
   return [...byActor.entries()].map(([id, { name, rows }]) => {
     const perOrder = new Map<string, OperatorEventRow[]>()
-    for (const r of rows) {
-      perOrder.set(r.order_id, [...(perOrder.get(r.order_id) ?? []), r])
-    }
+    for (const r of rows) perOrder.set(r.order_id, [...(perOrder.get(r.order_id) ?? []), r])
 
     const reaction: number[] = []
     const handling: number[] = []
-    let revenue = 0, delivered = 0, canceled = 0
+    const byType: Record<string, number> = {}
+    let revenue = 0, delivered = 0, canceled = 0, ttn = 0, sameShift = 0, withArrival = 0
+
+    for (const r of rows) {
+      byType[r.type] = (byType[r.type] ?? 0) + 1
+      if (r.type === 'ttn') ttn++
+    }
 
     for (const [orderId, evs] of perOrder) {
       const order = orderById.get(orderId)
@@ -516,17 +541,24 @@ export function operatorStats(
         if (order.status === 'Скасовано') canceled++
       }
 
-      const times = evs.map(e => new Date(e.created_at).getTime()).sort((a, b) => a - b)
-      // The order's own arrival is the "created" event, which has no actor
-      const arrival = events
-        .filter(e => e.order_id === orderId && e.type === 'created')
-        .map(e => new Date(e.created_at).getTime())[0]
+      const sorted = [...evs].sort((a, b) => a.created_at.localeCompare(b.created_at))
+      const first = sorted[0].created_at
+      const last = sorted[sorted.length - 1].created_at
 
-      if (arrival != null && times[0] >= arrival) {
-        reaction.push(Math.round((times[0] - arrival) / 60000))
+      const arrival = arrivalOf.get(orderId)
+      if (arrival) {
+        const mins = businessMinutes(arrival, first)
+        if (mins != null) {
+          reaction.push(mins)
+          withArrival++
+          // One shift is nine hours; answering inside that is same-day service
+          if (mins <= (WORK_END_HOUR - WORK_START_HOUR) * 60) sameShift++
+        }
       }
-      if (times.length > 1) {
-        handling.push(Math.round((times[times.length - 1] - times[0]) / 60000))
+
+      if (sorted.length > 1) {
+        const mins = businessMinutes(first, last)
+        if (mins != null) handling.push(mins)
       }
     }
 
@@ -536,10 +568,26 @@ export function operatorStats(
       orders: perOrder.size,
       actions: rows.length,
       revenue: Math.round(revenue * 100) / 100,
+      avgOrder: perOrder.size ? Math.round((revenue / perOrder.size) * 100) / 100 : 0,
       delivered,
       canceled,
+      ttn,
+      byType,
       reactionMins: median(reaction),
       handlingMins: median(handling),
+      sameShiftPct: withArrival ? Math.round((sameShift / withArrival) * 100) : null,
     }
   }).sort((a, b) => b.orders - a.orders)
+}
+
+
+
+// --- Operator efficiency ----------------------------------------------------
+
+export interface OperatorEventRow {
+  order_id: string
+  actor_id: string | null
+  actor_name: string | null
+  type: string
+  created_at: string
 }

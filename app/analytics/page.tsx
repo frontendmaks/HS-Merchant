@@ -76,6 +76,11 @@ export default async function AnalyticsPage({
         .limit(50000)
     : { data: [] }
 
+  // Only operators are measured; managers and admins touch orders too
+  const { data: operatorRows } = await supabase
+    .from('profiles').select('id').eq('role', 'operator')
+  const operatorIds = new Set((operatorRows ?? []).map(r => r.id as string))
+
   const learned = learnCityOblasts(orders)
   const allCustomers = customers(orders, learned, gazetteer)
 
@@ -106,6 +111,7 @@ export default async function AnalyticsPage({
       operators={operatorStats(
         (eventRows ?? []) as OperatorEventRow[],
         (orderIdRows ?? []) as { id: string; total: number | null; status: string | null }[],
+        operatorIds,
       )}
     />
   )
