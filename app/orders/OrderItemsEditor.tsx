@@ -20,6 +20,14 @@ interface Line {
 
 interface Totals { ordered: number; corrected: number; diff: number }
 
+interface Push {
+  ok: boolean
+  total?: number
+  commission?: number
+  error?: string
+  skipped?: { itemId: string; wanted: number }[]
+}
+
 const money = (n: number) =>
   `₴${Number(n).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -46,6 +54,7 @@ export default function OrderItemsEditor({ orderId, onSaved }: {
   const [removed, setRemoved] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [push, setPush] = useState<Push | null>(null)
   const [picker, setPicker] = useState(false)
 
   const load = useCallback(async () => {
@@ -100,10 +109,11 @@ export default function OrderItemsEditor({ orderId, onSaved }: {
           add,
         }),
       })
-      const d = await res.json() as { lines?: Line[]; totals?: Totals; error?: string }
+      const d = await res.json() as { lines?: Line[]; totals?: Totals; push?: Push; error?: string }
       if (d.error) { setError(d.error); return }
       setLines(d.lines ?? [])
       setTotals(d.totals ?? null)
+      setPush(d.push ?? null)
       setDrafts(Object.fromEntries((d.lines ?? []).map(l =>
         [l.id, l.actual_qty != null ? String(l.actual_qty) : ''])))
       setRemoved(Object.fromEntries((d.lines ?? []).map(l => [l.id, l.removed])))
@@ -229,6 +239,28 @@ export default function OrderItemsEditor({ orderId, onSaved }: {
       </div>
 
       {error && <div className="text-red-400 text-xs">{error}</div>}
+
+      {push && (
+        <div className={`rounded-lg px-3 py-2 text-xs ${
+          push.ok
+            ? 'bg-emerald-950/40 border border-emerald-900/60 text-emerald-300'
+            : 'bg-amber-950/40 border border-amber-900/60 text-amber-300'
+        }`}>
+          {push.ok ? (
+            <>
+              ✓ Надіслано в MauDau — сума {money(push.total ?? 0)}, комісія {money(push.commission ?? 0)}
+            </>
+          ) : (
+            <>⚠ На маркетплейс не надіслано: {push.error}</>
+          )}
+          {push.skipped?.length ? (
+            <div className="mt-1 text-amber-400/90">
+              {push.skipped.length} позицій не передано — MauDau приймає лише цілу кількість пачок,
+              а фактична вага дає дробову. Ці рядки виправлені лише в нас.
+            </div>
+          ) : null}
+        </div>
+      )}
 
       <div className="flex justify-end">
         <button

@@ -2,9 +2,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import {
-  buildLine, indexCatalog, correctedTotal, orderTotals,
+  buildLine, indexCatalog, correctedTotal, effectiveQty, orderTotals,
   type CatalogProduct, type MarketplaceLine, type OrderLine,
 } from '@/lib/order-items'
+import { canPushToMaudau, packsFor, pushOrderItems, type PushResult } from '@/lib/maudau-order-sync'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -169,8 +170,62 @@ export async function PATCH(
   await logOrderEvent(service, id, 'items',
     { old: `₴${totals.ordered}`, new: `₴${totals.corrected}` }, actor)
 
+  const push = await pushToMarketplace(service, id, lines, actor)
+
   return NextResponse.json({
     lines: lines.map(l => ({ ...l, corrected_total: correctedTotal(l) })),
     totals,
+    push,
   })
+}
+
+
+/**
+ * Mirrors the correction onto the marketplace. MauDau recalculates the order
+ * total and our commission from the quantities it receives.
+ *
+ * Lines we added ourselves have no marketplace id, and removals are left out
+ * until we know how MauDau expects them — sending quantity 0 is untested.
+ */
+async function pushToMarketplace(
+  service: Service,
+  orderId: string,
+  lines: OrderLine[],
+  actor: { id: string; name: string } | null,
+): Promise<(PushResult & { platform?: string }) | null> {
+  const { data: order } = await service
+    .from('orders').select('platform, external_id').eq('id', orderId).single()
+  if (!order) return null
+
+  if (order.platform !== 'maudau') {
+    return { ok: false, platform: order.platform, error: 'Відправка налаштована лише для MauDau' }
+  }
+  if (!canPushToMaudau()) {
+    return { ok: false, error: 'MAUDAU_CABINET_TOKEN не налаштовано у середовищі' }
+  }
+
+  const sendable = lines
+    .filter(l => l.source === 'marketplace' && !l.removed && l.marketplace_item_id)
+    .map(l => ({
+      itemId: l.marketplace_item_id as string,
+      quantity: packsFor(effectiveQty(l), l.unit_weight),
+    }))
+
+  if (!sendable.length) return null
+
+  const marketplaceOrderId = (order.external_id ?? '').replace(/^MD-/, '')
+  const result = await pushOrderItems(marketplaceOrderId, sendable)
+
+  await logOrderEvent(
+    service, orderId, 'marketplace_push',
+    {
+      new: result.ok
+        ? `MauDau: сума ₴${result.total}, комісія ₴${result.commission}` +
+          (result.skipped?.length ? ` · ${result.skipped.length} позицій не передано` : '')
+        : `не вдалося — ${result.error}`,
+    },
+    actor,
+  )
+
+  return result
 }

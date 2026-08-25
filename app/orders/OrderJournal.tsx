@@ -20,6 +20,7 @@ const EVENT_META: Record<string, { label: string; icon: string; tone: string }> 
   cancel_reason: { label: 'вказав причину скасування',  icon: '✎', tone: 'text-amber-400' },
   sync_status:   { label: 'статус змінив маркетплейс',  icon: '⇄', tone: 'text-purple-400' },
   items:         { label: 'скоригував склад замовлення', icon: '≡', tone: 'text-cyan-400' },
+  marketplace_push: { label: 'надіслав зміни на маркетплейс', icon: '⇪', tone: 'text-purple-300' },
 }
 
 const fmtTime = (iso: string) =>

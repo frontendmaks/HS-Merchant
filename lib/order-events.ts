@@ -5,7 +5,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 type Service = ReturnType<typeof createServiceClient>
 
 export type OrderEventType =
-  | 'status' | 'ttn' | 'cancel' | 'cancel_reason' | 'sync_status' | 'created' | 'items'
+  | 'status' | 'ttn' | 'cancel' | 'cancel_reason' | 'sync_status' | 'created' | 'items' | 'marketplace_push'
 
 export const EVENT_META: Record<OrderEventType, { label: string; icon: string }> = {
   created:       { label: 'замовлення надійшло',   icon: '✚' },
@@ -15,6 +15,7 @@ export const EVENT_META: Record<OrderEventType, { label: string; icon: string }>
   cancel_reason: { label: 'вказав причину',         icon: '✎' },
   sync_status:   { label: 'статус змінив маркетплейс', icon: '⇄' },
   items:         { label: 'скоригував склад замовлення', icon: '≡' },
+  marketplace_push: { label: 'надіслав зміни на маркетплейс', icon: '⇪' },
 }
 
 /** Who is acting, resolved from the session cookie. Null for cron/sync. */

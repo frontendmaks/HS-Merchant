@@ -28,6 +28,16 @@
  *  only be expressed in whole packs. Verified against a live order. */
 export const WHOLE_UNITS_ONLY = true
 
+/** How many listed packs a corrected line amounts to.
+ *  Weighed goods: actual kg ÷ pack size. Piece goods: the count itself,
+ *  since their pack size is 1. */
+export const packsFor = (amount: number, unitWeight: number): number =>
+  unitWeight > 0 ? amount / unitWeight : amount
+
+/** Whole within a hair — floating point makes 1.3 / 0.65 land on 1.9999…  */
+export const isWhole = (n: number, eps = 1e-6): boolean =>
+  Math.abs(n - Math.round(n)) < eps
+
 const CABINET_BASE = process.env.MAUDAU_CABINET_BASE ?? 'https://backend.prod.maudau.click'
 
 export const canPushToMaudau = () => !!process.env.MAUDAU_CABINET_TOKEN
@@ -44,8 +54,8 @@ export interface PushResult {
   total?: number
   commission?: number
   error?: string
-  /** Lines whose quantity had to be rounded to a whole pack */
-  rounded?: { itemId: string; asked: number; sent: number }[]
+  /** Lines MauDau cannot represent, because the pack count is fractional */
+  skipped?: { itemId: string; wanted: number }[]
 }
 
 export async function pushOrderItems(
@@ -58,14 +68,25 @@ export async function pushOrderItems(
   }
   if (!lines.length) return { ok: false, error: 'Немає позицій для відправки' }
 
-  // Round here rather than let MauDau drop the request on the floor: a
-  // fractional quantity comes back 200 with nothing changed.
-  const rounded: NonNullable<PushResult['rounded']> = []
-  const payload = lines.map(l => {
-    const whole = Math.max(1, Math.round(l.quantity))
-    if (whole !== l.quantity) rounded.push({ itemId: l.itemId, asked: l.quantity, sent: whole })
-    return { id: Number(l.itemId), quantity: whole }
-  })
+  // A fractional quantity comes back 200 with nothing changed, so anything not
+  // whole is left out and reported rather than silently discarded.
+  const skipped: NonNullable<PushResult['skipped']> = []
+  const payload: { id: number; quantity: number }[] = []
+  for (const l of lines) {
+    if (!isWhole(l.quantity)) {
+      skipped.push({ itemId: l.itemId, wanted: l.quantity })
+      continue
+    }
+    payload.push({ id: Number(l.itemId), quantity: Math.round(l.quantity) })
+  }
+
+  if (!payload.length) {
+    return {
+      ok: false,
+      skipped,
+      error: 'Жодну позицію не можна передати: MauDau приймає лише цілу кількість пачок',
+    }
+  }
 
   const res = await fetch(`${CABINET_BASE}/v1/merchant/orders/${marketplaceOrderId}`, {
     method: 'PATCH',
@@ -87,9 +108,9 @@ export async function pushOrderItems(
       ok: true,
       total: (body.total_price ?? 0) / 100,
       commission: (body.merchant_commission_amount ?? 0) / 100,
-      rounded: rounded.length ? rounded : undefined,
+      skipped: skipped.length ? skipped : undefined,
     }
   } catch {
-    return { ok: true, rounded: rounded.length ? rounded : undefined }
+    return { ok: true, skipped: skipped.length ? skipped : undefined }
   }
 }
