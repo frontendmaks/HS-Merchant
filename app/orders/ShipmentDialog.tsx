@@ -10,6 +10,7 @@ interface Shipment {
     branch: string | null
     address: string | null
     cost: number
+    originalCost: number
     ttn: string | null
   }
   weight: { computed: number; assumed: string[]; saved: number | null }
@@ -147,7 +148,18 @@ export default function ShipmentDialog({ orderId, onClose }: {
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-zinc-500">Оголошена вартість</span>
-                <span className="text-zinc-200">{money(data.order.cost)}</span>
+                <span className="text-zinc-200 text-right">
+                  {money(data.order.cost)}
+                  {Math.abs(data.order.cost - data.order.originalCost) >= 0.01 && (
+                    <span className="block text-zinc-600 text-xs">
+                      було {money(data.order.originalCost)} до коригування
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-zinc-500">Доставку оплачує</span>
+                <span className="text-zinc-200">Одержувач, готівкою</span>
               </div>
             </div>
 

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
-import { shipmentWeight, type OrderLine } from '@/lib/order-items'
+import { shipmentWeight, orderTotals, type OrderLine } from '@/lib/order-items'
 import { createWaybill, hasNpKey, senderWarehouses, type NpSettings } from '@/lib/nova-poshta'
 
 // GET — what would go on the waybill, computed from the corrected lines
@@ -27,6 +27,10 @@ export async function GET(
 
   const lines = (items ?? []) as unknown as OrderLine[]
   const computed = shipmentWeight(lines)
+  const totals = orderTotals(lines)
+
+  // The waybill insures what is actually in the box, so the corrected sum wins
+  const declared = lines.length ? totals.corrected : Number(order.total ?? 0)
 
   // Nova Poshta wants its own refs for the recipient's city and branch. MauDau
   // passes them straight through, so no lookup is needed.
@@ -59,7 +63,8 @@ export async function GET(
       phone: order.customer_phone,
       branch: order.branch,
       address: order.address,
-      cost: Number(order.total ?? 0),
+      cost: declared,
+      originalCost: Number(order.total ?? 0),
       ttn: order.ttn,
     },
     weight: {
@@ -124,11 +129,12 @@ export async function POST(
   }
 
   const service = createServiceClient()
-  const [{ data: order }, { data: settings }] = await Promise.all([
+  const [{ data: order }, { data: settings }, { data: items }] = await Promise.all([
     service.from('orders')
       .select('customer_name, customer_phone, total, ttn, np_ttn_ref, raw')
       .eq('id', id).single(),
     service.from('np_settings').select('*').eq('id', true).maybeSingle(),
+    service.from('order_items').select('*').eq('order_id', id),
   ])
 
   if (!order) return NextResponse.json({ error: 'Замовлення не знайдено' }, { status: 404 })
@@ -145,6 +151,12 @@ export async function POST(
   const city = (delivery.city ?? {}) as Record<string, unknown>
   const warehouse = (delivery.warehouse ?? {}) as Record<string, unknown>
 
+  // Insure the corrected value — what actually goes in the box
+  const lines = (items ?? []) as unknown as OrderLine[]
+  const declaredValue = lines.length
+    ? orderTotals(lines).corrected
+    : Number(order.total ?? 0)
+
   const result = await createWaybill(settings as NpSettings, {
     recipientName: order.customer_name ?? '',
     recipientPhone: order.customer_phone ?? '',
@@ -155,7 +167,7 @@ export async function POST(
     flat: delivery.apartment as string | undefined,
     weightKg: Number(weight) || 1,
     seats: Number(seats) || 1,
-    cost: Number(order.total ?? 0),
+    cost: declaredValue,
     description,
     senderAddressRef,
     dimensions,
@@ -178,7 +190,7 @@ export async function POST(
   }).eq('id', id)
 
   await logOrderEvent(service, id, 'ttn',
-    { new: `${result.ttn} · ${weight} кг · доставка ${result.estimatedDelivery}` }, actor)
+    { new: `${result.ttn} · ${weight} кг · оцінка ₴${declaredValue} · доставка ${result.estimatedDelivery}` }, actor)
 
   return NextResponse.json(result)
 }
