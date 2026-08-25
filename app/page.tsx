@@ -2,6 +2,11 @@ import { createServiceClient } from '@/lib/supabase/service'
 
 export const dynamic = 'force-dynamic'
 
+// Shared by the feeds table's header and its rows so the two cannot drift apart.
+// 480px of fixed tracks + gaps + padding, plus room for the name column.
+const FEEDS_COLS = 'grid-cols-[1fr_160px_80px_100px_140px]'
+const FEEDS_MIN_W = 'min-w-[820px]'
+
 async function getStats() {
   const supabase = createServiceClient()
   const [products, feeds, marketplaces, changelog, feedActiveCounts] = await Promise.all([
@@ -89,15 +94,15 @@ export default async function Dashboard() {
     <div className="w-full space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-semibold text-white">Дашборд</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold text-white">Дашборд</h1>
         <p className="text-zinc-500 text-sm mt-1">Керування XML фідами для маркетплейсів</p>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
         {cards.map(card => (
-          <div key={card.label} className={`bg-zinc-900 border border-zinc-800 border-l-2 ${card.color} rounded-xl p-5`}>
-            <div className="text-3xl font-bold text-white mb-1">{card.value}</div>
+          <div key={card.label} className={`bg-zinc-900 border border-zinc-800 border-l-2 ${card.color} rounded-xl p-4 sm:p-5`}>
+            <div className="text-2xl sm:text-3xl font-bold text-white mb-1">{card.value}</div>
             <div className="text-sm font-medium text-zinc-300">{card.label}</div>
             <div className="text-xs text-zinc-500 mt-1">{card.sub}</div>
           </div>
@@ -105,7 +110,7 @@ export default async function Dashboard() {
       </div>
 
       {/* Alerts row */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-4">
         {/* Проблемні товари */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl">
           <div className="px-5 py-3.5 border-b border-zinc-800 flex items-center justify-between">
@@ -184,15 +189,18 @@ export default async function Dashboard() {
       </div>
 
       {/* Feeds table */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl">
-        <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+        <div className="px-4 sm:px-6 py-4 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span>🔄</span>
             <h2 className="text-sm font-semibold text-white">XML фіди по маркетплейсах</h2>
           </div>
           <a href="/feeds" className="text-xs text-red-500 hover:text-red-400">Всі фіди →</a>
         </div>
-        <div className="grid grid-cols-[1fr_160px_80px_100px_140px] gap-4 px-6 py-2 border-b border-zinc-800/50">
+       {/* Too many columns to reflow onto a phone; the table scrolls in place. */}
+       <div className="overflow-x-auto">
+        <div className={FEEDS_MIN_W}>
+        <div className={`grid ${FEEDS_COLS} gap-4 px-6 py-2 border-b border-zinc-800/50`}>
           <div className="text-xs text-zinc-600 uppercase tracking-wide">Фід / Маркетплейс</div>
           <div className="text-xs text-zinc-600 uppercase tracking-wide">URL</div>
           <div className="text-xs text-zinc-600 uppercase tracking-wide text-right">Товарів</div>
@@ -209,7 +217,7 @@ export default async function Dashboard() {
             const productCount = feed.activeProductCount ?? 0
             const marketplace = feed.marketplace
             return (
-              <div key={feed.id} className="grid grid-cols-[1fr_160px_80px_100px_140px] gap-4 px-6 py-4 items-center hover:bg-zinc-800/30 transition-colors">
+              <div key={feed.id} className={`grid ${FEEDS_COLS} gap-4 px-6 py-4 items-center hover:bg-zinc-800/30 transition-colors`}>
                 <div>
                   <div className="text-sm text-white font-medium">{feed.slug}</div>
                   {marketplace && (
@@ -244,6 +252,8 @@ export default async function Dashboard() {
             )
           })}
         </div>
+        </div>
+       </div>
       </div>
 
       {/* Changelog */}

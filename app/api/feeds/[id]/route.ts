@@ -5,9 +5,12 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ slug: string }> }
+  // The segment is named `id` because the sibling routes under this folder use
+  // that name and Next.js requires one name per dynamic path — the value here is
+  // the feed's slug, which is what marketplaces fetch the feed by.
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const { slug: rawSlug } = await params
+  const { id: rawSlug } = await params
   const slug = rawSlug.replace(/\.xml$/, '')
   const supabase = createServiceClient()
 

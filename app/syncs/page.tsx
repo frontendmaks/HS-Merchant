@@ -5,6 +5,14 @@ import MarketplaceSyncTrigger from './MarketplaceSyncTrigger'
 
 export const dynamic = 'force-dynamic'
 
+// Header and rows must stay in step, so each track list lives in one place.
+// The journals are too dense to reflow into a phone; they scroll sideways
+// inside their own card, which keeps the columns identical at every size.
+const WC_LOG_COLS = '160px 150px 80px 90px 90px 90px 90px 80px 1fr'
+const WC_LOG_MIN_W = 'min-w-[1220px]'
+const ORDER_LOG_COLS = '160px 150px 80px 100px 100px 80px 1fr'
+const ORDER_LOG_MIN_W = 'min-w-[1020px]'
+
 function timeAgo(d: string) {
   const diff = Date.now() - new Date(d).getTime()
   const m = Math.floor(diff / 60000)
@@ -70,16 +78,16 @@ export default async function SyncsPage() {
 
       {/* ── ТОВАРИ (WooCommerce) ── */}
       <section className="space-y-5">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-white">Синхронізації товарів</h1>
+            <h1 className="text-xl sm:text-2xl font-semibold text-white">Синхронізації товарів</h1>
             <p className="text-zinc-500 text-sm mt-1">Журнал синків з WooCommerce</p>
           </div>
           <SyncTrigger />
         </div>
 
         {/* WC schedule */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 flex items-center justify-between gap-6">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 flex flex-wrap items-center justify-between gap-6">
           <div className="flex items-center gap-4">
             <div className="w-9 h-9 rounded-lg bg-blue-950 flex items-center justify-center text-blue-400 text-lg shrink-0">⏱</div>
             <div>
@@ -89,7 +97,7 @@ export default async function SyncsPage() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-6 text-center shrink-0">
+          <div className="flex flex-wrap items-center gap-6 text-center">
             <div>
               <div className="text-xs text-zinc-500">Розклад</div>
               <div className="text-sm text-blue-400 font-medium mt-0.5">Щодня о 03:00</div>
@@ -106,7 +114,7 @@ export default async function SyncsPage() {
         </div>
 
         {/* WC stats */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
             <div className="text-2xl font-bold text-white">{wcEntries.length}</div>
             <div className="text-xs text-zinc-500 mt-1">Всього синків</div>
@@ -131,8 +139,9 @@ export default async function SyncsPage() {
 
         {/* WC log table */}
         <CollapsibleLog title="Журнал синків товарів" count={wcEntries.length}>
+         <div className={WC_LOG_MIN_W}>
           <div className="grid gap-4 px-6 py-3 border-b border-zinc-800 bg-zinc-800/50"
-            style={{ gridTemplateColumns: '160px 150px 80px 90px 90px 90px 90px 80px 1fr' }}>
+            style={{ gridTemplateColumns: WC_LOG_COLS }}>
             <div className="text-xs text-zinc-500 uppercase tracking-wide">Час</div>
             <div className="text-xs text-zinc-500 uppercase tracking-wide">Тригер</div>
             <div className="text-xs text-zinc-500 uppercase tracking-wide">Статус</div>
@@ -150,7 +159,7 @@ export default async function SyncsPage() {
             {wcEntries.map(log => (
               <div key={log.id}
                 className="grid gap-4 px-6 py-3.5 items-center hover:bg-zinc-800/20 transition-colors"
-                style={{ gridTemplateColumns: '160px 150px 80px 90px 90px 90px 90px 80px 1fr' }}>
+                style={{ gridTemplateColumns: WC_LOG_COLS }}>
                 <div>
                   <div className="text-xs text-zinc-300">{formatDate(log.created_at)}</div>
                   <div className="text-xs text-zinc-600 mt-0.5">{timeAgo(log.created_at)}</div>
@@ -177,21 +186,22 @@ export default async function SyncsPage() {
               </div>
             ))}
           </div>
+         </div>
         </CollapsibleLog>
       </section>
 
       {/* ── ЗАМОВЛЕННЯ (MauDau + Rozetka) ── */}
       <section className="space-y-5">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-semibold text-white">Синхронізації замовлень</h2>
+            <h2 className="text-xl sm:text-2xl font-semibold text-white">Синхронізації замовлень</h2>
             <p className="text-zinc-500 text-sm mt-1">MauDau + Rozetka → база даних</p>
           </div>
           <MarketplaceSyncTrigger />
         </div>
 
         {/* Orders schedule */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 flex items-center justify-between gap-6">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 flex flex-wrap items-center justify-between gap-6">
           <div className="flex items-center gap-4">
             <div className="w-9 h-9 rounded-lg bg-purple-950 flex items-center justify-center text-purple-400 text-lg shrink-0">⏱</div>
             <div>
@@ -202,7 +212,7 @@ export default async function SyncsPage() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-6 text-center shrink-0">
+          <div className="flex flex-wrap items-center gap-6 text-center">
             <div>
               <div className="text-xs text-zinc-500">Розклад</div>
               <div className="text-sm text-purple-400 font-medium mt-0.5">5 хв / 3 год</div>
@@ -219,7 +229,7 @@ export default async function SyncsPage() {
         </div>
 
         {/* Orders stats */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
             <div className="text-2xl font-bold text-white">{orderEntries.length}</div>
             <div className="text-xs text-zinc-500 mt-1">Всього синків</div>
@@ -285,8 +295,9 @@ export default async function SyncsPage() {
 
         {/* Orders log table */}
         <CollapsibleLog title="Журнал синків замовлень" count={orderEntries.length}>
+         <div className={ORDER_LOG_MIN_W}>
           <div className="grid gap-4 px-6 py-3 border-b border-zinc-800 bg-zinc-800/50"
-            style={{ gridTemplateColumns: '160px 150px 80px 100px 100px 80px 1fr' }}>
+            style={{ gridTemplateColumns: ORDER_LOG_COLS }}>
             <div className="text-xs text-zinc-500 uppercase tracking-wide">Час</div>
             <div className="text-xs text-zinc-500 uppercase tracking-wide">Тригер</div>
             <div className="text-xs text-zinc-500 uppercase tracking-wide">Статус</div>
@@ -304,7 +315,7 @@ export default async function SyncsPage() {
             {orderEntries.map(log => (
               <div key={log.id}
                 className="grid gap-4 px-6 py-3.5 items-center hover:bg-zinc-800/20 transition-colors"
-                style={{ gridTemplateColumns: '160px 150px 80px 100px 100px 80px 1fr' }}>
+                style={{ gridTemplateColumns: ORDER_LOG_COLS }}>
                 <div>
                   <div className="text-xs text-zinc-300">{formatDate(log.created_at)}</div>
                   <div className="text-xs text-zinc-600 mt-0.5">{timeAgo(log.created_at)}</div>
@@ -335,6 +346,7 @@ export default async function SyncsPage() {
               </div>
             ))}
           </div>
+         </div>
         </CollapsibleLog>
       </section>
 

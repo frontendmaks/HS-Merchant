@@ -675,7 +675,7 @@ function CreateForm({ people, me, onCreated }: {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className={label}>Пріоритет</label>
             <select
@@ -880,7 +880,7 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
               <div className="text-zinc-400 text-xs mb-1.5">Статус</div>
               <select

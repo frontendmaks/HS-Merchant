@@ -125,10 +125,10 @@ export default async function OrdersPage({
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="bg-zinc-950 text-white space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">Замовлення</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Замовлення</h1>
           <p className="text-zinc-400 text-sm mt-0.5">Всі замовлення з MauDau та Rozetka</p>
         </div>
       </div>
@@ -157,7 +157,7 @@ export default async function OrdersPage({
       </div>
 
       {/* Analytics cards */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
           <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Всього замовлень</div>
           <div className="text-3xl font-bold text-white">{total}</div>
@@ -210,7 +210,7 @@ export default async function OrdersPage({
             <tbody>
               {!tableOrders?.length ? (
                 <tr>
-                  <td colSpan={12} className="text-center py-12 text-zinc-500">
+                  <td colSpan={13} className="text-center py-12 text-zinc-500">
                     Немає замовлень
                   </td>
                 </tr>

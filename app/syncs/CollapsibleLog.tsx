@@ -30,7 +30,8 @@ export default function CollapsibleLog({ title, count, children, defaultOpen = f
         </span>
       </button>
 
-      {open && <div className="border-t border-zinc-800">{children}</div>}
+      {/* The card clips its rounded corners, so the journal scrolls sideways in here */}
+      {open && <div className="border-t border-zinc-800 overflow-x-auto">{children}</div>}
     </div>
   )
 }

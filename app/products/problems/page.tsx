@@ -3,6 +3,11 @@ import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
 
+// Header and rows must stay in step, so the track list lives in one place.
+// Too dense to reflow into a phone — it scrolls sideways inside its own card.
+const GRID_COLS = '56px 1fr 140px 140px 120px 120px'
+const GRID_MIN_W = 'min-w-[880px]'
+
 export default async function ProblemsPage() {
   const supabase = createServiceClient()
   const { data } = await supabase
@@ -43,7 +48,7 @@ export default async function ProblemsPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
           <div className="text-2xl font-bold text-white">{products.length}</div>
           <div className="text-xs text-zinc-500 mt-1">Всього проблемних</div>
@@ -64,8 +69,10 @@ export default async function ProblemsPage() {
 
       {/* Table */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+       <div className="overflow-x-auto">
+        <div className={GRID_MIN_W}>
         <div className="grid gap-3 px-5 py-3 border-b border-zinc-800 bg-zinc-800/50"
-          style={{ gridTemplateColumns: '56px 1fr 140px 140px 120px 120px' }}>
+          style={{ gridTemplateColumns: GRID_COLS }}>
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Фото</div>
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Назва / Категорія</div>
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Бренд</div>
@@ -80,7 +87,7 @@ export default async function ProblemsPage() {
             return (
               <div key={p.id}
                 className="grid gap-3 px-5 py-3 items-center hover:bg-zinc-800/30 transition-colors"
-                style={{ gridTemplateColumns: '56px 1fr 140px 120px 120px 120px' }}>
+                style={{ gridTemplateColumns: GRID_COLS }}>
 
                 {/* Photo */}
                 <div className="w-12 h-12 rounded-lg overflow-hidden bg-zinc-800 shrink-0">
@@ -134,6 +141,8 @@ export default async function ProblemsPage() {
             )
           })}
         </div>
+        </div>
+       </div>
       </div>
     </div>
   )

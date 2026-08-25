@@ -57,6 +57,12 @@ type Override = {
   custom_params?: Record<string, string>
 }
 
+// Header and rows of the feed products table share one track list so they stay
+// aligned. The table is too dense to reflow onto a phone; it scrolls sideways
+// inside its card instead, so the columns look identical at every screen size.
+const FEED_COLS = '20px 10px 36px 1fr 36px 48px 48px 70px 70px 52px 86px 86px'
+const FEED_MIN_W = 'min-w-[950px]'
+
 /** Floating searchable select — renders panel via portal so it's never clipped by overflow containers */
 function SearchableSelect({
   value, options, onChange, placeholder = '— Обрати —', emptyLabel, isEmpty, accentColor = 'zinc',
@@ -996,12 +1002,12 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   return (
     <div className="space-y-6">
       {/* Top bar */}
-      <div className="flex items-center justify-between gap-6">
-        <div className="flex-1 min-w-0 space-y-1">
+      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+        <div className="flex-1 min-w-[200px] space-y-1">
           <input
             value={feedName}
             onChange={e => setFeedName(e.target.value)}
-            className="text-2xl font-semibold text-white bg-transparent border-b border-transparent hover:border-zinc-700 focus:border-red-500 focus:outline-none w-full transition-colors"
+            className="text-xl sm:text-2xl font-semibold text-white bg-transparent border-b border-transparent hover:border-zinc-700 focus:border-red-500 focus:outline-none w-full transition-colors"
             placeholder="Назва фіду"
           />
           <div className="flex items-center gap-1 text-xs text-zinc-500 font-mono">
@@ -1014,21 +1020,21 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
             />
           </div>
         </div>
-        <div className="flex gap-3 items-center">
+        <div className="flex flex-wrap gap-2 sm:gap-3 items-center">
           <button
             onClick={handleDelete}
             disabled={deleting}
-            className="px-3 py-2 bg-zinc-900 hover:bg-red-950 border border-zinc-700 hover:border-red-700 text-zinc-500 hover:text-red-400 text-sm rounded-lg transition-colors disabled:opacity-50"
+            className="px-3 py-2 bg-zinc-900 hover:bg-red-950 border border-zinc-700 hover:border-red-700 text-zinc-500 hover:text-red-400 text-sm rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
             title="Видалити фід"
           >
             {deleting ? '⏳' : '🗑 Видалити'}
           </button>
-          <div className="w-px h-6 bg-zinc-800" />
+          <div className="hidden sm:block w-px h-6 bg-zinc-800" />
           <div className="flex flex-col items-end gap-1">
             <button
               onClick={handleSyncWC}
               disabled={syncingWC}
-              className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap"
               title="Синхронізувати товари з WooCommerce"
             >
               <span className={syncingWC ? 'animate-spin inline-block' : ''}>↻</span>
@@ -1039,14 +1045,14 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           <button
             onClick={handleGenerate}
             disabled={generating}
-            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-sm rounded-lg transition-colors"
+            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-sm rounded-lg transition-colors whitespace-nowrap"
           >
             ↗ Переглянути XML
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+            className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
           >
             {saving ? 'Збереження...' : '✓ Зберегти'}
           </button>
@@ -1126,10 +1132,10 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
           {/* Header: search + counters */}
           <div className="px-4 pt-4 pb-3 border-b border-zinc-800 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-white">Товари у фіді</h2>
-                <div className="text-xs text-zinc-500 mt-0.5">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-white whitespace-nowrap">Товари у фіді</h2>
+                <div className="text-xs text-zinc-500 mt-0.5 whitespace-nowrap">
                   <span className="text-emerald-400 font-medium">{selectedCount}</span> вибрано
                   <span className="mx-1.5 text-zinc-700">·</span>
                   {filteredProducts.length !== allProducts.length
@@ -1137,7 +1143,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                     : <>{allProducts.length} всього</>}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => { setShowOnlyInFeed(v => !v); setShowOnlySelected(false); setShowOnlyWithIssues(false) }}
                   className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
@@ -1322,8 +1328,10 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
           </div>
 
           {/* Column headers */}
+         <div className="overflow-x-auto">
+          <div className={FEED_MIN_W}>
           <div className="grid gap-2 px-4 py-2 bg-zinc-800/50 border-b border-zinc-800"
-            style={{ gridTemplateColumns: '20px 10px 36px 1fr 36px 48px 48px 70px 70px 52px 86px 86px' }}>
+            style={{ gridTemplateColumns: FEED_COLS }}>
             <div className="text-xs text-zinc-600">✓</div>
             <div />
             <div />
@@ -1412,7 +1420,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                   'border-transparent'
                 } ${isActive ? 'hover:bg-zinc-800/30' : 'opacity-35 hover:opacity-60'}`}>
                   <div className="grid gap-2 px-4 py-2 items-center"
-                    style={{ gridTemplateColumns: '20px 10px 36px 1fr 36px 48px 48px 70px 70px 52px 86px 86px' }}>
+                    style={{ gridTemplateColumns: FEED_COLS }}>
                     {/* Checkbox */}
                     <input
                       type="checkbox"
@@ -1832,14 +1840,16 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               )
             })}
           </div>
+          </div>
+         </div>
 
-          {/* Pagination */}
+          {/* Pagination — outside the scroller so it stays reachable */}
           {filteredProducts.length > PAGE_SIZE && (
-            <div className="px-4 py-3 border-t border-zinc-800 flex items-center justify-between gap-2">
+            <div className="px-4 py-3 border-t border-zinc-800 flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs text-zinc-500">
                 {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredProducts.length)} з {filteredProducts.length}
               </span>
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1">
                 <button
                   disabled={currentPage === 1}
                   onClick={() => setCurrentPage(p => Math.max(1, p - 1))}

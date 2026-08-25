@@ -44,6 +44,12 @@ type EditState = {
 const PER_PAGE = 50
 type SortKey = 'name' | 'price' | 'stock' | 'status' | 'category_name' | 'brand'
 
+// Header and rows must stay in step, so the track list lives in one place.
+// The table is too dense to reflow into a phone; it scrolls sideways inside its
+// own card instead, which keeps the columns identical at every screen size.
+const GRID_COLS = '24px 72px 1fr 160px 160px 100px 100px 90px 45px 90px 100px 90px'
+const GRID_MIN_W = 'min-w-[1400px]'
+
 function calcPer100g(price: number, attrs: Record<string, string> | null): number | null {
   const unit = (attrs?.['Одиниця'] ?? '').toLowerCase()
   const min = parseFloat(attrs?.['Мін'] ?? '0') || 0
@@ -476,7 +482,9 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
   const FilterBtn = ({ active, onClick, children, color = 'zinc' }: { active: boolean; onClick: () => void; children: React.ReactNode; color?: 'zinc' | 'emerald' | 'red' | 'amber' | 'blue' }) => {
     const activeClass = { zinc: 'bg-zinc-600 border-zinc-500 text-white', emerald: 'bg-emerald-700 border-emerald-700 text-white', red: 'bg-red-800 border-red-700 text-white', amber: 'bg-amber-700 border-amber-600 text-white', blue: 'bg-blue-800 border-blue-700 text-white' }[color]
     return (
-      <button onClick={onClick} className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${active ? activeClass : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'}`}>{children}</button>
+      // Category names arrive from WooCommerce and can be long; cap the chip so
+      // one label cannot push the filter row past the viewport.
+      <button onClick={onClick} className={`text-xs px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap max-w-full truncate ${active ? activeClass : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'}`}>{children}</button>
     )
   }
 
@@ -516,7 +524,7 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
               {syncing ? 'Синхронізація...' : 'Синк з WC'}
             </button>
           )}
-          <div className="ml-auto">
+          <div className="sm:ml-auto min-w-0">
             <FilterBtn active={filterWarehouse} onClick={() => setFilter(setFilterWarehouse, !filterWarehouse)} color="zinc">🏭 {warehouseName}</FilterBtn>
           </div>
         </div>
@@ -536,8 +544,10 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+       <div className="overflow-x-auto">
+        <div className={GRID_MIN_W}>
         <div className="grid gap-3 px-4 py-3 border-b border-zinc-800 bg-zinc-800/50"
-          style={{ gridTemplateColumns: '24px 72px 1fr 160px 160px 100px 100px 90px 45px 90px 100px 90px' }}>
+          style={{ gridTemplateColumns: GRID_COLS }}>
           <div />
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Фото</div>
           <SortBtn col="name" label="Назва / Артикул" />
@@ -580,7 +590,7 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
               <div key={p.id} className="border-b border-zinc-800/60 last:border-0">
                 <div
                   className="grid gap-3 px-4 py-2.5 items-center hover:bg-zinc-800/40 transition-colors cursor-pointer"
-                  style={{ gridTemplateColumns: '24px 72px 1fr 160px 160px 100px 100px 90px 45px 90px 100px 90px' }}
+                  style={{ gridTemplateColumns: GRID_COLS }}
                   onClick={() => { setExpandedId(isExpanded ? null : p.id); if (!isExpanded) loadCats() }}
                 >
                   <div className="text-zinc-600 text-xs select-none">{isExpanded ? '▾' : '▸'}</div>
@@ -732,15 +742,17 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
             )
           })}
         </div>
+        </div>
+       </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-between">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3 text-xs text-zinc-500">
           <span>{filteredProducts.length} товарів · сторінка {page} з {totalPages}</span>
-          <span className="text-zinc-700">{PER_PAGE} на сторінці</span>
+          <span className="hidden sm:inline text-zinc-700">{PER_PAGE} на сторінці</span>
         </div>
         {totalPages > 1 && (
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             <button disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))} className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors disabled:opacity-30">← Попередня</button>
             {Array.from({ length: totalPages }, (_, i) => i + 1)
               .filter(pg => pg === 1 || pg === totalPages || Math.abs(pg - page) <= 2)

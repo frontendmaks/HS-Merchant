@@ -102,7 +102,7 @@ function DailyChart({ data, metric }: { data: DayBucket[]; metric: ChartMetric }
           )
         })}
       </div>
-      <div className="flex items-center justify-between mt-3 text-xs text-zinc-500">
+      <div className="flex flex-wrap items-center justify-between gap-y-2 mt-3 text-xs text-zinc-500">
         <span>{dayMonth(data[0].date)}</span>
         <span className="text-zinc-400">
           У середньому{' '}
@@ -346,7 +346,7 @@ export default function AnalyticsClient({
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Аналітика</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Аналітика</h1>
           <p className="text-zinc-400 text-sm mt-0.5">
             {dayMonth(from)} — {dayMonth(to)} · {t.orders} {orderWord(t.orders)}
           </p>
@@ -426,7 +426,7 @@ export default function AnalyticsClient({
       </div>
 
       {/* Customers */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <Card label="Клієнтів" value={String(customerSummary.total)} />
         <Card
           label="Повторні покупці"

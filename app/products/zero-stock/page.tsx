@@ -3,6 +3,11 @@ import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
 
+// Header and rows must stay in step, so the track list lives in one place.
+// Too dense to reflow into a phone — it scrolls sideways inside its own card.
+const GRID_COLS = '56px 1fr 160px 160px 100px 120px 100px'
+const GRID_MIN_W = 'min-w-[1020px]'
+
 export default async function ZeroStockPage() {
   const supabase = createServiceClient()
   const { data } = await supabase
@@ -47,7 +52,7 @@ export default async function ZeroStockPage() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-[auto_1fr] gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-4">
         <div className="bg-zinc-900 border border-red-900/40 rounded-xl p-5 flex items-center gap-5">
           <div>
             <div className="text-4xl font-bold text-red-400">{products.length}</div>
@@ -70,8 +75,10 @@ export default async function ZeroStockPage() {
 
       {/* Table */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+       <div className="overflow-x-auto">
+        <div className={GRID_MIN_W}>
         <div className="grid gap-3 px-5 py-3 border-b border-zinc-800 bg-zinc-800/50"
-          style={{ gridTemplateColumns: '56px 1fr 160px 160px 100px 120px 100px' }}>
+          style={{ gridTemplateColumns: GRID_COLS }}>
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Фото</div>
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Назва</div>
           <div className="text-xs text-zinc-500 uppercase tracking-wide">Категорія</div>
@@ -93,7 +100,7 @@ export default async function ZeroStockPage() {
             return (
               <div key={p.id}
                 className="grid gap-3 px-5 py-3 items-center hover:bg-zinc-800/30 transition-colors"
-                style={{ gridTemplateColumns: '56px 1fr 160px 160px 100px 120px 100px' }}>
+                style={{ gridTemplateColumns: GRID_COLS }}>
 
                 {/* Photo */}
                 <div className="w-12 h-12 rounded-lg overflow-hidden bg-zinc-800 shrink-0">
@@ -143,6 +150,8 @@ export default async function ZeroStockPage() {
             )
           })}
         </div>
+        </div>
+       </div>
 
         {products.length > 0 && (
           <div className="px-5 py-3 border-t border-zinc-800 text-xs text-zinc-600 text-center">

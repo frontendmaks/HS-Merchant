@@ -78,14 +78,14 @@ export default async function FeedsPage() {
 
   return (
     <div className="w-full">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-white">XML Фіди</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold text-white">XML Фіди</h1>
           <p className="text-zinc-500 text-sm mt-1">Керування фідами для маркетплейсів</p>
         </div>
         <Link
           href="/feeds/new"
-          className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors"
+          className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
         >
           + Новий фід
         </Link>
@@ -104,8 +104,8 @@ export default async function FeedsPage() {
 
           return (
             <Link key={feed.id} href={`/feeds/${feed.id}`} className="block">
-              <div className="bg-zinc-900 border border-zinc-800 hover:border-zinc-600 rounded-xl px-6 py-5 transition-colors cursor-pointer">
-                <div className="flex items-center justify-between gap-4">
+              <div className="bg-zinc-900 border border-zinc-800 hover:border-zinc-600 rounded-xl px-4 sm:px-6 py-5 transition-colors cursor-pointer">
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
                   {/* Left */}
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -120,13 +120,13 @@ export default async function FeedsPage() {
                         {feed.status === 'active' ? 'Активний' : feed.status === 'draft' ? 'Чернетка' : feed.status}
                       </span>
                     </div>
-                    <div className="text-xs text-zinc-500 mt-1 font-mono">
+                    <div className="text-xs text-zinc-500 mt-1 font-mono break-all">
                       /api/feeds/{feed.slug}
                     </div>
                   </div>
 
                   {/* Stats */}
-                  <div className="flex items-center gap-6 shrink-0 text-sm">
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
                     {/* Product count */}
                     <div className="text-center">
                       <div className="text-white font-semibold">{productCount}</div>

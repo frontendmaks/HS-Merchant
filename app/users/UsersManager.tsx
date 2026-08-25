@@ -115,9 +115,9 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">Користувачі</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Користувачі</h1>
           <p className="text-zinc-400 text-sm mt-0.5">Управління доступом команди</p>
         </div>
         <button
@@ -140,7 +140,7 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
         <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-5">
           <h2 className="text-white font-semibold mb-4">Запросити нового користувача</h2>
           <form onSubmit={handleInvite} className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div>
                 <label className="block text-zinc-400 text-xs mb-1.5">Email *</label>
                 <input
@@ -212,115 +212,117 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
 
       {/* Users table */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
-              <th className="text-left px-4 py-3">Користувач</th>
-              <th className="text-left px-4 py-3">Email</th>
-              <th className="text-left px-4 py-3">Роль</th>
-              <th className="text-left px-4 py-3">В мережі</th>
-              <th className="text-left px-4 py-3">Статус</th>
-              <th className="text-left px-4 py-3">Доданий</th>
-              <th className="px-4 py-3"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-800/60">
-            {users.map(user => {
-              const isMe = user.id === currentUserId
-              const role = ROLE_LABELS[user.role]
-              return (
-                <tr key={user.id} className="hover:bg-zinc-800/20 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-zinc-300 text-xs font-semibold shrink-0">
-                        {(user.full_name || user.email).slice(0, 1).toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="text-white text-sm font-medium">
-                          {user.full_name || '—'}
-                          {isMe && <span className="ml-2 text-xs text-zinc-500">(ви)</span>}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
+                <th className="text-left px-4 py-3">Користувач</th>
+                <th className="text-left px-4 py-3">Email</th>
+                <th className="text-left px-4 py-3">Роль</th>
+                <th className="text-left px-4 py-3">В мережі</th>
+                <th className="text-left px-4 py-3">Статус</th>
+                <th className="text-left px-4 py-3">Доданий</th>
+                <th className="px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/60">
+              {users.map(user => {
+                const isMe = user.id === currentUserId
+                const role = ROLE_LABELS[user.role]
+                return (
+                  <tr key={user.id} className="hover:bg-zinc-800/20 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center text-zinc-300 text-xs font-semibold shrink-0">
+                          {(user.full_name || user.email).slice(0, 1).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="text-white text-sm font-medium">
+                            {user.full_name || '—'}
+                            {isMe && <span className="ml-2 text-xs text-zinc-500">(ви)</span>}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-zinc-400 text-sm">{user.email}</td>
-                  <td className="px-4 py-3">
-                    {isMe || !canManage(user.role) ? (
-                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${role.color}`}>
-                        {role.label}
-                      </span>
-                    ) : (
-                      <select
-                        value={user.role}
-                        onChange={e => handleRoleChange(user.id, e.target.value)}
-                        className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-red-500"
-                      >
-                        {/* current role stays selectable even if not grantable */}
-                        {!grantable.includes(user.role as UserRole) && (
-                          <option value={user.role}>{ROLE_NAMES[user.role]}</option>
-                        )}
-                        {grantable.map(r => (
-                          <option key={r} value={r!}>{ROLE_NAMES[r!]}</option>
-                        ))}
-                      </select>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {(() => {
-                      const isOnline = onlineUsers.has(user.id)
-                      return (
-                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded ${
-                          isOnline ? 'bg-emerald-950/60 text-emerald-400' : 'bg-zinc-800 text-zinc-500'
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${
-                            isOnline ? 'bg-emerald-400' : 'bg-zinc-600'
-                          }`} />
-                          {isOnline ? 'Online' : 'Offline'}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-400 text-sm">{user.email}</td>
+                    <td className="px-4 py-3">
+                      {isMe || !canManage(user.role) ? (
+                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${role.color}`}>
+                          {role.label}
                         </span>
-                      )
-                    })()}
-                  </td>
-                  <td className="px-4 py-3">
-                    {user.invite_pending ? (
-                      <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded bg-amber-950/60 text-amber-400">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                        Запрошений
-                      </span>
-                    ) : (
-                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded ${
-                        user.is_active ? 'bg-emerald-950/60 text-emerald-400' : 'bg-zinc-800 text-zinc-500'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${user.is_active ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
-                        {user.is_active ? 'Активний' : 'Деактивований'}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-500 text-xs">
-                    {new Date(user.created_at).toLocaleDateString('uk-UA')}
-                  </td>
-                  <td className="px-4 py-3">
-                    {!isMe && canManage(user.role) && (
-                      <div className="flex items-center gap-2 justify-end">
-                        <button
-                          onClick={() => handleToggleActive(user.id, !user.is_active)}
-                          className="text-xs text-zinc-400 hover:text-white px-2 py-1 rounded hover:bg-zinc-800 transition-colors"
+                      ) : (
+                        <select
+                          value={user.role}
+                          onChange={e => handleRoleChange(user.id, e.target.value)}
+                          className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-red-500"
                         >
-                          {user.is_active ? 'Деактивувати' : 'Активувати'}
-                        </button>
-                        <button
-                          onClick={() => handleDelete(user.id, user.email)}
-                          className="text-xs text-red-500 hover:text-red-400 px-2 py-1 rounded hover:bg-zinc-800 transition-colors"
-                        >
-                          Видалити
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                          {/* current role stays selectable even if not grantable */}
+                          {!grantable.includes(user.role as UserRole) && (
+                            <option value={user.role}>{ROLE_NAMES[user.role]}</option>
+                          )}
+                          {grantable.map(r => (
+                            <option key={r} value={r!}>{ROLE_NAMES[r!]}</option>
+                          ))}
+                        </select>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const isOnline = onlineUsers.has(user.id)
+                        return (
+                          <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded ${
+                            isOnline ? 'bg-emerald-950/60 text-emerald-400' : 'bg-zinc-800 text-zinc-500'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${
+                              isOnline ? 'bg-emerald-400' : 'bg-zinc-600'
+                            }`} />
+                            {isOnline ? 'Online' : 'Offline'}
+                          </span>
+                        )
+                      })()}
+                    </td>
+                    <td className="px-4 py-3">
+                      {user.invite_pending ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded bg-amber-950/60 text-amber-400">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                          Запрошений
+                        </span>
+                      ) : (
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded ${
+                          user.is_active ? 'bg-emerald-950/60 text-emerald-400' : 'bg-zinc-800 text-zinc-500'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${user.is_active ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+                          {user.is_active ? 'Активний' : 'Деактивований'}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-500 text-xs">
+                      {new Date(user.created_at).toLocaleDateString('uk-UA')}
+                    </td>
+                    <td className="px-4 py-3">
+                      {!isMe && canManage(user.role) && (
+                        <div className="flex items-center gap-2 justify-end">
+                          <button
+                            onClick={() => handleToggleActive(user.id, !user.is_active)}
+                            className="text-xs text-zinc-400 hover:text-white px-2 py-1 rounded hover:bg-zinc-800 transition-colors"
+                          >
+                            {user.is_active ? 'Деактивувати' : 'Активувати'}
+                          </button>
+                          <button
+                            onClick={() => handleDelete(user.id, user.email)}
+                            className="text-xs text-red-500 hover:text-red-400 px-2 py-1 rounded hover:bg-zinc-800 transition-colors"
+                          >
+                            Видалити
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )
