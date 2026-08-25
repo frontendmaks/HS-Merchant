@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/service'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { sanitizeSku } from '@/lib/transliterate'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -10,24 +11,27 @@ export async function GET(
   const slug = rawSlug.replace(/\.xml$/, '')
   const supabase = createServiceClient()
 
-  const { data: feed, error } = await supabase
+  const { data: feedRow, error } = await supabase
     .from('feeds')
-    .select(`
-      *,
-      marketplace:marketplaces(*),
-      feed_products(
-        *,
-        product:products(*)
-      )
-    `)
+    .select('*, marketplace:marketplaces(*)')
     .eq('slug', slug)
     .eq('status', 'active')
     .single()
 
-  if (error || !feed) {
+  if (error || !feedRow) {
     console.error('Feed error:', error)
     return new NextResponse('Feed not found', { status: 404 })
   }
+
+  // Paged separately — an embedded join is capped at PostgREST's max-rows (1000),
+  // which would silently drop offers from a large feed.
+  const feedProducts = await fetchAllRows(() =>
+    supabase
+      .from('feed_products')
+      .select('*, product:products(*)')
+      .eq('feed_id', feedRow.id)
+  )
+  const feed = { ...feedRow, feed_products: feedProducts }
 
   // Auto-sync removed from feed request — causes timeout when MauDau/Rozetka pulls the feed.
   // Sync WooCommerce manually or via scheduled cron separately.
