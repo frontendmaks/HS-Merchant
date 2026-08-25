@@ -391,12 +391,8 @@ function PlatformTabs({ value, onChange }: {
   )
 }
 
-export default function AnalyticsClient({
-  from, to, platform, totals: t, perDay, products, categories, customers, customerSummary, regions, operators,
-}: {
-  from: string
-  to: string
-  platform: string
+/** One marketplace's worth of figures — the server sends all three at once. */
+export interface Bundle {
   totals: Totals
   perDay: DayBucket[]
   products: ProductStat[]
@@ -411,13 +407,36 @@ export default function AnalyticsClient({
   }
   regions: RegionStat[]
   operators: OperatorStat[]
+}
+
+export default function AnalyticsClient({
+  from, to, platform: initialPlatform, bundles,
+}: {
+  from: string
+  to: string
+  platform: string
+  bundles: Record<string, Bundle>
 }) {
   const [chartMetric, setChartMetric] = useState<ChartMetric>('count')
   const router = useRouter()
-  const go = (f: string, t2: string, p: string) =>
-    router.push(`/analytics?from=${f}&to=${t2}${p === 'all' ? '' : `&platform=${p}`}`)
-  const setRange = (f: string, t2: string) => go(f, t2, platform)
-  const setPlatform = (p: string) => go(from, to, p)
+
+  // Switching marketplace only picks a different pre-computed bundle, so it is
+  // instant. The address bar is kept in step without a navigation, which would
+  // re-render the whole page on the server for data the browser already holds.
+  const [platform, setPlatformState] = useState(initialPlatform)
+  const setPlatform = (p: string) => {
+    setPlatformState(p)
+    const q = new URLSearchParams({ from, to })
+    if (p !== 'all') q.set('platform', p)
+    window.history.replaceState(null, '', `/analytics?${q}`)
+  }
+  // A different period does need the server
+  const setRange = (f: string, t2: string) =>
+    router.push(`/analytics?from=${f}&to=${t2}${platform === 'all' ? '' : `&platform=${platform}`}`)
+
+  const {
+    totals: t, perDay, products, categories, customers, customerSummary, regions, operators,
+  } = bundles[platform] ?? bundles.all
 
   const maxProductQty = Math.max(1, ...products.map(p => p.qty))
   const maxCategoryRevenue = Math.max(1, ...categories.map(c => c.revenue))

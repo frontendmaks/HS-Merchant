@@ -7,7 +7,7 @@ import {
   type OrderRow, type Gazetteer, type OperatorEventRow,
 } from '@/lib/analytics'
 import gazetteerJson from '@/lib/ua-settlements.json'
-import AnalyticsClient from './AnalyticsClient'
+import AnalyticsClient, { type Bundle } from './AnalyticsClient'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
 const gazetteer = gazetteerJson as unknown as Gazetteer
 
 /** Marketplace slugs as stored on orders.platform */
-const PLATFORMS = ['maudau', 'rozetka']
+export const PLATFORMS = ['maudau', 'rozetka'] as const
 
 // Local date parts — toISOString() would shift midnight back a day in UTC+N
 const iso = (d: Date) =>
@@ -27,6 +27,8 @@ function defaultRange() {
   const last = new Date(now.getFullYear(), now.getMonth() + 1, 0)
   return { from: iso(first), to: iso(last) }
 }
+
+type OrderWithId = OrderRow & { id: string }
 
 export default async function AnalyticsPage({
   searchParams,
@@ -41,28 +43,28 @@ export default async function AnalyticsPage({
   const valid = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null)
   const from = valid(sp.from) ?? fallback.from
   const to = valid(sp.to) ?? fallback.to
-
-  // Every figure on the page is computed from this slice, so narrowing it here
-  // is all it takes for one marketplace to be reported on its own.
-  const platform = PLATFORMS.includes(sp.platform ?? '') ? sp.platform! : 'all'
+  const platform = (PLATFORMS as readonly string[]).includes(sp.platform ?? '')
+    ? sp.platform! : 'all'
 
   const supabase = createServiceClient()
 
-  const ordersInPeriod = (columns: string) => {
-    const q = supabase.from('orders').select(columns)
-      .gte('order_date', from).lte('order_date', to)
-    return platform === 'all' ? q : q.eq('platform', platform)
-  }
+  // One pass over the period. Splitting by marketplace happens in memory below,
+  // so switching between them costs no round trip at all.
+  const [{ data: orderRows }, { data: productRows }, { data: operatorRows }] =
+    await Promise.all([
+      supabase.from('orders')
+        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, items, total, commission, status, created_at, raw')
+        .gte('order_date', from).lte('order_date', to)
+        .order('order_date', { ascending: false })
+        .limit(20000),
+      // Only needed to put order lines into categories
+      supabase.from('products').select('name, category_name').limit(5000),
+      // Only operators are measured; managers and admins touch orders too
+      supabase.from('profiles').select('id').eq('role', 'operator'),
+    ])
 
-  const [{ data: orderRows }, { data: productRows }] = await Promise.all([
-    ordersInPeriod('external_id, platform, order_date, customer_name, customer_phone, address, items, total, commission, status, created_at, raw')
-      .order('order_date', { ascending: false })
-      .limit(20000),
-    // Only needed to put order lines into categories
-    supabase.from('products').select('name, category_name').limit(5000),
-  ])
-
-  const orders = (orderRows ?? []) as unknown as OrderRow[]
+  const orders = (orderRows ?? []) as unknown as OrderWithId[]
+  const operatorIds = new Set((operatorRows ?? []).map(r => r.id as string))
 
   const productCategories = new Map<string, string>()
   for (const p of productRows ?? []) {
@@ -72,58 +74,59 @@ export default async function AnalyticsPage({
   }
 
   // Operator efficiency reads the order journal for the same window
-  const { data: orderIdData } = await ordersInPeriod('id, total, status').limit(20000)
-  // The column list is built at runtime, so Supabase cannot infer the row shape
-  const orderIdRows = (orderIdData ?? []) as unknown as
-    { id: string; total: number | null; status: string | null }[]
-
-  const orderIds = orderIdRows.map(o => o.id)
-  const { data: eventRows } = orderIds.length
+  const { data: eventRows } = orders.length
     ? await supabase
         .from('order_events')
         .select('order_id, actor_id, actor_name, type, created_at')
-        .in('order_id', orderIds)
+        .in('order_id', orders.map(o => o.id))
         .limit(50000)
     : { data: [] }
 
-  // Only operators are measured; managers and admins touch orders too
-  const { data: operatorRows } = await supabase
-    .from('profiles').select('id').eq('role', 'operator')
-  const operatorIds = new Set((operatorRows ?? []).map(r => r.id as string))
+  const events = (eventRows ?? []) as OperatorEventRow[]
 
-  const learned = learnCityOblasts(orders)
-  const allCustomers = customers(orders, learned, gazetteer)
+  /** Everything the page shows, for one slice of the orders. */
+  function bundle(rows: OrderWithId[]): Bundle {
+    const learned = learnCityOblasts(rows)
+    const all = customers(rows, learned, gazetteer)
+    const ids = new Set(rows.map(o => o.id))
+
+    return {
+      totals: totals(rows),
+      perDay: ordersPerDay(rows, from, to),
+      products: popularProducts(rows),
+      categories: popularCategories(rows, productCategories),
+      customers: all.slice(0, 20),
+      customerSummary: {
+        total: all.length,
+        repeat: all.filter(c => c.orders > 1).length,
+        avgLtv: all.length ? all.reduce((s, c) => s + c.revenue, 0) / all.length : 0,
+        avgOrdersPerCustomer: all.length
+          ? all.reduce((s, c) => s + c.orders, 0) / all.length
+          : 0,
+        avgCadence: (() => {
+          const c = all.map(x => x.cadenceDays).filter((d): d is number => d != null)
+          return c.length ? Math.round(c.reduce((a, b) => a + b, 0) / c.length) : null
+        })(),
+      },
+      regions: byRegion(rows, learned, gazetteer),
+      operators: operatorStats(
+        events.filter(e => ids.has(e.order_id)),
+        rows.map(o => ({ id: o.id, total: o.total, status: o.status })),
+        operatorIds,
+      ),
+    }
+  }
 
   return (
     <AnalyticsClient
       from={from}
       to={to}
       platform={platform}
-      totals={totals(orders)}
-      perDay={ordersPerDay(orders, from, to)}
-      products={popularProducts(orders)}
-      categories={popularCategories(orders, productCategories)}
-      customers={allCustomers.slice(0, 20)}
-      customerSummary={{
-        total: allCustomers.length,
-        repeat: allCustomers.filter(c => c.orders > 1).length,
-        avgLtv: allCustomers.length
-          ? allCustomers.reduce((s, c) => s + c.revenue, 0) / allCustomers.length
-          : 0,
-        avgOrdersPerCustomer: allCustomers.length
-          ? allCustomers.reduce((s, c) => s + c.orders, 0) / allCustomers.length
-          : 0,
-        avgCadence: (() => {
-          const c = allCustomers.map(x => x.cadenceDays).filter((d): d is number => d != null)
-          return c.length ? Math.round(c.reduce((a, b) => a + b, 0) / c.length) : null
-        })(),
+      bundles={{
+        all: bundle(orders),
+        maudau: bundle(orders.filter(o => o.platform === 'maudau')),
+        rozetka: bundle(orders.filter(o => o.platform === 'rozetka')),
       }}
-      regions={byRegion(orders, learned, gazetteer)}
-      operators={operatorStats(
-        (eventRows ?? []) as OperatorEventRow[],
-        orderIdRows,
-        operatorIds,
-      )}
     />
   )
 }
