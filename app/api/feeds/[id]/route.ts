@@ -3,7 +3,9 @@ import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { sanitizeSku } from '@/lib/transliterate'
 import { NextRequest, NextResponse } from 'next/server'
 import { calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars } from '@/lib/feed-xml'
-import { generateRozetkaYML } from '@/lib/rozetka-feed'
+import {
+  generateRozetkaYML, type RozetkaFeedContext, type RzCategoryMeta,
+} from '@/lib/rozetka-feed'
 
 export async function GET(
   request: NextRequest,
@@ -65,10 +67,33 @@ export async function GET(
 
   const isRozetka = feed.marketplace?.slug === 'rozetka'
 
+  // Rozetka files products under its own category ids, and each category
+  // dictates which characteristics an offer may carry
+  let rzCtx: RozetkaFeedContext = { categoryIds: {}, categories: new Map() }
+  if (isRozetka) {
+    const categoryIds = (feed.settings?.rozetka_category_ids ?? {}) as Record<string, string>
+    // Per-product overrides can point outside the category mapping
+    const perProduct = feedProducts
+      .map(fp => (fp.custom_params as Record<string, string> | null)?.['_rz_category'])
+      .filter((v): v is string => !!v)
+    const wanted = [...new Set([...Object.values(categoryIds), ...perProduct])].filter(Boolean)
+
+    const { data: rzCats } = wanted.length
+      ? await supabase.from('rozetka_categories')
+          .select('id, title, attributes')
+          .in('id', wanted.map(Number))
+      : { data: [] }
+
+    rzCtx = {
+      categoryIds,
+      categories: new Map((rzCats ?? []).map(c => [String(c.id), c as RzCategoryMeta])),
+    }
+  }
+
   const { xml, offersCount, errorsCount, errors } = isMaudau
     ? generateMaudauYML(feed, slugToPortalId, catAttrsMap)
     : isRozetka
-      ? generateRozetkaYML(feed)
+      ? generateRozetkaYML(feed, rzCtx)
       : generateYML(feed)
 
   // Log access (fire-and-forget)

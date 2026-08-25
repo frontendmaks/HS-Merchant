@@ -11,29 +11,19 @@ import { calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars } fr
 //   · name up to 255 chars, description up to 50 000
 // https://sellerhelp.rozetka.com.ua/p185-pricelist-requirements.html
 
-/** Category ids must survive regeneration, so they are derived from the name
- *  rather than from the order products happen to arrive in. FNV-1a, kept well
- *  inside 32 bits; collisions are resolved deterministically by the caller. */
-function categoryHash(name: string): number {
-  let h = 0x811c9dc5
-  for (let i = 0; i < name.length; i++) {
-    h ^= name.charCodeAt(i)
-    h = Math.imul(h, 0x01000193) >>> 0
-  }
-  return (h % 1_000_000_000) + 1
+export interface RzCategoryMeta {
+  id: number
+  title: string
+  attributes: { id: number; title: string; type: string; values: { id: number; value: string }[] }[] | null
 }
 
-function rozetkaCategoryIds(names: string[]): Map<string, number> {
-  const out = new Map<string, number>()
-  const taken = new Set<number>()
-  // Sorted so the resolution of any collision does not depend on product order
-  for (const name of [...names].sort()) {
-    let id = categoryHash(name)
-    while (taken.has(id)) id++
-    taken.add(id)
-    out.set(name, id)
-  }
-  return out
+/** The categories a feed maps onto, keyed by our category name, plus whatever
+ *  the editor stored per product. */
+export interface RozetkaFeedContext {
+  /** our category name -> Rozetka category id, from feed.settings */
+  categoryIds: Record<string, string>
+  /** Rozetka category id -> its metadata, from rozetka_categories */
+  categories: Map<string, RzCategoryMeta>
 }
 
 /** Rozetka wants "YYYY-MM-DD hh:mm", not an ISO timestamp. */
@@ -47,36 +37,42 @@ function usableImage(url: string): boolean {
   return /^https:\/\//i.test(url) && !/[\u0400-\u04FF\s+]/.test(url)
 }
 
+/** Params the editor stores are prefixed so they cannot collide with a
+ *  WooCommerce attribute of the same name. */
+const RZ_PARAM = /^_rz_(\d+)$/
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function generateRozetkaYML(feed: any): {
+export function generateRozetkaYML(feed: any, ctx: RozetkaFeedContext): {
   xml: string; offersCount: number; errorsCount: number; errors: string[]
 } {
   const errors: string[] = []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const activeFps = feed.feed_products.filter((fp: any) => fp.is_active && fp.product)
 
-  const catIds = rozetkaCategoryIds([...new Set(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    activeFps.map((fp: any) => (fp.product.category_name as string) ?? 'Інше'),
-  )] as string[])
-
-  const categoriesXml = [...catIds.entries()]
-    .map(([name, id]) => `      <category id="${id}">${escapeXml(name)}</category>`)
-    .join('\n')
-
+  const used = new Map<string, RzCategoryMeta>()
   const offers: string[] = []
 
   for (const fp of activeFps) {
     const p = fp.product
     const attrs = (p.attributes as Record<string, string>) ?? {}
+    const params = (fp.custom_params ?? {}) as Record<string, string>
 
-    // The id has to be permanent. The WooCommerce product id is, our own row id
+    // The id has to be permanent. The WooCommerce product id is; our own row id
     // is a uuid and Rozetka allows no hyphens in it.
     const offerId = String(p.external_id ?? '').trim()
     if (!/^[A-Za-z0-9]+$/.test(offerId)) {
       errors.push(`Пропущено — немає стабільного коду товару: ${p.name ?? p.id}`)
       continue
     }
+
+    // Per-product choice wins over the mapping made for its category
+    const catId = params['_rz_category'] || ctx.categoryIds[p.category_name ?? ''] || ''
+    const cat = catId ? ctx.categories.get(String(catId)) : undefined
+    if (!cat) {
+      errors.push(`Пропущено — категорію Rozetka не задано: ${p.name ?? offerId}`)
+      continue
+    }
+    used.set(String(cat.id), cat)
 
     const weightLabel = minWeightLabel(attrs)
     const baseName = fp.custom_name ?? p.name
@@ -105,11 +101,24 @@ export function generateRozetkaYML(feed: any): {
       ? (calcMarketplacePrice(Number(p.price_old), attrs) ?? Number(p.price_old))
       : null
 
-    const merged = { ...attrs, ...(fp.custom_params ?? {}) }
-    const params = Object.entries(merged)
-      .filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '')
-      .map(([k, v]) => `      <param name="${escapeXml(k)}">${escapeXml(String(v))}</param>`)
-      .join('\n')
+    // Characteristics, named and numbered the way Rozetka knows them. Where the
+    // attribute takes values from its own list, send the id too — matching on
+    // the text alone is how a value silently fails to stick.
+    const byId = new Map((cat.attributes ?? []).map(a => [String(a.id), a]))
+    const paramXml: string[] = []
+    for (const [key, raw] of Object.entries(params)) {
+      const m = RZ_PARAM.exec(key)
+      if (!m || raw == null || String(raw).trim() === '') continue
+      const attr = byId.get(m[1])
+      if (!attr) continue
+      const value = String(raw).trim()
+      const valueId = attr.values?.find(v => v.value === value)?.id
+      paramXml.push(
+        `      <param name="${escapeXml(attr.title)}" paramid="${attr.id}"` +
+        (valueId ? ` valueid="${valueId}"` : '') +
+        `>${escapeXml(value)}</param>`,
+      )
+    }
 
     offers.push([
       `    <offer id="${offerId}" available="${available}">`,
@@ -118,16 +127,21 @@ export function generateRozetkaYML(feed: any): {
       `      <price>${price}</price>`,
       oldRaw && oldRaw > price ? `      <price_old>${oldRaw}</price_old>` : '',
       `      <currencyId>${p.currency || 'UAH'}</currencyId>`,
-      `      <categoryId>${catIds.get(p.category_name ?? 'Інше')}</categoryId>`,
+      `      <categoryId>${cat.id}</categoryId>`,
       `      <stock_quantity>${stock}</stock_quantity>`,
       ...pictures.map(u => `      <picture>${escapeXml(u)}</picture>`),
       p.vendor ? `      <vendor>${escapeXml(p.vendor)}</vendor>` : '',
       p.sku ? `      <article>${escapeXml(p.sku)}</article>` : '',
       `      <description><![CDATA[${stripControlChars(p.description ?? '').slice(0, 50_000)}]]></description>`,
-      params,
+      ...paramXml,
       `    </offer>`,
     ].filter(Boolean).join('\n'))
   }
+
+  const categoriesXml = [...used.values()]
+    .sort((a, b) => a.id - b.id)
+    .map(c => `      <category id="${c.id}">${escapeXml(c.title)}</category>`)
+    .join('\n')
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <yml_catalog date="${ymlDate(new Date())}">

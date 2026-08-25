@@ -20,20 +20,29 @@ export async function GET(req: NextRequest) {
     const leafOnly = req.nextUrl.searchParams.get('leaf') === '1'
     const supabase = createServiceClient()
 
-    let q = supabase
-      .from('rozetka_categories')
-      .select('id, title, parent_id, level, mpath, is_vendor_required, attributes')
-      .order('title')
-      .limit(500)
+    // Compact on purpose: the picker holds all 4712 at once to filter locally,
+    // and the wide columns would turn 150KB into megabytes.
+    const page = async (from: number) => {
+      let q = supabase
+        .from('rozetka_categories')
+        .select('id, title, level, is_vendor_required')
+        .order('title')
+        .range(from, from + 999)
+      if (title) q = q.ilike('title', `%${title}%`)
+      if (leafOnly) q = q.gte('level', 4)
+      const { data, error } = await q
+      if (error) throw error
+      return data ?? []
+    }
 
-    if (title) q = q.ilike('title', `%${title}%`)
-    // A parent category takes no products, so offer only the deepest levels
-    if (leafOnly) q = q.gte('level', 4)
+    const data: { id: number; title: string; level: number | null; is_vendor_required: boolean }[] = []
+    for (let from = 0; ; from += 1000) {
+      const rows = await page(from)
+      data.push(...rows)
+      if (rows.length < 1000) break
+    }
 
-    const { data, error } = await q
-    if (error) throw error
-
-    if (data && data.length) {
+    if (data.length) {
       return NextResponse.json({ success: true, categories: data, source: 'db' })
     }
 

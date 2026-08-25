@@ -196,6 +196,44 @@ function MauDauCatDropdown({
   )
 }
 
+interface RzCategory {
+  id: number
+  title: string
+  level: number | null
+  is_vendor_required: boolean
+}
+
+interface RzAttribute {
+  id: number
+  title: string
+  type: string
+  unit: string | null
+  values: { id: number; value: string }[]
+}
+
+/** Rozetka category picker. Same control as MauDau's, but over 4700 entries
+ *  rather than 139, so the level is shown to tell near-identical names apart. */
+function RozetkaCatDropdown({ value, categories, onChange }: {
+  value: string
+  categories: RzCategory[]
+  onChange: (v: string) => void
+}) {
+  const options = useMemo(
+    () => categories.map(c => ({ value: String(c.id), label: `${c.title} · ${c.id}` })),
+    [categories],
+  )
+  return (
+    <SearchableSelect
+      value={value}
+      options={options}
+      onChange={onChange}
+      placeholder="— оберіть —"
+      emptyLabel="— прибрати вибір —"
+      accentColor="purple"
+    />
+  )
+}
+
 export default function FeedEditor({ feed, feedProducts, allProducts, categories, marketplaces }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -203,6 +241,83 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [generating, setGenerating] = useState(false)
 
   const isMaudau = feed.marketplace?.slug === 'maudau' || feed.marketplace?.name?.toLowerCase().includes('maudau')
+  const isRozetka = feed.marketplace?.slug === 'rozetka' || feed.marketplace?.name?.toLowerCase().includes('rozetka')
+
+  // Rozetka: its whole tree, held client-side so the picker can filter without
+  // a round trip. ~4700 entries, id and title only.
+  const [rzCategories, setRzCategories] = useState<RzCategory[]>([])
+  const [rzCatsLoading, setRzCatsLoading] = useState(false)
+  const [rzCatsError, setRzCatsError] = useState('')
+  const [rzSyncing, setRzSyncing] = useState(false)
+  const [rzSyncMsg, setRzSyncMsg] = useState('')
+  const [rzBlockSearch, setRzBlockSearch] = useState('')
+  const [rzExpandedCats, setRzExpandedCats] = useState<Set<string>>(new Set())
+  // Attributes per Rozetka category id, fetched on demand
+  const [rzAttrs, setRzAttrs] = useState<Record<string, RzAttribute[]>>({})
+  const [rzAttrsLoading, setRzAttrsLoading] = useState<Record<string, boolean>>({})
+
+  const loadRzCategories = () => {
+    setRzCatsLoading(true)
+    setRzCatsError('')
+    fetch('/api/rozetka/categories')
+      .then(r => r.json())
+      .then(d => {
+        setRzCategories(d.categories ?? [])
+        if (d.error) setRzCatsError(d.error)
+        else if (d.hint) setRzCatsError(d.hint)
+      })
+      .catch(() => setRzCatsError('Не вдалося завантажити категорії Rozetka'))
+      .finally(() => setRzCatsLoading(false))
+  }
+
+  const syncRzCategories = async () => {
+    setRzSyncing(true)
+    setRzSyncMsg('')
+    try {
+      const res = await fetch('/api/rozetka/sync-categories', { method: 'POST' })
+      const d = await res.json()
+      if (!d.success) throw new Error(d.error)
+      setRzSyncMsg(`✅ ${d.count} категорій`)
+      loadRzCategories()
+    } catch (err) {
+      setRzSyncMsg('❌ ' + ((err as Error).message || 'Помилка'))
+    } finally {
+      setRzSyncing(false)
+    }
+  }
+
+  /** Rozetka charges one request per attribute value list, so fetch a
+   *  category's attributes once and keep them. */
+  const loadRzAttrs = async (categoryId: string, force = false) => {
+    if (!categoryId) return
+    if (!force && rzAttrs[categoryId]) return
+    setRzAttrsLoading(m => ({ ...m, [categoryId]: true }))
+    try {
+      const res = force
+        ? await fetch('/api/rozetka/attributes', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category_id: Number(categoryId) }),
+          })
+        : await fetch(`/api/rozetka/attributes?category_id=${categoryId}`)
+      const d = await res.json()
+      if (d.success) setRzAttrs(m => ({ ...m, [categoryId]: d.attributes ?? [] }))
+    } finally {
+      setRzAttrsLoading(m => ({ ...m, [categoryId]: false }))
+    }
+  }
+
+  useEffect(() => {
+    if (!isRozetka) return
+    loadRzCategories()
+  }, [isRozetka])
+
+  // Categories mapped in an earlier session need their attributes back before
+  // the editor can show what is already filled in
+  useEffect(() => {
+    if (!isRozetka) return
+    for (const id of new Set(Object.values(rzCategoryIds).filter(Boolean))) void loadRzAttrs(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRozetka])
 
   // MauDau: available categories fetched from API / DB
   const [maudauCategories, setMaudauCategories] = useState<{ slug: string; title: string; portal_id?: string; attributes?: { name: string; type: string; values: string[] }[] }[]>([])
@@ -299,6 +414,10 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [categoryPortalIds, setCategoryPortalIds] = useState<Record<string, string>>(
     feed.settings?.category_portal_ids ?? {}
   )
+  // Rozetka: category id per category name
+  const [rzCategoryIds, setRzCategoryIds] = useState<Record<string, string>>(
+    feed.settings?.rozetka_category_ids ?? {}
+  )
 
   // Build overrides map — only from saved feed_products, everything else defaults to inactive
   const fpMap = useMemo(() => new Map(feedProducts.map(fp => [fp.product_id, fp])), [feedProducts])
@@ -360,6 +479,26 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   const [expandedCatBlocks, setExpandedCatBlocks] = useState<Set<string>>(new Set())
   const [maudauBlockSearch, setMaudauBlockSearch] = useState('')
   const [attrTemplateStatus, setAttrTemplateStatus] = useState<Record<string, string>>({}) // portalId → 'ok'|'err'|msg
+
+  /** Writes one Rozetka attribute onto every active product of our category.
+   *  Keys are prefixed so they cannot collide with a WooCommerce attribute of
+   *  the same name, and so the generator knows which params are Rozetka's. */
+  const rzParamKey = (attrId: number) => `_rz_${attrId}`
+
+  const setRzCatDefault = (catName: string, attrId: number, value: string) => {
+    setOverrides(prev => {
+      const next = { ...prev }
+      for (const p of allProducts) {
+        if (p.category_name !== catName) continue
+        if (next[p.id]?.is_active !== true) continue
+        const params = { ...(next[p.id]?.custom_params ?? {}) }
+        if (value) params[rzParamKey(attrId)] = value
+        else delete params[rzParamKey(attrId)]
+        next[p.id] = { ...next[p.id], custom_params: params }
+      }
+      return next
+    })
+  }
 
   const setCatDefaultAndApply = (catName: string, portalId: string, attrName: string, value: string) => {
     setOverrides(prev => {
@@ -974,6 +1113,7 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               categories: filterType === 'categories' ? selectedCategories : [],
             },
             ...(isMaudau ? { category_portal_ids: categoryPortalIds } : {}),
+            ...(isRozetka ? { rozetka_category_ids: rzCategoryIds } : {}),
           },
           overrides,
         }),
@@ -1670,6 +1810,80 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                             >+ Додати</button>
                           </div>
 
+                          {/* Per-product Rozetka category and characteristics */}
+                          {isRozetka && (() => {
+                            const catId = curParams['_rz_category'] || (rzCategoryIds[p.category_name ?? ''] ?? '')
+                            const attrs = catId ? (rzAttrs[catId] ?? []) : []
+                            const inherited = rzCategoryIds[p.category_name ?? ''] ?? ''
+                            const inheritedTitle = rzCategories.find(c => String(c.id) === inherited)?.title
+                            return (
+                              <div className="mb-3 space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] text-zinc-400 whitespace-nowrap shrink-0 w-28">Rozetka кат.:</span>
+                                  <div className="flex-1 min-w-0">
+                                    <RozetkaCatDropdown
+                                      value={curParams['_rz_category'] ?? ''}
+                                      categories={rzCategories}
+                                      onChange={v => {
+                                        if (v) { setParam('_rz_category', v); void loadRzAttrs(v) }
+                                        else clearParam('_rz_category')
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                                {!curParams['_rz_category'] && (
+                                  <p className="text-[10px] text-zinc-600 pl-[7.5rem]">
+                                    {inheritedTitle
+                                      ? `за категорією «${p.category_name}» → ${inheritedTitle}`
+                                      : 'категорію не задано — товар не потрапить у фід'}
+                                  </p>
+                                )}
+
+                                {attrs.length > 0 && (
+                                  <div className="space-y-1.5 pt-1">
+                                    <p className="text-[10px] text-zinc-600">
+                                      Характеристики Rozetka — порожні успадковують значення категорії
+                                    </p>
+                                    {attrs.map(attr => {
+                                      const key = rzParamKey(attr.id)
+                                      const val = curParams[key] ?? ''
+                                      return (
+                                        <div key={attr.id} className="flex items-center gap-2">
+                                          <span className="w-28 shrink-0 text-[11px] text-zinc-400 truncate"
+                                                title={`${attr.title} · ${attr.type}`}>
+                                            {attr.title}{attr.unit ? `, ${attr.unit}` : ''}
+                                          </span>
+                                          {attr.values.length > 0 ? (
+                                            <div className="flex-1 min-w-0">
+                                              <SearchableSelect
+                                                value={val}
+                                                options={attr.values.map(v => ({ value: v.value, label: v.value }))}
+                                                onChange={v => v ? setParam(key, v) : clearParam(key)}
+                                                placeholder="— Обрати —"
+                                                emptyLabel="— прибрати —"
+                                                accentColor="purple"
+                                              />
+                                            </div>
+                                          ) : (
+                                            <input
+                                              type="text"
+                                              defaultValue={val}
+                                              onBlur={e => {
+                                                if (e.target.value === val) return
+                                                e.target.value ? setParam(key, e.target.value) : clearParam(key)
+                                              }}
+                                              className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-purple-500"
+                                            />
+                                          )}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()}
+
                           {/* Per-product MauDau category override */}
                           {isMaudau && (() => {
                             const autoMauCat = maudauCategories.find(c => c.portal_id === catPortalId)
@@ -1885,6 +2099,167 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
       </div>
 
       {/* MauDau: Category portal_id mapping */}
+      {isRozetka && (
+        <div className="bg-zinc-900 border border-purple-900/50 rounded-xl p-4 w-1/2 min-w-[320px]">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-white">🟢 Rozetka — категорії</h2>
+              {rzCatsLoading && <span className="text-xs text-zinc-500">Завантаження...</span>}
+              {rzCategories.length > 0 && (
+                <span className="text-xs text-zinc-600">• {rzCategories.length} кат.</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={syncRzCategories}
+                disabled={rzSyncing}
+                className="text-xs px-2.5 py-1 rounded-lg border border-purple-800 text-purple-400 hover:bg-purple-900/20 transition-colors disabled:opacity-50 whitespace-nowrap"
+              >
+                {rzSyncing ? '⏳...' : '🔄 Категорії'}
+              </button>
+              {rzSyncMsg && <span className="text-xs text-zinc-400">{rzSyncMsg}</span>}
+            </div>
+          </div>
+
+          {rzCatsError && <p className="text-xs text-amber-400 mb-3">{rzCatsError}</p>}
+
+          {activeCategories.length === 0 ? (
+            <p className="text-xs text-zinc-600">Спочатку виберіть товари у фіді.</p>
+          ) : (
+            <>
+              <input
+                type="text"
+                placeholder="🔍 Пошук по своїх категоріях..."
+                value={rzBlockSearch}
+                onChange={e => setRzBlockSearch(e.target.value)}
+                className="w-full mb-3 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-purple-500"
+              />
+
+              <div className="grid grid-cols-[1fr_1fr_56px] gap-2 px-2 py-1 mb-1">
+                <span className="text-[10px] text-zinc-600 uppercase tracking-wide">Категорія на сайті</span>
+                <span className="text-[10px] text-zinc-600 uppercase tracking-wide">Категорія на Rozetka</span>
+                <span className="text-[10px] text-zinc-600 uppercase tracking-wide text-center">Атр.</span>
+              </div>
+
+              <div className="space-y-0.5">
+                {activeCategories
+                  .filter(cat => !rzBlockSearch || cat.toLowerCase().includes(rzBlockSearch.toLowerCase()))
+                  .map(cat => {
+                    const rzId = rzCategoryIds[cat] ?? ''
+                    const attrs = rzId ? (rzAttrs[rzId] ?? []) : []
+                    const loading = !!rzAttrsLoading[rzId]
+                    const expanded = rzExpandedCats.has(cat)
+
+                    return (
+                      <div key={cat} className="border border-zinc-800/60 rounded-lg overflow-hidden">
+                        <div className="grid grid-cols-[1fr_1fr_56px] gap-2 px-2 py-1.5 items-center bg-zinc-900">
+                          <span className="text-xs text-zinc-300 truncate">{cat}</span>
+
+                          <RozetkaCatDropdown
+                            value={rzId}
+                            categories={rzCategories}
+                            onChange={v => {
+                              setRzCategoryIds(prev => ({ ...prev, [cat]: v }))
+                              if (v) void loadRzAttrs(v)
+                            }}
+                          />
+
+                          <button
+                            type="button"
+                            disabled={!rzId}
+                            onClick={() => {
+                              void loadRzAttrs(rzId)
+                              setRzExpandedCats(prev => {
+                                const next = new Set(prev)
+                                if (next.has(cat)) next.delete(cat); else next.add(cat)
+                                return next
+                              })
+                            }}
+                            className={`text-center text-[10px] px-1.5 py-1 rounded border transition-colors ${
+                              !rzId
+                                ? 'border-zinc-800 text-zinc-700 cursor-not-allowed'
+                                : expanded
+                                  ? 'bg-purple-900/40 border-purple-700 text-purple-300'
+                                  : 'border-zinc-700 text-zinc-500 hover:border-purple-600 hover:text-purple-400'
+                            }`}
+                            title={rzId ? `${attrs.length} характеристик` : 'Спершу оберіть категорію Rozetka'}
+                          >
+                            {loading ? '…' : rzId ? (expanded ? `▲${attrs.length}` : `▼${attrs.length}`) : '—'}
+                          </button>
+                        </div>
+
+                        {expanded && rzId && (
+                          <div className="px-3 py-3 bg-zinc-800/30 border-t border-zinc-800 space-y-2">
+                            <div className="flex items-center justify-between mb-1 gap-2">
+                              <p className="text-[10px] text-zinc-500">
+                                Заповнене застосується до всіх активних товарів у «{cat}»
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => void loadRzAttrs(rzId, true)}
+                                className="text-[10px] text-purple-400 hover:text-purple-300 whitespace-nowrap shrink-0"
+                              >
+                                ↻ Оновити з Rozetka
+                              </button>
+                            </div>
+
+                            {loading && <p className="text-[10px] text-zinc-500">Завантаження характеристик…</p>}
+                            {!loading && attrs.length === 0 && (
+                              <p className="text-[10px] text-zinc-600">Ця категорія не має характеристик.</p>
+                            )}
+
+                            {attrs.map(attr => {
+                              const sample = allProducts.find(p =>
+                                p.category_name === cat && overrides[p.id]?.is_active)
+                              const val = sample
+                                ? (overrides[sample.id]?.custom_params?.[rzParamKey(attr.id)] ?? '')
+                                : ''
+                              return (
+                                <div key={attr.id} className="flex items-center gap-2">
+                                  <span className="w-36 shrink-0 text-[11px] text-zinc-400 truncate"
+                                        title={`${attr.title} · ${attr.type}`}>
+                                    {attr.title}{attr.unit ? `, ${attr.unit}` : ''}
+                                  </span>
+                                  <span className="text-zinc-600 text-xs shrink-0">:</span>
+                                  {attr.values.length > 0 ? (
+                                    <div className="flex-1">
+                                      <SearchableSelect
+                                        value={val}
+                                        options={attr.values.map(v => ({ value: v.value, label: v.value }))}
+                                        onChange={v => setRzCatDefault(cat, attr.id, v)}
+                                        placeholder="— Обрати —"
+                                        emptyLabel="— прибрати —"
+                                        accentColor="purple"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      defaultValue={val}
+                                      onBlur={e => {
+                                        if (e.target.value !== val) setRzCatDefault(cat, attr.id, e.target.value)
+                                      }}
+                                      className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none focus:border-purple-500"
+                                      placeholder="Значення для всіх товарів..."
+                                    />
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                {activeCategories.filter(cat => !rzBlockSearch || cat.toLowerCase().includes(rzBlockSearch.toLowerCase())).length === 0 && (
+                  <p className="text-xs text-zinc-600 py-2">Нічого не знайдено</p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {isMaudau && (
         <div className="bg-zinc-900 border border-purple-900/50 rounded-xl p-4 w-1/2 min-w-[320px]">
           {/* Header row */}
