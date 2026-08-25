@@ -38,6 +38,9 @@ export default function ShipmentDialog({ orderId, onClose }: {
   const [seats, setSeats] = useState('1')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [created, setCreated] = useState<{ ttn?: string; cost?: number; estimatedDelivery?: string } | null>(null)
+  const [createError, setCreateError] = useState('')
 
   useEffect(() => {
     fetch(`/api/orders/${orderId}/shipment`)
@@ -65,6 +68,28 @@ export default function ShipmentDialog({ orderId, onClose }: {
       if (res.ok) { setSaved(true); setTimeout(() => setSaved(false), 3000) }
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function createTtn() {
+    setCreating(true)
+    setCreateError('')
+    try {
+      const res = await fetch(`/api/orders/${orderId}/shipment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          weight: Number(weight.replace(',', '.')),
+          seats: Number(seats),
+        }),
+      })
+      const d = await res.json()
+      if (!res.ok || d.error) { setCreateError(d.error || 'Не вдалося створити ТТН'); return }
+      setCreated(d)
+    } catch {
+      setCreateError('Помилка мережі')
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -142,13 +167,25 @@ export default function ShipmentDialog({ orderId, onClose }: {
             </div>
 
             <div className="border-t border-zinc-800 pt-4">
-              {missing.length === 0 ? (
+              {created || data.order.ttn ? (
+                <div className="bg-emerald-950/40 border border-emerald-900/60 rounded-lg px-3 py-2.5">
+                  <div className="text-emerald-300 text-sm font-medium">
+                    ✓ ТТН {created?.ttn ?? data.order.ttn}
+                  </div>
+                  {created && (
+                    <div className="text-emerald-400/80 text-xs mt-1">
+                      Вартість доставки {created.cost} грн
+                      {created.estimatedDelivery && <> · орієнтовно {created.estimatedDelivery}</>}
+                    </div>
+                  )}
+                </div>
+              ) : missing.length === 0 ? (
                 <button
-                  disabled
-                  title="Створення ТТН ще не під'єднано"
-                  className="w-full px-4 py-2.5 rounded-lg text-sm bg-red-600/40 text-white/70 cursor-not-allowed"
+                  onClick={createTtn}
+                  disabled={creating}
+                  className="w-full px-4 py-2.5 rounded-lg text-sm bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-medium transition-colors"
                 >
-                  Створити ТТН у Новій Пошті
+                  {creating ? 'Створення...' : 'Створити ТТН у Новій Пошті'}
                 </button>
               ) : (
                 <div className="bg-amber-950/40 border border-amber-900/60 rounded-lg px-3 py-2.5">
@@ -162,9 +199,12 @@ export default function ShipmentDialog({ orderId, onClose }: {
                   </ul>
                 </div>
               )}
+              {createError && (
+                <div className="text-red-400 text-xs mt-2">{createError}</div>
+              )}
               <div className="text-zinc-600 text-xs mt-2">
-                Вагу можна зберегти вже зараз — вона підставиться, щойно підключимо
-                Нову Пошту, і доти видна для ручного створення накладної.
+                Одержувача буде створено в Новій Пошті з імені та телефону
+                із замовлення. Оплата — одержувачем при отриманні.
               </div>
             </div>
           </div>
