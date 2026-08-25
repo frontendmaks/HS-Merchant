@@ -1,4 +1,4 @@
--- Order sync schedule (lives in Supabase, not vercel.json).
+-- Sync schedules (live in Supabase, not vercel.json).
 --
 -- Why here: the Vercel plan is Hobby, where cron jobs may only run once per
 -- day. pg_cron has no such limit, so the frequent schedules run from Postgres
@@ -9,12 +9,17 @@
 --
 --   orders-quick-sync         */5 * * * *   ~4 marketplace requests, ~2s
 --   orders-full-sync          2 */3 * * *   ~26 requests, ~8s (re-reads the year)
+--   hourly-wc-sync            10 * * * *    full WooCommerce product sync, 135-225s
 --   order-sync-logs-cleanup   30 4 * * *    drops auto logs older than 7 days
 --
 -- The full run is offset by two minutes so it never coincides with a quick run.
 --
--- The Vercel cron in vercel.json (04:00 daily, full) stays as a backstop in
--- case pg_cron or the database is unavailable.
+-- hourly-wc-sync keeps feed prices and stock current; a run takes long enough
+-- that pg_net often discards the response body, which is harmless — the app
+-- records every run in sync_logs, and that is where to check the outcome.
+--
+-- The Vercel crons in vercel.json (03:00 products, 04:00 orders — both daily)
+-- stay as a backstop in case pg_cron or the database is unavailable.
 
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
@@ -57,8 +62,39 @@ $$;
 
 REVOKE ALL ON FUNCTION public.trigger_order_sync(text) FROM PUBLIC, anon, authenticated;
 
+CREATE OR REPLACE FUNCTION public.trigger_product_sync()
+RETURNS bigint
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions, vault
+AS $$
+DECLARE
+  v_url     text;
+  v_secret  text;
+  v_request bigint;
+BEGIN
+  SELECT decrypted_secret INTO v_url    FROM vault.decrypted_secrets WHERE name = 'hs_app_url';
+  SELECT decrypted_secret INTO v_secret FROM vault.decrypted_secrets WHERE name = 'hs_cron_secret';
+
+  IF v_url IS NULL OR v_secret IS NULL THEN
+    RAISE EXCEPTION 'hs_app_url or hs_cron_secret missing from vault';
+  END IF;
+
+  SELECT net.http_get(
+    url                  := v_url || '/api/cron/sync',
+    headers              := jsonb_build_object('Authorization', 'Bearer ' || v_secret),
+    timeout_milliseconds := 290000
+  ) INTO v_request;
+
+  RETURN v_request;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.trigger_product_sync() FROM PUBLIC, anon, authenticated;
+
 SELECT cron.schedule('orders-quick-sync', '*/5 * * * *', $$SELECT public.trigger_order_sync('quick')$$);
 SELECT cron.schedule('orders-full-sync',  '2 */3 * * *', $$SELECT public.trigger_order_sync('full')$$);
+SELECT cron.schedule('hourly-wc-sync',    '10 * * * *',  $$SELECT public.trigger_product_sync()$$);
 
 SELECT cron.schedule(
   'order-sync-logs-cleanup', '30 4 * * *',
@@ -76,6 +112,8 @@ SELECT cron.schedule(
 -- HTTP responses: SELECT id, status_code, content FROM net._http_response
 --                 ORDER BY id DESC LIMIT 10;
 -- App-side log:   SELECT * FROM order_sync_logs ORDER BY created_at DESC LIMIT 20;
+-- Product syncs:  SELECT created_at, status, synced, deactivated, duration_ms
+--                 FROM sync_logs ORDER BY created_at DESC LIMIT 20;
 -- Change cadence: SELECT cron.schedule('orders-quick-sync', '*/3 * * * *',
 --                   $$SELECT public.trigger_order_sync('quick')$$);
 -- Pause:          SELECT cron.unschedule('orders-quick-sync');
