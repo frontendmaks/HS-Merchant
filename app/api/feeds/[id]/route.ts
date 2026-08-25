@@ -69,7 +69,7 @@ export async function GET(
 
   // Rozetka files products under its own category ids, and each category
   // dictates which characteristics an offer may carry
-  let rzCtx: RozetkaFeedContext = { categoryIds: {}, categories: new Map() }
+  let rzCtx: RozetkaFeedContext = { categoryIds: {}, categories: new Map(), cardIds: new Map() }
   if (isRozetka) {
     const categoryIds = (feed.settings?.rozetka_category_ids ?? {}) as Record<string, string>
     // Per-product overrides can point outside the category mapping
@@ -84,9 +84,13 @@ export async function GET(
           .in('id', wanted.map(Number))
       : { data: [] }
 
+    const { data: cards } = await supabase
+      .from('rozetka_product_ids').select('external_id, rozetka_id').limit(20000)
+
     rzCtx = {
       categoryIds,
       categories: new Map((rzCats ?? []).map(c => [String(c.id), c as RzCategoryMeta])),
+      cardIds: new Map((cards ?? []).map(c => [String(c.external_id), String(c.rozetka_id)])),
     }
   }
 

@@ -255,6 +255,9 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
   // Attributes per Rozetka category id, fetched on demand
   const [rzAttrs, setRzAttrs] = useState<Record<string, RzAttribute[]>>({})
   const [rzAttrsLoading, setRzAttrsLoading] = useState<Record<string, boolean>>({})
+  const [rzUnmatched, setRzUnmatched] = useState<
+    { rozetka_id: string; name: string; candidates?: string[] }[]
+  >([])
 
   const loadRzCategories = () => {
     setRzCatsLoading(true)
@@ -2117,11 +2120,63 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               >
                 {rzSyncing ? '⏳...' : '🔄 Категорії'}
               </button>
+
+              {/* Without this the feed would create duplicates of cards that
+                  already exist and let the originals fall out of stock */}
+              <label
+                className="text-xs px-2.5 py-1 rounded-lg border border-zinc-700 text-zinc-400 hover:border-purple-700 hover:text-purple-400 transition-colors cursor-pointer whitespace-nowrap"
+                title="Експорт із Pricecreator — щоб фід оновлював наявні картки, а не створював дублікати"
+              >
+                📥 Оновити ID товарів
+                <input
+                  type="file"
+                  accept=".xlsx"
+                  className="hidden"
+                  onChange={async e => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    e.target.value = ''
+                    setRzSyncMsg('⏳ Зіставлення...')
+                    try {
+                      const fd = new FormData()
+                      fd.append('file', file)
+                      const res = await fetch('/api/rozetka/upload-product-ids', { method: 'POST', body: fd })
+                      const d = await res.json()
+                      if (!res.ok || d.error) { setRzSyncMsg('❌ ' + d.error); return }
+                      const left = (d.missing?.length ?? 0) + (d.ambiguous?.length ?? 0)
+                      setRzSyncMsg(
+                        `✅ ${d.matched} із ${d.total}` +
+                        (left ? ` · ${left} без пари` : ''),
+                      )
+                      setRzUnmatched([...(d.ambiguous ?? []), ...(d.missing ?? [])])
+                    } catch {
+                      setRzSyncMsg('❌ Помилка завантаження')
+                    }
+                  }}
+                />
+              </label>
               {rzSyncMsg && <span className="text-xs text-zinc-400">{rzSyncMsg}</span>}
             </div>
           </div>
 
           {rzCatsError && <p className="text-xs text-amber-400 mb-3">{rzCatsError}</p>}
+
+          {rzUnmatched.length > 0 && (
+            <div className="mb-3 bg-amber-950/30 border border-amber-900/60 rounded-lg px-3 py-2">
+              <p className="text-[11px] text-amber-300 mb-1">
+                {rzUnmatched.length} карток Rozetka не зіставлено з нашим каталогом.
+                Вони випадуть із прайсу й Rozetka переведе їх у «немає в наявності».
+              </p>
+              <ul className="max-h-28 overflow-y-auto space-y-0.5">
+                {rzUnmatched.map(u => (
+                  <li key={u.rozetka_id} className="text-[10px] text-amber-400/80">
+                    · {u.name}
+                    {u.candidates?.length ? ` — схоже на: ${u.candidates.join('; ')}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {activeCategories.length === 0 ? (
             <p className="text-xs text-zinc-600">Спочатку виберіть товари у фіді.</p>

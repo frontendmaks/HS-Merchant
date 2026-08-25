@@ -24,6 +24,8 @@ export interface RozetkaFeedContext {
   categoryIds: Record<string, string>
   /** Rozetka category id -> its metadata, from rozetka_categories */
   categories: Map<string, RzCategoryMeta>
+  /** our product id -> the id of the card it already is on Rozetka */
+  cardIds: Map<string, string>
 }
 
 /** Rozetka wants "YYYY-MM-DD hh:mm", not an ISO timestamp. */
@@ -57,9 +59,12 @@ export function generateRozetkaYML(feed: any, ctx: RozetkaFeedContext): {
     const attrs = (p.attributes as Record<string, string>) ?? {}
     const params = (fp.custom_params ?? {}) as Record<string, string>
 
-    // The id has to be permanent. The WooCommerce product id is; our own row id
-    // is a uuid and Rozetka allows no hyphens in it.
-    const offerId = String(p.external_id ?? '').trim()
+    // A product that is already a card on Rozetka must keep that card's id —
+    // sending a different one abandons the original and it falls out of stock.
+    // Everything else goes out under its WooCommerce id, which is permanent
+    // where our own row id is a uuid Rozetka would reject for its hyphens.
+    const ourId = String(p.external_id ?? '').trim()
+    const offerId = ctx.cardIds.get(ourId) ?? ourId
     if (!/^[A-Za-z0-9]+$/.test(offerId)) {
       errors.push(`Пропущено — немає стабільного коду товару: ${p.name ?? p.id}`)
       continue
