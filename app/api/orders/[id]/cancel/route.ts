@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt } from '@/lib/maudau'
+import { currentActor, logOrderEvent } from '@/lib/order-events'
 
 const ROZETKA_CANCEL_IDS = new Set([11, 12, 13, 15, 16, 17, 18, 19, 24, 25, 28, 29, 30, 31, 40, 42, 44, 45, 50])
 // IDs considered "in-progress" or "completed" — not valid cancels
@@ -22,6 +23,8 @@ export async function PATCH(
     .from('orders')
     .update({ status: 'Скасовано', cancel_reason: reason, updated_at: new Date().toISOString() })
     .eq('id', id)
+
+  await logOrderEvent(supabase, id, 'cancel', { new: reason }, await currentActor())
 
   if (dbError) return NextResponse.json({ success: false, error: dbError.message }, { status: 500 })
 

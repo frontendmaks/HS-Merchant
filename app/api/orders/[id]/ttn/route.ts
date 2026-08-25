@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt, patchMaudauStatus, patchMaudauTtn } from '@/lib/maudau'
+import { currentActor, logOrderEvent } from '@/lib/order-events'
 
 interface RozetkaStatusEntry {
   child_id: number
@@ -49,12 +50,21 @@ export async function PATCH(
   }
 
   const supabase = createServiceClient()
+
+  const { data: before } = await supabase
+    .from('orders').select('ttn').eq('id', id).single()
+
   const { error: dbError } = await supabase
     .from('orders')
     .update({ ttn, updated_at: new Date().toISOString() })
     .eq('id', id)
 
   if (dbError) return NextResponse.json({ success: false, error: dbError.message }, { status: 500 })
+
+  if ((before?.ttn ?? null) !== (ttn || null)) {
+    await logOrderEvent(supabase, id, 'ttn',
+      { old: before?.ttn ?? null, new: ttn || null }, await currentActor())
+  }
 
   try {
     if (platform === 'maudau') {

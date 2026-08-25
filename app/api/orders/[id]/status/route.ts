@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt, patchMaudauStatus } from '@/lib/maudau'
+import { currentActor, logOrderEvent } from '@/lib/order-events'
 
 const MAUDAU_STATUS_MAP: Record<string, string> = {
   'Нове': 'new_order',
@@ -24,12 +25,22 @@ export async function PATCH(
   }
 
   const supabase = createServiceClient()
+
+  // Read the previous value first so the journal can show the transition
+  const { data: before } = await supabase
+    .from('orders').select('status').eq('id', id).single()
+
   const { error: dbError } = await supabase
     .from('orders')
     .update({ status, updated_at: new Date().toISOString() })
     .eq('id', id)
 
   if (dbError) return NextResponse.json({ success: false, error: dbError.message }, { status: 500 })
+
+  if (before?.status !== status) {
+    await logOrderEvent(supabase, id, 'status',
+      { old: before?.status ?? null, new: status }, await currentActor())
+  }
 
   try {
     if (platform === 'maudau') {

@@ -220,7 +220,7 @@ export async function syncRozetka(mode: SyncMode = 'full'): Promise<{ synced: nu
     const externalIds = rows.map(r => r.external_id)
     const { data: existing } = await supabase
       .from('orders')
-      .select('external_id, cancel_reason')
+      .select('id, external_id, cancel_reason, status')
       .in('external_id', externalIds)
       .eq('platform', 'rozetka')
 
@@ -242,6 +242,30 @@ export async function syncRozetka(mode: SyncMode = 'full'): Promise<{ synced: nu
       .from('orders')
       .upsert(rowsToUpsert, { onConflict: 'external_id,platform' })
     if (error) throw error
+
+    // A status that moved on the marketplace side belongs in the journal too,
+    // with no actor — nobody here touched it.
+    const beforeById = new Map(
+      (existing ?? []).map(r => [r.external_id as string, r as { id: string; status: string | null }])
+    )
+    const statusEvents = rows
+      .map(r => {
+        const prev = beforeById.get(r.external_id)
+        if (!prev || prev.status === r.status) return null
+        return {
+          order_id: prev.id,
+          actor_id: null,
+          actor_name: null,
+          type: 'sync_status',
+          old_value: prev.status,
+          new_value: r.status,
+        }
+      })
+      .filter((e): e is NonNullable<typeof e> => e !== null)
+
+    if (statusEvents.length) {
+      await supabase.from('order_events').insert(statusEvents)
+    }
 
     // Only after the rows are safely stored
     await notifyNewOrders(supabase, 'rozetka', freshOrders)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import OrderJournal from './OrderJournal'
 
 const MAUDAU_STATUSES = ['Нове', 'Прийнято', 'Узгоджено', 'На доставці', 'Прибуло', 'Доставлено', 'Скасовано']
 const ROZETKA_STATUSES = ['Нове', 'Опрацьовується', 'Комплектується', 'Передано в доставку', 'Доставляється', 'Чекає в пункті', 'Доставлено', 'Скасовано']
@@ -98,6 +99,7 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
     setCancelReason(props.cancel_reason || '')
   }, [props.status, props.ttn, props.cancel_reason])
 
+  const [journalOpen, setJournalOpen] = useState(false)
   const [statusLoading, setStatusLoading] = useState(false)
   const [ttnLoading, setTtnLoading] = useState(false)
   const [cancelLoading, setCancelLoading] = useState(false)
@@ -213,7 +215,12 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
   const isTerminal = TERMINAL_STATUSES.has(status)
 
   return (
-    <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors align-top">
+    <>
+    <tr
+      onClick={() => setJournalOpen(true)}
+      title="Натисніть, щоб побачити журнал змін"
+      className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors align-top cursor-pointer"
+    >
       <td className="px-3 py-2 whitespace-nowrap text-zinc-400 text-xs">{props.order_date || '—'}</td>
       <td className="px-3 py-2 whitespace-nowrap text-zinc-300 font-mono text-xs">{props.external_id}</td>
       <td className="px-3 py-2 whitespace-nowrap">{platformBadge(props.platform)}</td>
@@ -242,7 +249,7 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
       </td>
 
       {/* Status */}
-      <td className="px-3 py-2 min-w-[140px]">
+      <td onClick={e => e.stopPropagation()} className="px-3 py-2 min-w-[140px]">
         {readOnly ? (
           <span className="text-zinc-300 text-xs">{status}</span>
         ) : (
@@ -264,7 +271,7 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
       </td>
 
       {/* TTN */}
-      <td className="px-3 py-2 min-w-[120px]">
+      <td onClick={e => e.stopPropagation()} className="px-3 py-2 min-w-[120px]">
         {readOnly ? (
           <span className="text-zinc-400 text-xs font-mono">{ttn || '—'}</span>
         ) : (
@@ -286,7 +293,7 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
       </td>
 
       {/* Cancel reason */}
-      <td className="px-3 py-2 min-w-[160px]">
+      <td onClick={e => e.stopPropagation()} className="px-3 py-2 min-w-[160px]">
         {readOnly ? (
           <span className="text-zinc-400 text-xs">{cancelReason || '—'}</span>
         ) : status !== 'Доставлено' && (
@@ -310,6 +317,100 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
             {cancelError && <div className="text-red-400 text-xs mt-0.5">{cancelError}</div>}
           </>
         )}
+      </td>
+    </tr>
+
+    {journalOpen && (
+      <OrderDetailModal
+        {...props}
+        status={status}
+        ttn={ttn}
+        cancelReason={cancelReason}
+        onClose={() => setJournalOpen(false)}
+      />
+    )}
+    </>
+  )
+}
+
+function Field({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-zinc-500 text-xs">{label}</div>
+      <div className="text-zinc-200 text-sm mt-0.5 break-words">{value || '—'}</div>
+    </div>
+  )
+}
+
+function OrderDetailModal(
+  props: OrderRowProps & { status: string; ttn: string; cancelReason: string; onClose: () => void },
+) {
+  const { onClose } = props
+  return (
+    <tr>
+      <td colSpan={13} className="p-0">
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-start justify-center p-4 overflow-y-auto"
+          onClick={onClose}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-3xl my-8 text-left"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-zinc-800 flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {platformBadge(props.platform)}
+                  <span className="text-zinc-300 font-mono text-sm">{props.external_id}</span>
+                  <span className="text-zinc-600 text-xs">{props.order_date}</span>
+                </div>
+                <h3 className="text-white font-semibold mt-1.5">{props.customer_name || '—'}</h3>
+              </div>
+              <button onClick={onClose} className="text-zinc-500 hover:text-white text-xl leading-none px-1">×</button>
+            </div>
+
+            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Статус" value={props.status} />
+                  <Field label="ТТН" value={props.ttn} />
+                  <Field label="Сума" value={props.total != null ? `₴${fmt(Number(props.total))}` : null} />
+                  <Field label="Комісія" value={props.commission != null ? `₴${fmt(Number(props.commission))}` : null} />
+                </div>
+                <Field label="Телефон" value={props.customer_phone} />
+                <Field label="Відділення" value={props.branch} />
+                <Field label="Адреса" value={props.address} />
+                {props.cancelReason && <Field label="Причина скасування" value={props.cancelReason} />}
+                {props.items && (
+                  <div>
+                    <div className="text-zinc-500 text-xs mb-1">Товари</div>
+                    <div className="bg-zinc-800/40 rounded-lg px-3 py-2 max-h-52 overflow-y-auto">
+                      {props.items.split('\n').filter(Boolean).map((line, i) => (
+                        <div key={i} className="text-zinc-300 text-xs py-0.5">{line}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="text-zinc-400 text-xs mb-3">Журнал змін</div>
+                <div className="max-h-[420px] overflow-y-auto pr-1">
+                  <OrderJournal orderId={props.id} />
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 border-t border-zinc-800 flex justify-end">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm rounded-lg transition-colors"
+              >
+                Закрити
+              </button>
+            </div>
+          </div>
+        </div>
       </td>
     </tr>
   )
