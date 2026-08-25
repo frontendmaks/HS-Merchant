@@ -10,15 +10,23 @@
  * verified against a real order: 10 → 11 moved the total from 1180 to 1298 and
  * the commission from 165.20 to 181.72 at 14%.
  *
- * Our integration token cannot reach that path. It is issued for
- * /v1/merchant_public_api/ and /v1/merchant/ answers `401 wrong scope`.
- * Sending the same payload to the public API is silently ignored: a probe with
- * an invented field name returned an identical 200, and a real 10 → 11 change
- * left the order untouched.
+ * Two scopes exist. Our integration token is `v1_merchant_api_user` and gets
+ * `401 wrong scope` on /v1/merchant/; the cabinet runs as
+ * `v1_merchant_employee`. Sending items_attributes to merchant_public_api is
+ * silently ignored — an invented field name returns the same 200, and a real
+ * 10 → 11 change left the order untouched.
  *
- * So this stays switched off until MAUDAU_CABINET_TOKEN exists. Nothing here
- * can fire without it.
+ * Verified end to end with an employee token: 10 → 11 moved the order to
+ * 1298.00 and the commission to 181.72, and reverting restored both exactly.
+ *
+ * IMPORTANT: quantity is whole units only. A request for 10.4 came back 200
+ * with the quantity still 10, so a weighed line cannot carry its invoice
+ * weight — see WHOLE_UNITS_ONLY below.
  */
+
+/** MauDau silently drops fractional quantities, so a weighed correction can
+ *  only be expressed in whole packs. Verified against a live order. */
+export const WHOLE_UNITS_ONLY = true
 
 const CABINET_BASE = process.env.MAUDAU_CABINET_BASE ?? 'https://backend.prod.maudau.click'
 
@@ -36,6 +44,8 @@ export interface PushResult {
   total?: number
   commission?: number
   error?: string
+  /** Lines whose quantity had to be rounded to a whole pack */
+  rounded?: { itemId: string; asked: number; sent: number }[]
 }
 
 export async function pushOrderItems(
@@ -48,18 +58,22 @@ export async function pushOrderItems(
   }
   if (!lines.length) return { ok: false, error: 'Немає позицій для відправки' }
 
+  // Round here rather than let MauDau drop the request on the floor: a
+  // fractional quantity comes back 200 with nothing changed.
+  const rounded: NonNullable<PushResult['rounded']> = []
+  const payload = lines.map(l => {
+    const whole = Math.max(1, Math.round(l.quantity))
+    if (whole !== l.quantity) rounded.push({ itemId: l.itemId, asked: l.quantity, sent: whole })
+    return { id: Number(l.itemId), quantity: whole }
+  })
+
   const res = await fetch(`${CABINET_BASE}/v1/merchant/orders/${marketplaceOrderId}`, {
     method: 'PATCH',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      items_attributes: lines.map(l => ({
-        id: Number(l.itemId),
-        quantity: l.quantity,
-      })),
-    }),
+    body: JSON.stringify({ items_attributes: payload }),
   })
 
   const text = await res.text()
@@ -73,8 +87,9 @@ export async function pushOrderItems(
       ok: true,
       total: (body.total_price ?? 0) / 100,
       commission: (body.merchant_commission_amount ?? 0) / 100,
+      rounded: rounded.length ? rounded : undefined,
     }
   } catch {
-    return { ok: true }
+    return { ok: true, rounded: rounded.length ? rounded : undefined }
   }
 }
