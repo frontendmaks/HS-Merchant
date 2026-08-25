@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { shipmentWeight, type OrderLine } from '@/lib/order-items'
-import { createWaybill, hasNpKey, type NpSettings } from '@/lib/nova-poshta'
+import { createWaybill, hasNpKey, senderWarehouses, type NpSettings } from '@/lib/nova-poshta'
 
 // GET — what would go on the waybill, computed from the corrected lines
 export async function GET(
@@ -37,7 +37,22 @@ export async function GET(
   const cityRef = (city.external_ids as { id?: string }[] | undefined)?.[0]?.id ?? null
   const warehouseRef = (warehouse.external_id as string | undefined) ?? null
 
+  const street = ((delivery.street ?? {}) as Record<string, unknown>).name as string | undefined
+  const building = delivery.building as string | undefined
+  const flat = delivery.apartment as string | undefined
+  const toBranch = !!warehouseRef
+
+  // Dispatch branch can change day to day, so the operator picks it
+  const branches = hasNpKey() && settings?.city_sender_ref
+    ? await senderWarehouses(settings.city_sender_ref)
+    : []
+
   return NextResponse.json({
+    delivery: { toBranch, street: street ?? null, building: building ?? null, flat: flat ?? null },
+    sender: {
+      current: settings?.sender_address_ref ?? null,
+      branches,
+    },
     order: {
       external_id: order.external_id,
       recipient: order.customer_name,
@@ -56,10 +71,11 @@ export async function GET(
     recipientRefs: { cityRef, warehouseRef },
     // Without these a waybill cannot be created, so the UI can say which is missing
     ready: {
-      apiKey: !!process.env.NOVA_POSHTA_API_KEY,
+      apiKey: hasNpKey(),
       sender: !!settings?.sender_ref,
       cityRef: !!cityRef,
-      warehouseRef: !!warehouseRef,
+      // Courier orders need a street instead of a branch
+      destination: toBranch || !!(street && building),
     },
   })
 }
@@ -99,8 +115,12 @@ export async function POST(
   if (!actor) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await params
-  const { weight, seats, description } = await req.json() as {
-    weight?: number; seats?: number; description?: string
+  const { weight, seats, description, senderAddressRef, dimensions } = await req.json() as {
+    weight?: number
+    seats?: number
+    description?: string
+    senderAddressRef?: string
+    dimensions?: { length?: number; width?: number; height?: number }
   }
 
   const service = createServiceClient()
@@ -129,11 +149,16 @@ export async function POST(
     recipientName: order.customer_name ?? '',
     recipientPhone: order.customer_phone ?? '',
     cityRecipientRef: (city.external_ids as { id?: string }[] | undefined)?.[0]?.id ?? '',
-    warehouseRecipientRef: (warehouse.external_id as string | undefined) ?? '',
+    warehouseRecipientRef: (warehouse.external_id as string | undefined) ?? null,
+    street: ((delivery.street ?? {}) as Record<string, unknown>).name as string | undefined,
+    building: delivery.building as string | undefined,
+    flat: delivery.apartment as string | undefined,
     weightKg: Number(weight) || 1,
     seats: Number(seats) || 1,
     cost: Number(order.total ?? 0),
     description,
+    senderAddressRef,
+    dimensions,
   })
 
   if (!result.ok) {

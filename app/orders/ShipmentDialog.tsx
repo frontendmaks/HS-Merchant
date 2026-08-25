@@ -15,7 +15,9 @@ interface Shipment {
   weight: { computed: number; assumed: string[]; saved: number | null }
   seats: number
   recipientRefs: { cityRef: string | null; warehouseRef: string | null }
-  ready: { apiKey: boolean; sender: boolean; cityRef: boolean; warehouseRef: boolean }
+  delivery: { toBranch: boolean; street: string | null; building: string | null; flat: string | null }
+  sender: { current: string | null; branches: { ref: string; description: string }[] }
+  ready: { apiKey: boolean; sender: boolean; cityRef: boolean; destination: boolean }
 }
 
 const money = (n: number) =>
@@ -25,7 +27,7 @@ const MISSING_LABEL: Record<keyof Shipment['ready'], string> = {
   apiKey: 'ключ API Нової Пошти (змінна NOVA_POSHTA_API_KEY)',
   sender: 'дані відправника (таблиця np_settings)',
   cityRef: 'ідентифікатор міста одержувача',
-  warehouseRef: 'ідентифікатор відділення — замовлення на курʼєрську адресу',
+  destination: 'адреса призначення — немає ні відділення, ні вулиці з будинком',
 }
 
 export default function ShipmentDialog({ orderId, onClose }: {
@@ -38,6 +40,8 @@ export default function ShipmentDialog({ orderId, onClose }: {
   const [seats, setSeats] = useState('1')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [senderRef, setSenderRef] = useState('')
+  const [dims, setDims] = useState({ length: '', width: '', height: '' })
   const [creating, setCreating] = useState(false)
   const [created, setCreated] = useState<{ ttn?: string; cost?: number; estimatedDelivery?: string } | null>(null)
   const [createError, setCreateError] = useState('')
@@ -50,6 +54,7 @@ export default function ShipmentDialog({ orderId, onClose }: {
         setData(d)
         setWeight(String(d.weight.saved ?? d.weight.computed))
         setSeats(String(d.seats ?? 1))
+        setSenderRef(d.sender?.current ?? '')
       })
       .catch(() => setError('Не вдалося завантажити дані відправлення'))
   }, [orderId])
@@ -81,6 +86,10 @@ export default function ShipmentDialog({ orderId, onClose }: {
         body: JSON.stringify({
           weight: Number(weight.replace(',', '.')),
           seats: Number(seats),
+          senderAddressRef: senderRef || undefined,
+          dimensions: dims.length && dims.width && dims.height
+            ? { length: Number(dims.length), width: Number(dims.width), height: Number(dims.height) }
+            : undefined,
         }),
       })
       const d = await res.json()
@@ -125,14 +134,37 @@ export default function ShipmentDialog({ orderId, onClose }: {
                 <span className="text-zinc-200">{data.order.phone ?? '—'}</span>
               </div>
               <div className="flex justify-between gap-3">
-                <span className="text-zinc-500">Відділення</span>
-                <span className="text-zinc-200 text-right">{data.order.branch ?? '—'}</span>
+                <span className="text-zinc-500">Куди</span>
+                <span className="text-zinc-200 text-right">
+                  {data.delivery.toBranch
+                    ? (data.order.branch ?? '—')
+                    : [data.delivery.street, data.delivery.building, data.delivery.flat && `кв. ${data.delivery.flat}`]
+                        .filter(Boolean).join(', ') || '—'}
+                  {!data.delivery.toBranch && (
+                    <span className="block text-cyan-500 text-xs">курʼєром на адресу</span>
+                  )}
+                </span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-zinc-500">Оголошена вартість</span>
                 <span className="text-zinc-200">{money(data.order.cost)}</span>
               </div>
             </div>
+
+            {data.sender.branches.length > 0 && (
+              <div>
+                <label className="block text-zinc-400 text-xs mb-1.5">Відправка з відділення</label>
+                <select
+                  value={senderRef}
+                  onChange={e => setSenderRef(e.target.value)}
+                  className={field}
+                >
+                  {data.sender.branches.map(b => (
+                    <option key={b.ref} value={b.ref}>{b.description}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -145,6 +177,27 @@ export default function ShipmentDialog({ orderId, onClose }: {
               <div>
                 <label className="block text-zinc-400 text-xs mb-1.5">Місць</label>
                 <input value={seats} onChange={e => setSeats(e.target.value)} inputMode="numeric" className={field} />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-zinc-400 text-xs mb-1.5">
+                Габарити, см <span className="text-zinc-600">— необовʼязково</span>
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {(['length', 'width', 'height'] as const).map((k, i) => (
+                  <input
+                    key={k}
+                    value={dims[k]}
+                    onChange={e => setDims(d => ({ ...d, [k]: e.target.value }))}
+                    placeholder={['довжина', 'ширина', 'висота'][i]}
+                    inputMode="numeric"
+                    className={field}
+                  />
+                ))}
+              </div>
+              <div className="text-zinc-600 text-xs mt-1">
+                Якщо не заповнити, Нова Пошта порахує обʼєм за вагою.
               </div>
             </div>
 

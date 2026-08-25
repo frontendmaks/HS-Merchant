@@ -23,12 +23,61 @@ export interface WaybillInput {
   recipientPhone: string
   /** Nova Poshta refs, passed straight through from the marketplace order */
   cityRecipientRef: string
-  warehouseRecipientRef: string
+  /** Branch delivery. Absent for courier orders. */
+  warehouseRecipientRef?: string | null
+  /** Courier delivery: the street address from the order */
+  street?: string | null
+  building?: string | null
+  flat?: string | null
   weightKg: number
   seats: number
   /** Declared value, UAH */
   cost: number
   description?: string
+  /** Overrides the branch we ship from, which is not always the default one */
+  senderAddressRef?: string | null
+  /** Centimetres. Sent only when all three are given. */
+  dimensions?: { length?: number; width?: number; height?: number } | null
+}
+
+export interface SenderWarehouse {
+  ref: string
+  description: string
+}
+
+/** Branches the sender can hand a parcel over at, for the dispatch dropdown. */
+export async function senderWarehouses(cityRef: string): Promise<SenderWarehouse[]> {
+  const r = await call<{ Ref: string; Description: string }>(
+    'AddressGeneral', 'getWarehouses', { CityRef: cityRef, Page: '1', Limit: '500' })
+  return (r.data ?? []).map(w => ({ ref: w.Ref, description: w.Description }))
+}
+
+/** Resolves a street name to Nova Poshta's own ref, then pins the address to
+ *  the recipient — courier delivery is refused without an address ref. */
+async function courierAddressRef(
+  counterpartyRef: string,
+  cityRef: string,
+  street: string,
+  building: string,
+  flat?: string | null,
+): Promise<{ ok: true; ref: string } | { ok: false; error: string }> {
+  const found = await call<{ Ref: string; Description: string }>(
+    'AddressGeneral', 'getStreet', { CityRef: cityRef, FindByString: street, Limit: '5' })
+
+  const streetRef = found.data?.[0]?.Ref
+  if (!streetRef) return { ok: false, error: `Нова Пошта не знайшла вулицю «${street}»` }
+
+  const saved = await call<{ Ref: string }>('Address', 'save', {
+    CounterpartyRef: counterpartyRef,
+    StreetRef: streetRef,
+    BuildingNumber: building,
+    Flat: flat || '',
+  })
+  const ref = saved.data?.[0]?.Ref
+  if (!ref) {
+    return { ok: false, error: (saved.errors ?? []).join('; ') || 'Не вдалося зберегти адресу' }
+  }
+  return { ok: true, ref }
 }
 
 export interface WaybillResult {
@@ -115,13 +164,33 @@ export async function createWaybill(
   if (!hasNpKey()) return { ok: false, error: 'NOVA_POSHTA_API_KEY не налаштовано' }
 
   const missing = (
-    [['cityRecipientRef', input.cityRecipientRef], ['warehouseRecipientRef', input.warehouseRecipientRef],
-     ['recipientPhone', input.recipientPhone], ['recipientName', input.recipientName]] as const
+    [['місто', input.cityRecipientRef], ['телефон', input.recipientPhone],
+     ["ім'я", input.recipientName]] as const
   ).filter(([, v]) => !v).map(([k]) => k)
   if (missing.length) return { ok: false, error: `Бракує даних одержувача: ${missing.join(', ')}` }
 
+  const toBranch = !!input.warehouseRecipientRef
+  if (!toBranch && !(input.street && input.building)) {
+    return { ok: false, error: 'Для курʼєрської доставки потрібні вулиця і будинок' }
+  }
+
   const recipient = await ensureRecipient(input.recipientName, input.recipientPhone)
   if (!recipient.ok) return { ok: false, error: recipient.error }
+
+  let recipientAddress = input.warehouseRecipientRef ?? ''
+  if (!toBranch) {
+    const addr = await courierAddressRef(
+      recipient.ref, input.cityRecipientRef, input.street!, input.building!, input.flat)
+    if (!addr.ok) return { ok: false, error: addr.error }
+    recipientAddress = addr.ref
+  }
+
+  // Nova Poshta prices by volume as well as weight, so send it when we have it
+  const dims = input.dimensions
+  const hasDims = !!(dims?.length && dims.width && dims.height)
+  const volumeGeneral = hasDims
+    ? ((dims!.length! * dims!.width! * dims!.height!) / 1_000_000).toFixed(4)
+    : undefined
 
   const result = await call<{
     Ref: string
@@ -134,20 +203,21 @@ export async function createWaybill(
     DateTime: today(),
     CargoType: settings.cargo_type || 'Parcel',
     Weight: input.weightKg.toFixed(2),
-    ServiceType: 'WarehouseWarehouse',
+    ServiceType: toBranch ? 'WarehouseWarehouse' : 'WarehouseDoors',
     SeatsAmount: String(Math.max(1, Math.round(input.seats))),
     Description: input.description || settings.default_description || 'Продукти харчування',
     Cost: Math.max(1, Math.round(input.cost)).toString(),
+    ...(volumeGeneral ? { VolumeGeneral: volumeGeneral } : {}),
 
     CitySender: settings.city_sender_ref,
     Sender: settings.sender_ref,
-    SenderAddress: settings.sender_address_ref,
+    SenderAddress: input.senderAddressRef || settings.sender_address_ref,
     ContactSender: settings.contact_sender_ref,
     SendersPhone: settings.senders_phone,
 
     CityRecipient: input.cityRecipientRef,
     Recipient: recipient.ref,
-    RecipientAddress: input.warehouseRecipientRef,
+    RecipientAddress: recipientAddress,
     ContactRecipient: recipient.contactRef,
     RecipientsPhone: normalisePhone(input.recipientPhone),
   })
