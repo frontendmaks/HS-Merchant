@@ -2,6 +2,8 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { sanitizeSku } from '@/lib/transliterate'
 import { NextRequest, NextResponse } from 'next/server'
+import { calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars } from '@/lib/feed-xml'
+import { generateRozetkaYML } from '@/lib/rozetka-feed'
 
 export async function GET(
   request: NextRequest,
@@ -61,9 +63,13 @@ export async function GET(
     }
   }
 
+  const isRozetka = feed.marketplace?.slug === 'rozetka'
+
   const { xml, offersCount, errorsCount, errors } = isMaudau
     ? generateMaudauYML(feed, slugToPortalId, catAttrsMap)
-    : generateYML(feed)
+    : isRozetka
+      ? generateRozetkaYML(feed)
+      : generateYML(feed)
 
   // Log access (fire-and-forget)
   const now = new Date().toISOString()
@@ -87,34 +93,6 @@ export async function GET(
       'Cache-Control': 'no-store',
     },
   })
-}
-
-/**
- * Marketplace price for weight products:
- * кг/л: price is per kg → multiply by min_kg (default 0.4 = 400g if no min)
- * г/мл: price is already per-portion → no change
- * piece: return null (no transformation)
- */
-function calcMarketplacePrice(price: number, attrs: Record<string, string> | null): number | null {
-  const unit = (attrs?.['Одиниця'] ?? '').toLowerCase()
-  const minRaw = parseFloat(attrs?.['Мін'] ?? '0') || 0
-  if (unit === 'кг' || unit === 'л') {
-    const minKg = minRaw > 0 ? minRaw : 0.4
-    return Math.round(price * minKg * 100) / 100
-  }
-  if (unit === 'г' || unit === 'мл') {
-    return Math.round(price * 100) / 100
-  }
-  return null
-}
-
-/** Min weight label for product name (weight products only, in grams) */
-function minWeightLabel(attrs: Record<string, string> | null): string | null {
-  const unit = (attrs?.['Одиниця'] ?? '').toLowerCase()
-  const minRaw = parseFloat(attrs?.['Мін'] ?? '0') || 0
-  if (unit === 'кг' || unit === 'л') return `${minRaw > 0 ? Math.round(minRaw * 1000) : 400} г`
-  if (unit === 'г' || unit === 'мл') return `${minRaw > 0 ? Math.round(minRaw) : 400} ${unit}`
-  return null
 }
 
 /** Generic YML format */
@@ -373,16 +351,6 @@ ${offersXml}
   return { xml, offersCount: activeFps.length, errorsCount: errors.length, errors }
 }
 
-function escapeXml(str: string): string {
-  if (!str) return ''
-  return stripControlChars(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;')
-}
-
 // For descriptions: MauDau allows HTML but no CDATA — escape only & keep tags intact
 function descToXml(str: string, maxLen = 10000): string {
   if (!str) return ''
@@ -391,7 +359,3 @@ function descToXml(str: string, maxLen = 10000): string {
     .replace(/&/g, '&amp;')
 }
 
-// Strip XML-forbidden control characters (ASCII 0-8, 11-12, 14-31)
-function stripControlChars(str: string): string {
-  return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-}
