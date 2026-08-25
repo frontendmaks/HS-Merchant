@@ -58,7 +58,8 @@ async function login(): Promise<string> {
     )
   }
 
-  const res = await fetch(`${BASE}/sites/login`, {
+  // POST /sites, not /sites/login — the latter answers 5404 not_found
+  const res = await fetch(`${BASE}/sites`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
