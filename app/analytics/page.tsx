@@ -53,7 +53,9 @@ export default async function AnalyticsPage({
   const [{ data: orderRows }, { data: productRows }, { data: operatorRows }] =
     await Promise.all([
       supabase.from('orders')
-        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, items, total, commission, status, created_at, raw')
+        // The raw marketplace payload is large and mostly irrelevant here, so
+        // Postgres digs out the three geography fields instead of sending it all
+        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, items, total, commission, status, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code')
         .gte('order_date', from).lte('order_date', to)
         .order('order_date', { ascending: false })
         .limit(20000),

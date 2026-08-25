@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import UkraineMap from './UkraineMap'
 import type {
@@ -179,10 +179,11 @@ function monthRange(anchor: string, offset = 0) {
   return { from: iso(first), to: iso(last) }
 }
 
-function PeriodPicker({ from, to, onChange }: {
+function PeriodPicker({ from, to, onChange, pending }: {
   from: string
   to: string
   onChange: (from: string, to: string) => void
+  pending?: boolean
 }) {
   const openPicker = (el: HTMLInputElement) => {
     try { el.showPicker?.() } catch { /* needs a user gesture */ }
@@ -206,7 +207,11 @@ function PeriodPicker({ from, to, onChange }: {
           >
             ‹
           </button>
-          <span className="text-zinc-300 text-xs min-w-[110px] text-center">{monthLabel(from)}</span>
+          <span className={`text-xs min-w-[110px] text-center transition-colors ${
+            pending ? 'text-zinc-500' : 'text-zinc-300'
+          }`}>
+            {monthLabel(from)}
+          </span>
           <button
             onClick={() => { const r = monthRange(from, 1); onChange(r.from, r.to) }}
             disabled={from >= thisMonth.from}
@@ -419,6 +424,14 @@ export default function AnalyticsClient({
 }) {
   const [chartMetric, setChartMetric] = useState<ChartMetric>('count')
   const router = useRouter()
+  // A new period genuinely needs the server. Without a transition React blocks
+  // on the navigation and nothing on screen acknowledges the click, which reads
+  // as the page having hung. The period the user picked is shown right away and
+  // the figures fade until the answer arrives.
+  const [pending, startTransition] = useTransition()
+  const [pickedFrom, setPickedFrom] = useState<[string, string] | null>(null)
+  const shownFrom = pending && pickedFrom ? pickedFrom[0] : from
+  const shownTo = pending && pickedFrom ? pickedFrom[1] : to
 
   // Switching marketplace only picks a different pre-computed bundle, so it is
   // instant. The address bar is kept in step without a navigation, which would
@@ -431,8 +444,12 @@ export default function AnalyticsClient({
     window.history.replaceState(null, '', `/analytics?${q}`)
   }
   // A different period does need the server
-  const setRange = (f: string, t2: string) =>
-    router.push(`/analytics?from=${f}&to=${t2}${platform === 'all' ? '' : `&platform=${platform}`}`)
+  const setRange = (f: string, t2: string) => {
+    setPickedFrom([f, t2])
+    startTransition(() => {
+      router.push(`/analytics?from=${f}&to=${t2}${platform === 'all' ? '' : `&platform=${platform}`}`)
+    })
+  }
 
   const {
     totals: t, perDay, products, categories, customers, customerSummary, regions, operators,
@@ -447,7 +464,8 @@ export default function AnalyticsClient({
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">Аналітика</h1>
           <p className="text-zinc-400 text-sm mt-0.5">
-            {dayMonth(from)} — {dayMonth(to)} · {t.orders} {orderWord(t.orders)}
+            {dayMonth(shownFrom)} — {dayMonth(shownTo)} ·{' '}
+            {pending ? 'рахую…' : `${t.orders} ${orderWord(t.orders)}`}
             {platform !== 'all' && (
               <span className="text-zinc-500">
                 {' '}· лише {MARKETPLACES.find(m => m.key === platform)?.label}
@@ -457,9 +475,13 @@ export default function AnalyticsClient({
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <PlatformTabs value={platform} onChange={setPlatform} />
-          <PeriodPicker from={from} to={to} onChange={setRange} />
+          <PeriodPicker from={shownFrom} to={shownTo} onChange={setRange} pending={pending} />
         </div>
       </div>
+
+      <div className={`space-y-5 transition-opacity duration-150 ${
+        pending ? 'opacity-40' : ''
+      }`}>
 
       {/* Money */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -650,6 +672,7 @@ export default function AnalyticsClient({
           </>
         )}
       </Panel>
+      </div>
     </div>
   )
 }

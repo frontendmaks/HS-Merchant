@@ -15,8 +15,11 @@ export interface OrderRow {
   commission: number | null
   status: string | null
   created_at: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  raw: any
+  /** Geography, pulled straight out of the raw marketplace payload by the
+   *  query rather than shipped whole — see the select list in the page. */
+  rz_city?: { city_name?: string; name_ua?: string; region_title?: string } | null
+  md_city?: string | null
+  md_postal?: string | null
 }
 
 export const DELIVERED = 'Доставлено'
@@ -84,18 +87,18 @@ function oblastFromPostal(postal: string | null | undefined): string | null {
 
 export const cityOf = (o: OrderRow): string | null =>
   o.platform === 'rozetka'
-    ? (o.raw?.delivery?.city?.city_name ?? o.raw?.delivery?.city?.name_ua ?? null)
-    : (o.raw?.delivery_address?.city?.name ?? null)
+    ? (o.rz_city?.city_name ?? o.rz_city?.name_ua ?? null)
+    : (o.md_city ?? null)
 
 /** Rozetka states the region outright; MauDau does not, so it comes from the
  *  branch's postal index. Courier orders have no branch — for those we reuse
  *  the oblast already learned for that city from other orders. */
 function directOblast(o: OrderRow): string | null {
   if (o.platform === 'rozetka') {
-    const t = o.raw?.delivery?.city?.region_title
+    const t = o.rz_city?.region_title
     return typeof t === 'string' && t.trim() ? t.trim() : null
   }
-  return oblastFromPostal(o.raw?.delivery_address?.warehouse?.postal_code)
+  return oblastFromPostal(o.md_postal)
 }
 
 /** city -> oblast, learned from the orders that state it directly.
