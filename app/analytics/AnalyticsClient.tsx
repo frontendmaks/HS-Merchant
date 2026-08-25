@@ -361,11 +361,42 @@ function OperatorBars({ title, rows, format, lowerIsBetter }: {
   )
 }
 
+const MARKETPLACES = [
+  { key: 'all', label: 'Загальна' },
+  { key: 'maudau', label: 'MauDau' },
+  { key: 'rozetka', label: 'Rozetka' },
+] as const
+
+/** Every figure on the page is recomputed for the chosen marketplace. */
+function PlatformTabs({ value, onChange }: {
+  value: string
+  onChange: (p: string) => void
+}) {
+  return (
+    <div className="inline-flex bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
+      {MARKETPLACES.map(m => (
+        <button
+          key={m.key}
+          onClick={() => onChange(m.key)}
+          className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+            value === m.key
+              ? 'bg-red-600 text-white'
+              : 'text-zinc-400 hover:text-white'
+          }`}
+        >
+          {m.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export default function AnalyticsClient({
-  from, to, totals: t, perDay, products, categories, customers, customerSummary, regions, operators,
+  from, to, platform, totals: t, perDay, products, categories, customers, customerSummary, regions, operators,
 }: {
   from: string
   to: string
+  platform: string
   totals: Totals
   perDay: DayBucket[]
   products: ProductStat[]
@@ -383,8 +414,10 @@ export default function AnalyticsClient({
 }) {
   const [chartMetric, setChartMetric] = useState<ChartMetric>('count')
   const router = useRouter()
-  const setRange = (f: string, t2: string) =>
-    router.push(`/analytics?from=${f}&to=${t2}`)
+  const go = (f: string, t2: string, p: string) =>
+    router.push(`/analytics?from=${f}&to=${t2}${p === 'all' ? '' : `&platform=${p}`}`)
+  const setRange = (f: string, t2: string) => go(f, t2, platform)
+  const setPlatform = (p: string) => go(from, to, p)
 
   const maxProductQty = Math.max(1, ...products.map(p => p.qty))
   const maxCategoryRevenue = Math.max(1, ...categories.map(c => c.revenue))
@@ -396,9 +429,17 @@ export default function AnalyticsClient({
           <h1 className="text-xl sm:text-2xl font-bold text-white">Аналітика</h1>
           <p className="text-zinc-400 text-sm mt-0.5">
             {dayMonth(from)} — {dayMonth(to)} · {t.orders} {orderWord(t.orders)}
+            {platform !== 'all' && (
+              <span className="text-zinc-500">
+                {' '}· лише {MARKETPLACES.find(m => m.key === platform)?.label}
+              </span>
+            )}
           </p>
         </div>
-        <PeriodPicker from={from} to={to} onChange={setRange} />
+        <div className="flex items-center gap-3 flex-wrap">
+          <PlatformTabs value={platform} onChange={setPlatform} />
+          <PeriodPicker from={from} to={to} onChange={setRange} />
+        </div>
       </div>
 
       {/* Money */}

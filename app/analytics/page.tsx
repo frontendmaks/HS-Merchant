@@ -14,6 +14,9 @@ export const dynamic = 'force-dynamic'
 /** 24k settlements — stays on the server, only resolved values reach the client */
 const gazetteer = gazetteerJson as unknown as Gazetteer
 
+/** Marketplace slugs as stored on orders.platform */
+const PLATFORMS = ['maudau', 'rozetka']
+
 // Local date parts — toISOString() would shift midnight back a day in UTC+N
 const iso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -28,7 +31,7 @@ function defaultRange() {
 export default async function AnalyticsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string }>
+  searchParams: Promise<{ from?: string; to?: string; platform?: string }>
 }) {
   const role = await getCurrentRole()
   if (!canAccess('analytics', role)) redirect('/orders')
@@ -39,21 +42,27 @@ export default async function AnalyticsPage({
   const from = valid(sp.from) ?? fallback.from
   const to = valid(sp.to) ?? fallback.to
 
+  // Every figure on the page is computed from this slice, so narrowing it here
+  // is all it takes for one marketplace to be reported on its own.
+  const platform = PLATFORMS.includes(sp.platform ?? '') ? sp.platform! : 'all'
+
   const supabase = createServiceClient()
 
+  const ordersInPeriod = (columns: string) => {
+    const q = supabase.from('orders').select(columns)
+      .gte('order_date', from).lte('order_date', to)
+    return platform === 'all' ? q : q.eq('platform', platform)
+  }
+
   const [{ data: orderRows }, { data: productRows }] = await Promise.all([
-    supabase
-      .from('orders')
-      .select('external_id, platform, order_date, customer_name, customer_phone, address, items, total, commission, status, created_at, raw')
-      .gte('order_date', from)
-      .lte('order_date', to)
+    ordersInPeriod('external_id, platform, order_date, customer_name, customer_phone, address, items, total, commission, status, created_at, raw')
       .order('order_date', { ascending: false })
       .limit(20000),
     // Only needed to put order lines into categories
     supabase.from('products').select('name, category_name').limit(5000),
   ])
 
-  const orders = (orderRows ?? []) as OrderRow[]
+  const orders = (orderRows ?? []) as unknown as OrderRow[]
 
   const productCategories = new Map<string, string>()
   for (const p of productRows ?? []) {
@@ -63,11 +72,12 @@ export default async function AnalyticsPage({
   }
 
   // Operator efficiency reads the order journal for the same window
-  const { data: orderIdRows } = await supabase
-    .from('orders').select('id, total, status')
-    .gte('order_date', from).lte('order_date', to).limit(20000)
+  const { data: orderIdData } = await ordersInPeriod('id, total, status').limit(20000)
+  // The column list is built at runtime, so Supabase cannot infer the row shape
+  const orderIdRows = (orderIdData ?? []) as unknown as
+    { id: string; total: number | null; status: string | null }[]
 
-  const orderIds = (orderIdRows ?? []).map(o => o.id)
+  const orderIds = orderIdRows.map(o => o.id)
   const { data: eventRows } = orderIds.length
     ? await supabase
         .from('order_events')
@@ -88,6 +98,7 @@ export default async function AnalyticsPage({
     <AnalyticsClient
       from={from}
       to={to}
+      platform={platform}
       totals={totals(orders)}
       perDay={ordersPerDay(orders, from, to)}
       products={popularProducts(orders)}
@@ -110,7 +121,7 @@ export default async function AnalyticsPage({
       regions={byRegion(orders, learned, gazetteer)}
       operators={operatorStats(
         (eventRows ?? []) as OperatorEventRow[],
-        (orderIdRows ?? []) as { id: string; total: number | null; status: string | null }[],
+        orderIdRows,
         operatorIds,
       )}
     />
