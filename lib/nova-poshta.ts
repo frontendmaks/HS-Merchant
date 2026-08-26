@@ -108,8 +108,56 @@ export async function senderWarehouses(cityRef: string): Promise<SenderWarehouse
   return (r.data ?? []).map(w => ({ ref: w.Ref, description: w.Description }))
 }
 
-/** Resolves a street name to Nova Poshta's own ref, then pins the address to
- *  the recipient — courier delivery is refused without an address ref. */
+/**
+ * The delivery-city ref a settlement belongs to.
+ *
+ * The marketplaces hand over a *settlement* ref. Streets live under a *city*
+ * ref, and for a village that is the ref of the town its post is delivered
+ * through — a different value, which only searchSettlements reports and only
+ * alongside the name, so the settlement has to be named first and then matched
+ * back by ref. getSettlements does not carry it.
+ */
+async function deliveryCityRef(settlementRef: string): Promise<string | null> {
+  const settlement = await call<{ Description: string }>(
+    'AddressGeneral', 'getSettlements', { Ref: settlementRef, Limit: '1' })
+  const name = settlement.data?.[0]?.Description
+  if (!name) return null
+
+  // The name is not unique — there are three villages called Безводне — so the
+  // right row is the one whose own ref matches, not the first that comes back
+  const found = await call<{ Addresses?: { Ref: string; DeliveryCity: string }[] }>(
+    'AddressGeneral', 'searchSettlements', { CityName: name, Limit: '150' })
+
+  return found.data?.[0]?.Addresses?.find(a => a.Ref === settlementRef)?.DeliveryCity || null
+}
+
+/**
+ * Finds a street, given whichever kind of ref the marketplace supplied.
+ *
+ * A city ref works straight away. A settlement ref does not: getStreet answers
+ * "City not found", which reads as though the street were missing and sends
+ * you looking in the wrong place. So that case resolves the delivery city
+ * first and asks again.
+ *
+ * searchSettlementStreets does find such streets, but the ref it returns is a
+ * settlement-street ref, and Address.save refuses it with "Street doesn't
+ * exists" — so it is no use here.
+ */
+async function findStreetRef(ref: string, street: string): Promise<string | null> {
+  const direct = await call<{ Ref: string }>(
+    'AddressGeneral', 'getStreet', { CityRef: ref, FindByString: street, Limit: '5' })
+  if (direct.data?.[0]?.Ref) return direct.data[0].Ref
+
+  const cityRef = await deliveryCityRef(ref)
+  if (!cityRef) return null
+
+  const viaCity = await call<{ Ref: string }>(
+    'AddressGeneral', 'getStreet', { CityRef: cityRef, FindByString: street, Limit: '5' })
+  return viaCity.data?.[0]?.Ref ?? null
+}
+
+/** Pins a street address to the recipient — courier delivery is refused
+ *  without an address ref of their own. */
 async function courierAddressRef(
   counterpartyRef: string,
   cityRef: string,
@@ -117,11 +165,13 @@ async function courierAddressRef(
   building: string,
   flat?: string | null,
 ): Promise<{ ok: true; ref: string } | { ok: false; error: string }> {
-  const found = await call<{ Ref: string; Description: string }>(
-    'AddressGeneral', 'getStreet', { CityRef: cityRef, FindByString: street, Limit: '5' })
-
-  const streetRef = found.data?.[0]?.Ref
-  if (!streetRef) return { ok: false, error: `Нова Пошта не знайшла вулицю «${street}»` }
+  const streetRef = await findStreetRef(cityRef, street)
+  if (!streetRef) {
+    return {
+      ok: false,
+      error: `Нова Пошта не знайшла вулицю «${street}» у цьому населеному пункті`,
+    }
+  }
 
   const saved = await call<{ Ref: string }>('Address', 'save', {
     CounterpartyRef: counterpartyRef,
@@ -256,18 +306,22 @@ export async function createWaybill(
     : 0
   const volumeGeneral = hasDims ? (volumePerSeat * seats).toFixed(4) : undefined
 
-  // OptionsSeat describes each parcel separately. Nova Poshta rejects a
-  // waybill that has neither this nor VolumeGeneral — "OptionsSeat is empty" —
-  // and a parcel locker always needs the dimensions, since the door has to fit.
-  const optionsSeat = Array.from({ length: seats }, () => ({
-    weight: (input.weightKg / seats).toFixed(2),
-    ...(hasDims ? {
-      volumetricVolume: volumePerSeat.toFixed(4),
-      volumetricWidth: String(Math.round(dims!.width!)),
-      volumetricLength: String(Math.round(dims!.length!)),
-      volumetricHeight: String(Math.round(dims!.height!)),
-    } : {}),
-  }))
+  // OptionsSeat describes each parcel separately, and Nova Poshta wants every
+  // field of it or none of the block: sending weight alone comes back
+  // "OptionsSeat is empty or one of option is empty", which also refuses the
+  // branch deliveries that were working before. Without dimensions we send
+  // neither this nor VolumeGeneral and let Nova Poshta price by weight, as it
+  // always did — a parcel locker is the case that genuinely needs them, and is
+  // required to supply them earlier.
+  const optionsSeat = hasDims
+    ? Array.from({ length: seats }, () => ({
+        weight: (input.weightKg / seats).toFixed(2),
+        volumetricVolume: volumePerSeat.toFixed(4),
+        volumetricWidth: String(Math.round(dims!.width!)),
+        volumetricLength: String(Math.round(dims!.length!)),
+        volumetricHeight: String(Math.round(dims!.height!)),
+      }))
+    : null
 
   const result = await call<{
     Ref: string
@@ -282,7 +336,7 @@ export async function createWaybill(
     Weight: input.weightKg.toFixed(2),
     ServiceType: toBranch ? 'WarehouseWarehouse' : 'WarehouseDoors',
     SeatsAmount: String(seats),
-    OptionsSeat: optionsSeat,
+    ...(optionsSeat ? { OptionsSeat: optionsSeat } : {}),
     Description: input.description || settings.default_description || 'Продукти харчування',
     Cost: Math.max(1, Math.round(input.cost)).toString(),
     ...(volumeGeneral ? { VolumeGeneral: volumeGeneral } : {}),
