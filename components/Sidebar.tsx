@@ -283,6 +283,15 @@ export default function Sidebar() {
             </Link>
           )
         })}
+
+        {visibleGroups.map(group => (
+          <NavGroup
+            key={group.label}
+            group={group}
+            path={path}
+            onNavigate={() => setOpen(false)}
+          />
+        ))}
       </nav>
 
       {/* User info + sign out */}
