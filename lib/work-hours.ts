@@ -142,3 +142,45 @@ export function onlineMinutes(
   }
   return Math.round(total)
 }
+
+/**
+ * Rostered minutes that have actually elapsed.
+ *
+ * A shift still in the future is not time anyone failed to show up for, so it
+ * must not count against them. Today counts only up to now.
+ */
+export function elapsedShiftMinutes(
+  workDates: Set<string>,
+  now: Date = new Date(),
+  opts: {
+    startHour?: number
+    endHour?: number
+    timeZone?: string
+    /** Nothing before this was recorded, so it cannot be held against anyone.
+     *  Without it a shift worked before the heartbeat existed reads as an
+     *  absence rather than as an unknown. */
+    measuredSince?: Date | null
+  } = {},
+): number {
+  const startHour = opts.startHour ?? WORK_START_HOUR
+  const endHour = opts.endHour ?? WORK_END_HOUR
+  const tz = opts.timeZone ?? WORK_TZ
+  const today = localDate(now, tz)
+  const since = opts.measuredSince?.getTime() ?? -Infinity
+
+  let total = 0
+  for (const date of workDates) {
+    if (date > today) continue
+
+    // Resolve the shift's own window on that date rather than assuming a
+    // fixed offset — Kyiv moves between UTC+2 and UTC+3
+    const noon = new Date(`${date}T12:00:00Z`)
+    const open = localHourToUtc(noon, startHour, tz)
+    const close = localHourToUtc(noon, endHour, tz)
+
+    const from = Math.max(open, since)
+    const to = Math.min(close, now.getTime())
+    if (to > from) total += (to - from) / 60000
+  }
+  return Math.round(total)
+}

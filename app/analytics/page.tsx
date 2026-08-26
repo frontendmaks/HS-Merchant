@@ -8,6 +8,7 @@ import {
 } from '@/lib/analytics'
 import gazetteerJson from '@/lib/ua-settlements.json'
 import AnalyticsClient, { type Bundle } from './AnalyticsClient'
+import { placedAtIso } from '@/lib/order-arrival'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,7 +56,7 @@ export default async function AnalyticsPage({
       supabase.from('orders')
         // The raw marketplace payload is large and mostly irrelevant here, so
         // Postgres digs out the three geography fields instead of sending it all
-        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, items, total, commission, status, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code')
+        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, items, total, commission, status, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code, md_placed:raw->>created_at, rz_placed:raw->>created')
         .gte('order_date', from).lte('order_date', to)
         .order('order_date', { ascending: false })
         .limit(20000),
@@ -113,6 +114,12 @@ export default async function AnalyticsPage({
     ticks.set(id, [...(ticks.get(id) ?? []), r.minute as string])
   }
 
+  // The heartbeat is newer than the orders, so shifts worked before it exist
+  // with no presence data at all — unmeasured, not absent
+  const { data: firstTick } = await supabase
+    .from('presence_ticks').select('minute').order('minute').limit(1).maybeSingle()
+  const presenceSince = firstTick?.minute ? new Date(firstTick.minute as string) : null
+
   /** Everything the page shows, for one slice of the orders. */
   function bundle(rows: OrderWithId[]): Bundle {
     const learned = learnCityOblasts(rows)
@@ -140,10 +147,15 @@ export default async function AnalyticsPage({
       regions: byRegion(rows, learned, gazetteer),
       operators: operatorStats(
         events.filter(e => ids.has(e.order_id)),
-        rows.map(o => ({ id: o.id, total: o.total, status: o.status })),
+        rows.map(o => ({
+          id: o.id, total: o.total, status: o.status,
+          // The marketplace's own stamp, not our sync time — see lib/order-arrival
+          arrivedAt: placedAtIso(o.platform, o.md_placed, o.rz_placed) ?? o.created_at,
+        })),
         operatorIds,
         roster,
         ticks,
+        presenceSince,
       ),
     }
   }

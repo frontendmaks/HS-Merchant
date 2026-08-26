@@ -20,6 +20,10 @@ export interface OrderRow {
   rz_city?: { city_name?: string; name_ua?: string; region_title?: string } | null
   md_city?: string | null
   md_postal?: string | null
+  /** When the marketplace says the order was placed. MauDau's is UTC,
+   *  Rozetka's is Kyiv wall-clock — normalised by lib/order-arrival. */
+  md_placed?: string | null
+  rz_placed?: string | null
 }
 
 export const DELIVERED = 'Доставлено'
@@ -449,7 +453,7 @@ export { isClosed }
 // --- Operator efficiency ----------------------------------------------------
 
 import {
-  SHIFT_MINUTES, businessMinutes, localDate, onlineMinutes,
+  businessMinutes, elapsedShiftMinutes, localDate, onlineMinutes,
   WORK_END_HOUR, WORK_START_HOUR,
 } from '@/lib/work-hours'
 
@@ -506,6 +510,13 @@ const mean = (xs: number[]): number | null =>
 /** Taking the order on. The two marketplaces word it differently. */
 const ACCEPTED = new Set(['Прийнято', 'Опрацьовується'])
 
+/** Operators do not always log the acceptance step — some move an order
+ *  straight to Узгоджено. Any of these means they picked it up, and reading
+ *  only the first would leave the metric empty for most real orders. */
+const PICKED_UP = new Set([
+  ...ACCEPTED, 'Узгоджено', 'Комплектується',
+])
+
 /** Handed to the courier — the end of the shop's part. */
 const SHIPPED = new Set([
   'На доставці', 'Прибуло',
@@ -524,18 +535,31 @@ const SHIPPED = new Set([
  */
 export function operatorStats(
   events: OperatorEventRow[],
-  orders: { id: string; total: number | null; status: string | null }[],
+  orders: {
+    id: string
+    total: number | null
+    status: string | null
+    /** When the marketplace says it was placed. The journal has no arrival
+     *  entry — nothing writes one — so it has to come from the order. */
+    arrivedAt?: string | null
+  }[],
   operatorIds: Set<string>,
   /** Rostered days per operator, and the heartbeat trail — without these the
    *  durations would charge people for hours they were not due to work. */
   roster: Map<string, Set<string>> = new Map(),
   ticks: Map<string, string[]> = new Map(),
+  /** When the heartbeat started recording. Shifts worked before it are not
+   *  absences, they are unmeasured, and must not be scored as either. */
+  presenceSince: Date | null = null,
 ): OperatorStat[] {
   const orderById = new Map(orders.map(o => [o.id, o]))
   const byActor = new Map<string, { name: string; rows: OperatorEventRow[] }>()
 
-  // Arrival time per order, taken from the actorless "created" entry
   const arrivalOf = new Map<string, string>()
+  for (const o of orders) {
+    if (o.arrivedAt) arrivalOf.set(o.id, o.arrivedAt)
+  }
+  // A 'created' entry would be better still, but only if something wrote one
   for (const e of events) {
     if (e.type === 'created' && !arrivalOf.has(e.order_id)) arrivalOf.set(e.order_id, e.created_at)
   }
@@ -593,8 +617,10 @@ export function operatorStats(
 
       // Two named moments rather than "first and last thing they touched":
       // taking the order on, and handing it to the courier.
-      const acceptedAt = sorted
-        .find(e => e.type === 'status' && ACCEPTED.has(e.new_value ?? ''))?.created_at
+      const acceptedAt = (
+        sorted.find(e => e.type === 'status' && ACCEPTED.has(e.new_value ?? ''))
+        ?? sorted.find(e => e.type === 'status' && PICKED_UP.has(e.new_value ?? ''))
+      )?.created_at
       const shippedAt = sorted
         .find(e => e.type === 'status' && SHIPPED.has(e.new_value ?? ''))?.created_at
 
@@ -610,7 +636,10 @@ export function operatorStats(
       }
     }
 
-    const scheduledMins = workDates.size * SHIFT_MINUTES
+    // Only shifts that have already run. Counting a whole rostered week on
+    // Monday morning would report everyone as absent for four days they have
+    // not reached yet.
+    const scheduledMins = elapsedShiftMinutes(workDates, new Date(), { measuredSince: presenceSince })
     const onlineMins = onlineMinutes(ticks.get(id) ?? [], workDates)
     const onlineHours = onlineMins / 60
 
