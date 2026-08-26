@@ -243,12 +243,18 @@ export default function RequestsClient({ initialRequests, people, me, isAdmin }:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, ...payload }),
       })
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
         alert(data.error || 'Не вдалося зберегти зміну')
-        return
+        throw new Error(data.error || 'Не вдалося зберегти зміну')
       }
-      await refresh()
+      // Splice the one row the server sends back rather than refetching the
+      // board — the poll and the focus handler still reconcile the rest.
+      if (data.request) {
+        setRequests(list => list.map(r => (r.id === id ? data.request : r)))
+      } else {
+        await refresh()
+      }
     } finally {
       setBusy(false)
     }
@@ -619,15 +625,19 @@ function ResolutionDialog({ request, target, onClose, onDone }: {
     setUploading(true)
     setError('')
     try {
-      for (const file of Array.from(list)) {
+      // In parallel: three screenshots should take as long as the slowest, not
+      // the sum of all three
+      const results = await Promise.all(Array.from(list).map(async file => {
         const fd = new FormData()
         fd.append('file', file)
         fd.append('request_id', request.id)
         const res = await fetch('/api/requests/files', { method: 'POST', body: fd })
-        const d = await res.json()
-        if (d.error) { setError(d.error); continue }
-        setFiles(f => [...f, d.file])
-      }
+        return res.json() as Promise<{ file?: ResolutionFile; error?: string }>
+      }))
+      const failed = results.find(r => r.error)
+      if (failed?.error) setError(failed.error)
+      const added = results.map(r => r.file).filter((f): f is ResolutionFile => !!f)
+      if (added.length) setFiles(f => [...f, ...added])
     } finally {
       setUploading(false)
     }

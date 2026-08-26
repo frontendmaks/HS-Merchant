@@ -173,15 +173,18 @@ export async function PATCH(request: NextRequest) {
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
   const service = createServiceClient()
-  const { data: before } = await service
-    .from('requests')
-    .select('id, created_by, subject, status, deadline, priority, description, resolution')
-    .eq('id', id)
-    .single()
+
+  // Two reads that do not depend on each other. Every round trip to Supabase
+  // is most of a tenth of a second, and this route made seven of them in a row.
+  const [{ data: before }, currentAssignees] = await Promise.all([
+    service.from('requests')
+      .select('id, created_by, subject, status, deadline, priority, description, resolution')
+      .eq('id', id)
+      .single(),
+    assigneeIds(service, id),
+  ])
 
   if (!before) return NextResponse.json({ error: 'Запит не знайдено' }, { status: 404 })
-
-  const currentAssignees = await assigneeIds(service, id)
   const isAuthor = before.created_by === caller.id
   const isAssignee = currentAssignees.includes(caller.id)
   const admin = isAdmin(caller.role as UserRole)
@@ -268,8 +271,6 @@ export async function PATCH(request: NextRequest) {
       status === 'done' && before.status === 'pending_review' ? 'confirmed'
       : status === 'rework' ? 'returned'
       : 'status'
-    await logEvent(service, id, caller.id, eventType, before.status, status)
-
     const wording: Record<string, string> = {
       in_progress:    'взяв запит у роботу',
       pending_review: 'виконав запит — потрібне підтвердження',
@@ -278,12 +279,15 @@ export async function PATCH(request: NextRequest) {
       canceled:       'скасував запит',
       new:            'повернув запит у новий',
     }
-    await notify(
-      service, audience, caller.id, id,
-      status === 'pending_review' ? NOTIFICATION_TYPES.review : NOTIFICATION_TYPES.status,
-      `${displayName(caller)} ${wording[status] ?? 'змінив статус запиту'}`,
-      before.subject,
-    )
+    await Promise.all([
+      logEvent(service, id, caller.id, eventType, before.status, status),
+      notify(
+        service, audience, caller.id, id,
+        status === 'pending_review' ? NOTIFICATION_TYPES.review : NOTIFICATION_TYPES.status,
+        `${displayName(caller)} ${wording[status] ?? 'змінив статус запиту'}`,
+        before.subject,
+      ),
+    ])
   }
 
   if (deadline !== undefined && (deadline || null) !== before.deadline) {
@@ -303,12 +307,22 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (description !== undefined && (description.trim() || null) !== before.description) {
-    await logEvent(service, id, caller.id, 'description', before.description, description.trim() || null)
-    await notify(service, audience, caller.id, id, NOTIFICATION_TYPES.updated,
-      `${displayName(caller)} змінив опис запиту`, before.subject)
+    await Promise.all([
+      logEvent(service, id, caller.id, 'description', before.description, description.trim() || null),
+      notify(service, audience, caller.id, id, NOTIFICATION_TYPES.updated,
+        `${displayName(caller)} змінив опис запиту`, before.subject),
+    ])
   }
 
-  return NextResponse.json({ success: true })
+  // Hand the changed request back so the board can replace one row. Refetching
+  // the whole list meant a second authentication and a second heavy join for
+  // data the caller already had.
+  const { data: after } = await service.from('requests').select(SELECT).eq('id', id).single()
+
+  return NextResponse.json({
+    success: true,
+    request: after ? normalizeRequest(after) : null,
+  })
 }
 
 // DELETE /api/requests — only the person who raised the request may remove it
