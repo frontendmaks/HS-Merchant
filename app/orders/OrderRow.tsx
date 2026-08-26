@@ -74,6 +74,8 @@ interface OrderRowProps {
   external_id: string
   platform: string
   order_date: string | null
+  /** "HH:mm" the marketplace stamped on the order, in Kyiv time */
+  arrival: string | null
   customer_name: string | null
   customer_phone: string | null
   address: string | null
@@ -376,7 +378,10 @@ function OrderDetailModal(
                 <div className="flex items-center gap-2 flex-wrap">
                   {platformBadge(props.platform)}
                   <span className="text-zinc-300 font-mono text-sm">{props.external_id}</span>
-                  <span className="text-zinc-600 text-xs">{props.order_date}</span>
+                  <span className="text-zinc-600 text-xs">
+                    {props.order_date}
+                    {props.arrival && <span className="text-zinc-500"> о {props.arrival}</span>}
+                  </span>
                 </div>
                 <h3 className="text-white font-semibold mt-1.5">{props.customer_name || '—'}</h3>
               </div>

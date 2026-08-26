@@ -7,6 +7,7 @@ import { getCurrentRole, canAccess } from '@/lib/getRole'
 import { IN_PROGRESS_STATUSES, SHIPPING_STATUSES, isInProgress, isShipping } from '@/lib/order-statuses'
 import OrdersToolbar from './OrdersToolbar'
 import OrderRow from './OrderRow'
+import { arrivalTime } from '@/lib/order-arrival'
 
 const UA_MONTHS = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень']
 
@@ -223,6 +224,7 @@ export default async function OrdersPage({
                     external_id={order.external_id}
                     platform={order.platform}
                     order_date={order.order_date}
+                    arrival={arrivalTime(order.platform, order.raw)}
                     customer_name={order.customer_name}
                     customer_phone={order.customer_phone}
                     address={order.address}
