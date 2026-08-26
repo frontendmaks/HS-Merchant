@@ -16,7 +16,12 @@ interface Shipment {
   weight: { computed: number; assumed: string[]; saved: number | null }
   seats: number
   recipientRefs: { cityRef: string | null; warehouseRef: string | null }
-  delivery: { toBranch: boolean; street: string | null; building: string | null; flat: string | null }
+  delivery: {
+    toBranch: boolean
+    /** A parcel locker: Nova Poshta refuses a waybill without dimensions */
+    toPostomat: boolean
+    street: string | null; building: string | null; flat: string | null
+  }
   sender: { current: string | null; branches: { ref: string; description: string }[] }
   ready: { apiKey: boolean; sender: boolean; cityRef: boolean; destination: boolean }
 }
@@ -29,6 +34,97 @@ const MISSING_LABEL: Record<keyof Shipment['ready'], string> = {
   sender: 'дані відправника (таблиця np_settings)',
   cityRef: 'ідентифікатор міста одержувача',
   destination: 'адреса призначення — немає ні відділення, ні вулиці з будинком',
+}
+
+/** Nova Poshta gives hundreds of branches per city, so the list is searchable
+ *  and scrolls inside a fixed height rather than running off the dialog. */
+function BranchPicker({ branches, value, onChange }: {
+  branches: { ref: string; description: string }[]
+  value: string
+  onChange: (ref: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+
+  const selected = branches.find(b => b.ref === value)
+  const q = query.trim().toLowerCase()
+  // Typing "100" should find Відділення №100 rather than every address
+  // containing those digits, so a leading number match wins
+  const shown = !q ? branches : branches
+    .map(b => {
+      const text = b.description.toLowerCase()
+      const num = /№\s*(\d+)/.exec(b.description)?.[1] ?? ''
+      const score = num === q ? 0 : num.startsWith(q) ? 1 : text.includes(q) ? 2 : -1
+      return { b, score }
+    })
+    .filter(x => x.score >= 0)
+    .sort((a, b) => a.score - b.score)
+    .map(x => x.b)
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => { setQuery(''); setOpen(true) }}
+        className="w-full flex items-center justify-between gap-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-left text-white text-sm hover:border-zinc-600 transition-colors"
+      >
+        <span className="truncate">
+          {selected?.description ?? <span className="text-zinc-500">— оберіть відділення —</span>}
+        </span>
+        <span className="text-zinc-500 text-xs shrink-0">▼</span>
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4"
+             onClick={() => setOpen(false)}>
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-lg flex flex-col"
+            style={{ height: 'min(70vh, 520px)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-zinc-800 shrink-0">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-white text-sm font-medium">Відділення відправки</span>
+                <button onClick={() => setOpen(false)}
+                        className="text-zinc-500 hover:text-white text-xl leading-none">×</button>
+              </div>
+              <input
+                autoFocus
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape') setOpen(false) }}
+                placeholder="Номер або адреса — напр. 100"
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500"
+              />
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {shown.length === 0 ? (
+                <div className="px-4 py-8 text-center text-zinc-600 text-sm">Нічого не знайдено</div>
+              ) : shown.map(b => (
+                <button
+                  key={b.ref}
+                  type="button"
+                  onClick={() => { onChange(b.ref); setOpen(false) }}
+                  className={`w-full text-left px-4 py-2.5 text-xs transition-colors border-b border-zinc-800/60 ${
+                    b.ref === value
+                      ? 'bg-zinc-800 text-white'
+                      : 'text-zinc-300 hover:bg-zinc-800/60'
+                  }`}
+                >
+                  {b.description}
+                </button>
+              ))}
+            </div>
+
+            <div className="px-4 py-2 border-t border-zinc-800 shrink-0 text-zinc-600 text-xs">
+              {shown.length} із {branches.length}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
 }
 
 export default function ShipmentDialog({ orderId, onClose, onCreated }: {
@@ -113,6 +209,9 @@ export default function ShipmentDialog({ orderId, onClose, onCreated }: {
     ? (Object.keys(data.ready) as (keyof Shipment['ready'])[]).filter(k => !data.ready[k])
     : []
 
+  const needsDims = !!data?.delivery.toPostomat
+    && !(dims.length && dims.width && dims.height)
+
   const field = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500'
 
   return (
@@ -172,15 +271,11 @@ export default function ShipmentDialog({ orderId, onClose, onCreated }: {
             {data.sender.branches.length > 0 && (
               <div>
                 <label className="block text-zinc-400 text-xs mb-1.5">Відправка з відділення</label>
-                <select
+                <BranchPicker
+                  branches={data.sender.branches}
                   value={senderRef}
-                  onChange={e => setSenderRef(e.target.value)}
-                  className={field}
-                >
-                  {data.sender.branches.map(b => (
-                    <option key={b.ref} value={b.ref}>{b.description}</option>
-                  ))}
-                </select>
+                  onChange={setSenderRef}
+                />
               </div>
             )}
 
@@ -200,7 +295,10 @@ export default function ShipmentDialog({ orderId, onClose, onCreated }: {
 
             <div>
               <label className="block text-zinc-400 text-xs mb-1.5">
-                Габарити, см <span className="text-zinc-600">— необовʼязково</span>
+                Габарити, см{' '}
+                {data.delivery.toPostomat
+                  ? <span className="text-amber-400">— обовʼязково для поштомата</span>
+                  : <span className="text-zinc-600">— необовʼязково</span>}
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {(['length', 'width', 'height'] as const).map((k, i) => (
@@ -215,7 +313,9 @@ export default function ShipmentDialog({ orderId, onClose, onCreated }: {
                 ))}
               </div>
               <div className="text-zinc-600 text-xs mt-1">
-                Якщо не заповнити, Нова Пошта порахує обʼєм за вагою.
+                {data.delivery.toPostomat
+                  ? 'Нова Пошта має знати, чи посилка влізе у комірку — без габаритів ТТН не створиться.'
+                  : 'Якщо не заповнити, Нова Пошта порахує обʼєм за вагою.'}
               </div>
             </div>
 
@@ -262,6 +362,10 @@ export default function ShipmentDialog({ orderId, onClose, onCreated }: {
                       )}
                     </>
                   )}
+                </div>
+              ) : needsDims ? (
+                <div className="bg-amber-950/40 border border-amber-900/60 rounded-lg px-3 py-2.5 text-amber-300 text-xs">
+                  Заповніть габарити — доставка у поштомат без них неможлива.
                 </div>
               ) : missing.length === 0 ? (
                 <button

@@ -46,6 +46,9 @@ export async function GET(
   const building = delivery.building as string | undefined
   const flat = delivery.apartment as string | undefined
   const toBranch = !!warehouseRef
+  // parcel_locker vs branch, straight from the marketplace payload
+  const toPostomat = (warehouse.type as string) === 'parcel_locker'
+    || /поштомат/i.test(String(order.branch ?? ''))
 
   // Dispatch branch can change day to day, so the operator picks it
   const branches = hasNpKey() && settings?.city_sender_ref
@@ -53,7 +56,10 @@ export async function GET(
     : []
 
   return NextResponse.json({
-    delivery: { toBranch, street: street ?? null, building: building ?? null, flat: flat ?? null },
+    delivery: {
+      toBranch, toPostomat,
+      street: street ?? null, building: building ?? null, flat: flat ?? null,
+    },
     sender: {
       current: settings?.sender_address_ref ?? null,
       branches,
@@ -151,6 +157,7 @@ export async function POST(
   const delivery = (raw?.delivery_address ?? {}) as Record<string, unknown>
   const city = (delivery.city ?? {}) as Record<string, unknown>
   const warehouse = (delivery.warehouse ?? {}) as Record<string, unknown>
+  const toPostomat = (warehouse.type as string) === 'parcel_locker'
 
   // Insure the corrected value — what actually goes in the box
   const lines = (items ?? []) as unknown as OrderLine[]
@@ -172,6 +179,7 @@ export async function POST(
     description,
     senderAddressRef,
     dimensions,
+    toPostomat,
   })
 
   if (!result.ok) {

@@ -38,6 +38,8 @@ export interface WaybillInput {
   senderAddressRef?: string | null
   /** Centimetres. Sent only when all three are given. */
   dimensions?: { length?: number; width?: number; height?: number } | null
+  /** A parcel locker cannot take a waybill without dimensions */
+  toPostomat?: boolean
 }
 
 export interface SenderWarehouse {
@@ -173,6 +175,12 @@ export async function createWaybill(
   if (!toBranch && !(input.street && input.building)) {
     return { ok: false, error: 'Для курʼєрської доставки потрібні вулиця і будинок' }
   }
+  if (input.toPostomat && !(input.dimensions?.length && input.dimensions.width && input.dimensions.height)) {
+    return {
+      ok: false,
+      error: 'Для поштомата габарити обовʼязкові — Нова Пошта має знати, чи посилка влізе у комірку',
+    }
+  }
 
   const recipient = await ensureRecipient(input.recipientName, input.recipientPhone)
   if (!recipient.ok) return { ok: false, error: recipient.error }
@@ -188,9 +196,24 @@ export async function createWaybill(
   // Nova Poshta prices by volume as well as weight, so send it when we have it
   const dims = input.dimensions
   const hasDims = !!(dims?.length && dims.width && dims.height)
-  const volumeGeneral = hasDims
-    ? ((dims!.length! * dims!.width! * dims!.height!) / 1_000_000).toFixed(4)
-    : undefined
+  const seats = Math.max(1, Math.round(input.seats))
+  const volumePerSeat = hasDims
+    ? (dims!.length! * dims!.width! * dims!.height!) / 1_000_000
+    : 0
+  const volumeGeneral = hasDims ? (volumePerSeat * seats).toFixed(4) : undefined
+
+  // OptionsSeat describes each parcel separately. Nova Poshta rejects a
+  // waybill that has neither this nor VolumeGeneral — "OptionsSeat is empty" —
+  // and a parcel locker always needs the dimensions, since the door has to fit.
+  const optionsSeat = Array.from({ length: seats }, () => ({
+    weight: (input.weightKg / seats).toFixed(2),
+    ...(hasDims ? {
+      volumetricVolume: volumePerSeat.toFixed(4),
+      volumetricWidth: String(Math.round(dims!.width!)),
+      volumetricLength: String(Math.round(dims!.length!)),
+      volumetricHeight: String(Math.round(dims!.height!)),
+    } : {}),
+  }))
 
   const result = await call<{
     Ref: string
@@ -204,7 +227,8 @@ export async function createWaybill(
     CargoType: settings.cargo_type || 'Parcel',
     Weight: input.weightKg.toFixed(2),
     ServiceType: toBranch ? 'WarehouseWarehouse' : 'WarehouseDoors',
-    SeatsAmount: String(Math.max(1, Math.round(input.seats))),
+    SeatsAmount: String(seats),
+    OptionsSeat: optionsSeat,
     Description: input.description || settings.default_description || 'Продукти харчування',
     Cost: Math.max(1, Math.round(input.cost)).toString(),
     ...(volumeGeneral ? { VolumeGeneral: volumeGeneral } : {}),
@@ -236,8 +260,23 @@ export async function createWaybill(
   }
 }
 
-/** Removes a waybill that has not been handed over yet. */
-export async function deleteWaybill(ref: string): Promise<boolean> {
-  const r = await call('InternetDocument', 'delete', { DocumentRefs: ref })
-  return !!r.success
+/**
+ * Removes a waybill that has not been handed over yet.
+ *
+ * Reports why rather than returning a bare false: a deletion that quietly
+ * fails leaves a real waybill on the account, and the caller has no way to
+ * know. Retried once, because a document deleted immediately after creation is
+ * sometimes not ready yet.
+ */
+export async function deleteWaybill(ref: string): Promise<{ ok: boolean; error?: string }> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await call('InternetDocument', 'delete', { DocumentRefs: ref })
+    if (r.success) return { ok: true }
+    if (attempt === 0) {
+      await new Promise(resolve => setTimeout(resolve, 1500))
+      continue
+    }
+    return { ok: false, error: (r.errors ?? []).join('; ') || 'Нова Пошта не пояснила відмову' }
+  }
+  return { ok: false, error: 'Не вдалося видалити накладну' }
 }
