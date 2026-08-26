@@ -135,11 +135,12 @@ export function isOverdue(now: Date = new Date()): boolean {
 
 // --- who may do what -----------------------------------------------------
 //
-// Three roles run the schedule: operators propose it, management agrees it.
-// Everyone else may look. Super admins count as management — locking the owner
-// out of their own panel would be a bug, not a policy.
+// Exactly three roles run the schedule: operators propose it, an administrator
+// or manager agrees it. Everyone else — super admins included, by explicit
+// instruction — only reads it, and sees no buttons at all rather than disabled
+// ones.
 
-const MANAGEMENT = ['super_admin', 'admin', 'manager']
+const MANAGEMENT = ['admin', 'manager']
 
 /** Management: reviews, amends and approves. */
 export const canApprove = (role: string | null | undefined): boolean =>
@@ -211,6 +212,42 @@ export const isPlannable = (weekStart: string, now: Date = new Date()): boolean 
 
 /** The last week the picker may offer. */
 export const maxPlannableWeek = (now: Date = new Date()): string => nextWeekStart(now)
+
+/**
+ * Where a week sits in its life, which is not the same question as how far its
+ * approval has got. A past week is finished whatever was agreed; this week is
+ * the one being worked; only a future week is still a plan.
+ */
+export type WeekPhase = 'finished' | 'active' | 'planned' | 'drafting'
+
+export const PHASE_LABELS: Record<WeekPhase, string> = {
+  finished: 'Завершений',
+  active: 'Активний',
+  planned: 'Запланований',
+  drafting: 'Складається',
+}
+
+export const PHASE_TONES: Record<WeekPhase, string> = {
+  finished: 'bg-zinc-800 text-zinc-500',
+  active: 'bg-emerald-950/60 text-emerald-400',
+  planned: 'bg-sky-950/60 text-sky-300',
+  drafting: 'bg-amber-950/60 text-amber-300',
+}
+
+export function weekPhase(
+  weekStart: string,
+  status: ScheduleStatus,
+  now: Date = new Date(),
+): WeekPhase {
+  if (isPastWeek(weekStart, now)) return 'finished'
+  if (weekStart === thisWeekStart(now)) return 'active'
+  return status === 'approved' ? 'planned' : 'drafting'
+}
+
+/** The negotiation states worth naming alongside the phase — a week merely
+ *  being drafted or already agreed says nothing extra. */
+export const isInNegotiation = (status: ScheduleStatus): boolean =>
+  status === 'review_manager' || status === 'editing_manager' || status === 'review_operators'
 
 export const EVENT_LABELS: Record<string, string> = {
   submitted: 'надіслав на затвердження',

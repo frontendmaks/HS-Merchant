@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  ACTION_LABELS, EVENT_LABELS, STATUS_LABELS, STATUS_TONES, WEEKDAYS,
-  actionsFor, canApprove, canParticipate, dayLabel, holdsPen, isOverdue,
-  isPlannable, kyivToday, maxPlannableWeek, nextWeekStart, thisWeekStart,
-  weekDates, weekLabel, weekStartOf,
+  ACTION_LABELS, EVENT_LABELS, PHASE_LABELS, PHASE_TONES, STATUS_LABELS,
+  STATUS_TONES, WEEKDAYS, actionsFor, canApprove, canParticipate, dayLabel,
+  holdsPen, isInNegotiation, isOverdue, isPlannable, kyivToday,
+  maxPlannableWeek, nextWeekStart, thisWeekStart, weekDates, weekLabel,
+  weekPhase, weekStartOf,
   type ScheduleAction, type ScheduleStatus,
 } from '@/lib/schedule'
 import { timeAgo } from '@/lib/format'
@@ -75,6 +76,7 @@ export default function ScheduleClient({ initialWeek, role, meId }: {
   const manages = canApprove(role)
   const plannable = isPlannable(week)
   const status = data?.schedule.status ?? 'draft'
+  const phase = weekPhase(week, status)
 
   const applyWeek = useCallback((w: Week) => {
     setData(w)
@@ -176,9 +178,19 @@ export default function ScheduleClient({ initialWeek, role, meId }: {
           <p className="text-zinc-400 text-sm mt-0.5">
             {weekLabel(week)}
             {data && (
-              <span className={`ml-2 text-xs px-2 py-0.5 rounded ${STATUS_TONES[status]}`}>
-                {STATUS_LABELS[status]}
-              </span>
+              <>
+                {/* Where the week sits in its life… */}
+                <span className={`ml-2 text-xs px-2 py-0.5 rounded ${PHASE_TONES[phase]}`}>
+                  {PHASE_LABELS[phase]}
+                </span>
+                {/* …and, only while it is genuinely being passed back and
+                    forth, whose turn it is */}
+                {isInNegotiation(status) && (
+                  <span className={`ml-1.5 text-xs px-2 py-0.5 rounded ${STATUS_TONES[status]}`}>
+                    {STATUS_LABELS[status]}
+                  </span>
+                )}
+              </>
             )}
             {loading && <span className="ml-2 text-zinc-600 text-xs">оновлення…</span>}
           </p>
@@ -380,7 +392,9 @@ export default function ScheduleClient({ initialWeek, role, meId }: {
           </div>
         )}
 
-        {journalOpen && data && <Journal events={data.events} operators={operators} />}
+        {journalOpen && data && (
+          <Journal week={week} events={data.events} operators={operators} />
+        )}
       </div>
 
       {swaps.length > 0 && (
@@ -404,20 +418,29 @@ export default function ScheduleClient({ initialWeek, role, meId }: {
   )
 }
 
-/** How the week got to where it is: every handover and every edit. */
-function Journal({ events, operators }: { events: EventRow[]; operators: Operator[] }) {
+/** How this week got to where it is: every handover and every edit. Belongs to
+ *  the week on screen, and is refetched with it. */
+function Journal({ week, events, operators }: {
+  week: string; events: EventRow[]; operators: Operator[]
+}) {
   const byId = new Map(operators.map(o => [o.id, o]))
   const describe = (k: string) => {
     const [op, date] = k.split('|')
     return `${nameOf(byId.get(op))} ${dayLabel(date)}`
   }
 
-  if (!events.length) {
-    return <div className="px-5 py-5 border-t border-zinc-800 text-zinc-600 text-xs">Поки нічого не відбувалось.</div>
-  }
-
   return (
-    <div className="border-t border-zinc-800 divide-y divide-zinc-800/60">
+    <div className="border-t border-zinc-800">
+      <div className="px-5 py-2.5 bg-zinc-800/30 border-b border-zinc-800/60">
+        <span className="text-zinc-400 text-xs">Журнал тижня</span>
+        <span className="text-zinc-600 text-xs"> · {weekLabel(week)}</span>
+      </div>
+      {!events.length ? (
+        <div className="px-5 py-5 text-zinc-600 text-xs">
+          На цьому тижні поки нічого не відбувалось.
+        </div>
+      ) : (
+      <div className="divide-y divide-zinc-800/60">
       {events.map(e => (
         <div key={e.id} className="px-5 py-2.5">
           <div className="flex items-baseline gap-2 flex-wrap">
@@ -441,6 +464,8 @@ function Journal({ events, operators }: { events: EventRow[]; operators: Operato
           )}
         </div>
       ))}
+      </div>
+      )}
     </div>
   )
 }
