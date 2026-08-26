@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { isOverdue, kyivNow, nextWeekStart, weekLabel, DEADLINE_WEEKDAY } from '@/lib/schedule'
-import { approvers, notify, operators } from '@/lib/schedule-notify'
+import { managers, notify, operators } from '@/lib/schedule-notify'
 
 export async function GET(req: NextRequest) {
   const secret = req.headers.get('x-cron-secret')
@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
   })
 
   if (late) {
-    await notify(supabase, await approvers(supabase), {
+    await notify(supabase, await managers(supabase), {
       type,
       title: 'Графік не подано',
       body: `Оператори не подали графік на ${label} до 16:00.`,

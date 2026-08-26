@@ -18,7 +18,7 @@ import {
   actionsFor, canApprove, canParticipate, holdsPen, isPlannable, weekLabel, weekStartOf,
   thisWeekStart, type ScheduleAction, type ScheduleStatus,
 } from '@/lib/schedule'
-import { approvers, notify, operators } from '@/lib/schedule-notify'
+import { managers, notify, operators } from '@/lib/schedule-notify'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -199,25 +199,27 @@ export async function POST(req: NextRequest) {
   await logEvent(supabase, schedule.id, actor.id, EVENT[action])
 
   const label = weekLabel(week)
-  const tell = async (who: 'operators' | 'approvers', title: string, body: string, type: string) => {
-    const ids = who === 'operators' ? await operators(supabase) : await approvers(supabase)
+  // Only the two sides the schedule concerns hear about it — an administrator
+  // may act on it but is deliberately not told.
+  const tell = async (who: 'operators' | 'managers', title: string, body: string, type: string) => {
+    const ids = who === 'operators' ? await operators(supabase) : await managers(supabase)
     await notify(supabase, ids.filter(id => id !== actor.id), {
       type, title, body, actorId: actor.id, link: `/operators/schedule?week=${week}`,
     })
   }
 
   if (action === 'submit') {
-    await tell('approvers', 'Графік на затвердження', `${actor.name} надіслав графік на ${label}`, 'schedule_submitted')
+    await tell('managers', 'Графік на затвердження', `${actor.name} надіслав графік на ${label}`, 'schedule_submitted')
   } else if (action === 'amend') {
     // Whoever is now waiting is the side that should hear about it
-    await tell(management ? 'operators' : 'approvers', 'Графік на правках',
+    await tell(management ? 'operators' : 'managers', 'Графік на правках',
       `${actor.name} вносить зміни в графік на ${label}`, 'schedule_amend')
   } else if (action === 'send_back') {
     await tell('operators', 'Графік на розгляд', `${actor.name} змінив графік на ${label} — перегляньте`, 'schedule_sent_back')
   } else {
     await tell('operators', 'Графік затверджено', `${actor.name} затвердив графік на ${label}`, 'schedule_approved')
     if (management) return NextResponse.json({ ok: true, status: next })
-    await tell('approvers', 'Графік погоджено', `${actor.name} погодив графік на ${label}`, 'schedule_approved')
+    await tell('managers', 'Графік погоджено', `${actor.name} погодив графік на ${label}`, 'schedule_approved')
   }
 
   return NextResponse.json({ ok: true, status: next })

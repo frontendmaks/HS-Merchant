@@ -15,7 +15,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor } from '@/lib/order-events'
 import { getCurrentRole } from '@/lib/getRole'
 import { canApprove, dayLabel, isPastWeek, weekStartOf } from '@/lib/schedule'
-import { approvers, notify } from '@/lib/schedule-notify'
+import { approvers, managers, notify } from '@/lib/schedule-notify'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
   await notify(supabase, [to_operator], {
     type: 'swap_request', title: 'Запит на заміну', body, actorId: actor.id,
   })
-  await notify(supabase, await approvers(supabase), {
+  await notify(supabase, await managers(supabase), {
     type: 'swap_request',
     title: 'Заміна в графіку',
     body: `${actor.name} → ${await nameOf(supabase, to_operator)} · ${dayLabel(work_date)}`,
@@ -120,7 +120,7 @@ export async function PATCH(req: NextRequest) {
       status: 'declined', resolved_by: actor.id, resolved_at: now,
     }).eq('id', id)
 
-    await notify(supabase, [swap.from_operator, swap.to_operator, ...(await approvers(supabase))], {
+    await notify(supabase, [swap.from_operator, swap.to_operator, ...(await managers(supabase))], {
       type: 'swap_declined',
       title: 'Заміну відхилено',
       body: `${actor.name} відхилив заміну ${dayLabel(swap.work_date)}`,
@@ -169,7 +169,7 @@ export async function PATCH(req: NextRequest) {
   const [fromName, toName] = await Promise.all([
     nameOf(supabase, swap.from_operator), nameOf(supabase, swap.to_operator),
   ])
-  await notify(supabase, [swap.from_operator, swap.to_operator, ...(await approvers(supabase))], {
+  await notify(supabase, [swap.from_operator, swap.to_operator, ...(await managers(supabase))], {
     type: 'swap_approved',
     title: 'Заміну підтверджено',
     body: `${dayLabel(swap.work_date)} — ${fromName} → ${toName}`,
