@@ -492,13 +492,15 @@ export interface OperatorStat {
   // --- measured against the roster --------------------------------------
   /** Days they were rostered inside the period */
   shifts: number
-  /** Minutes those shifts add up to */
-  scheduledMins: number
+  /** Rostered minutes that have already elapsed */
+  workedMins: number
+  /** Of those, the ones the heartbeat was recording for */
+  measuredMins: number
   /** Minutes the panel was actually open during them */
   onlineMins: number
-  /** Online as a share of rostered time */
+  /** Online as a share of the time we were recording */
   presencePct: number | null
-  /** Orders handled per hour actually online */
+  /** Orders handled per rostered hour worked */
   ordersPerHour: number | null
   /** Actions taken outside any rostered shift — not counted in the durations */
   offShiftActions: number
@@ -636,12 +638,15 @@ export function operatorStats(
       }
     }
 
-    // Only shifts that have already run. Counting a whole rostered week on
-    // Monday morning would report everyone as absent for four days they have
-    // not reached yet.
-    const scheduledMins = elapsedShiftMinutes(workDates, new Date(), { measuredSince: presenceSince })
+    // Two different denominators, and conflating them is what made the
+    // columns misleading:
+    //   worked   — rostered time already elapsed, which is what a workload is
+    //              measured against and owes nothing to the heartbeat
+    //   measured — the part of it the heartbeat was actually recording, which
+    //              is the only honest denominator for presence
+    const workedMins = elapsedShiftMinutes(workDates)
+    const measuredMins = elapsedShiftMinutes(workDates, new Date(), { measuredSince: presenceSince })
     const onlineMins = onlineMinutes(ticks.get(id) ?? [], workDates)
-    const onlineHours = onlineMins / 60
 
     return {
       id,
@@ -657,13 +662,16 @@ export function operatorStats(
       reactionMins: mean(reaction),
       handlingMins: mean(handling),
       shifts: workDates.size,
-      scheduledMins,
+      workedMins,
+      measuredMins,
       onlineMins,
       // Presence can exceed the roster if someone works beyond their hours;
       // the honest figure is the ratio, not a capped one
-      presencePct: scheduledMins ? Math.round((onlineMins / scheduledMins) * 100) : null,
-      ordersPerHour: onlineHours >= 0.5
-        ? Math.round((perOrder.size / onlineHours) * 10) / 10
+      presencePct: measuredMins ? Math.round((onlineMins / measuredMins) * 100) : null,
+      // Half an hour of shift is enough to divide by; less would turn one order
+      // into a headline number
+      ordersPerHour: workedMins >= 30
+        ? Math.round((perOrder.size / (workedMins / 60)) * 10) / 10
         : null,
       offShiftActions,
     }

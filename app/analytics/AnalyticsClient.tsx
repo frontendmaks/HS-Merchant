@@ -378,9 +378,8 @@ const METRIC_HELP: [string, string][] = [
   ['Скасовано', 'скільки скасовано, і яка це частка — причина може бути й не в операторі'],
   ['Реакція', 'скільки замовлення чекало: від моменту, коли воно прийшло, до моменту, коли оператор поставив статус «Прийнято»'],
   ['Опрацювання', 'скільки зайняла сама робота: від прийняття замовлення до моменту, коли його передали в доставку. Порожньо, поки оператор не провів замовлення через обидва статуси'],
-  ['Змін', 'скільки днів оператор стояв у графіку, і скільки з тих годин уже минуло — майбутні зміни не рахуються'],
   ['Присутність', 'скільки з уже відпрацьованих годин панель справді була відкрита. Зміни до 26.08.2026 не вимірювались, тож у них присутності немає'],
-  ['Замовл./год', 'замовлень на годину реального часу онлайн — навантаження, а не швидкість'],
+  ['Замовл./год', 'замовлень на годину зміни, що вже минула — навантаження, а не швидкість. Майбутні зміни не рахуються'],
 ]
 
 const MARKETPLACES = [
@@ -624,7 +623,6 @@ export default function AnalyticsClient({
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Скасовано</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Реакція</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Опрацювання</th>
-                    <th className="text-right px-5 py-2.5 whitespace-nowrap">Змін</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Присутність</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Замовл./год</th>
                   </tr>
@@ -651,12 +649,6 @@ export default function AnalyticsClient({
                       </td>
                       <td className="px-5 py-2.5 text-right text-zinc-300 text-xs whitespace-nowrap">
                         {o.handlingMins != null ? duration(o.handlingMins) : '—'}
-                      </td>
-                      <td className="px-5 py-2.5 text-right text-zinc-400 text-xs whitespace-nowrap">
-                        {o.shifts || '—'}
-                        {o.scheduledMins > 0 && (
-                          <span className="text-zinc-600"> · {Math.round(o.scheduledMins / 60)} год</span>
-                        )}
                       </td>
                       <td className="px-5 py-2.5 text-right text-xs whitespace-nowrap">
                         {o.presencePct != null ? (
@@ -699,7 +691,7 @@ export default function AnalyticsClient({
                 format={v => `${v}%`}
               />
               <OperatorBars
-                title="Замовлень за годину онлайн"
+                title="Замовлень за годину зміни"
                 rows={operators
                   .filter(o => o.ordersPerHour != null)
                   .map(o => ({ name: o.name, value: o.ordersPerHour as number }))}
