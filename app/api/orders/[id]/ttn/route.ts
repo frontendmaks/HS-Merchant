@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { pushTtnToMarketplace } from '@/lib/marketplace-ttn'
+import { broadcastOrderChange } from '@/lib/order-broadcast'
 
 export async function PATCH(
   req: NextRequest,
@@ -47,5 +48,6 @@ export async function PATCH(
       await currentActor())
   }
 
+  await broadcastOrderChange(id, 'ttn')
   return NextResponse.json({ success: true, status: pushed.status })
 }

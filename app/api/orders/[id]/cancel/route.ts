@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt } from '@/lib/maudau'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { rozetkaToken } from '@/lib/rozetka-auth'
+import { broadcastOrderChange } from '@/lib/order-broadcast'
 
 const ROZETKA_CANCEL_IDS = new Set([11, 12, 13, 15, 16, 17, 18, 19, 24, 25, 28, 29, 30, 31, 40, 42, 44, 45, 50])
 // IDs considered "in-progress" or "completed" — not valid cancels
@@ -88,5 +89,6 @@ export async function PATCH(
     )
   }
 
+  await broadcastOrderChange(id, 'cancel')
   return NextResponse.json({ success: true })
 }

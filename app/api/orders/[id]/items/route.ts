@@ -6,6 +6,7 @@ import {
   type CatalogProduct, type MarketplaceLine, type OrderLine,
 } from '@/lib/order-items'
 import { canPushToMaudau, packsFor, pushOrderItems, type PushResult } from '@/lib/maudau-order-sync'
+import { broadcastOrderChange } from '@/lib/order-broadcast'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -204,6 +205,8 @@ export async function PATCH(
     },
     actor,
   )
+
+  await broadcastOrderChange(id, 'items')
 
   return NextResponse.json({
     lines: lines.map(l => ({ ...l, corrected_total: correctedTotal(l) })),

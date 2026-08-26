@@ -7,6 +7,7 @@ import {
   type NpSettings,
 } from '@/lib/nova-poshta'
 import { pushTtnToMarketplace } from '@/lib/marketplace-ttn'
+import { broadcastOrderChange } from '@/lib/order-broadcast'
 
 // GET — what would go on the waybill, computed from the corrected lines
 export async function GET(
@@ -226,6 +227,8 @@ export async function POST(
     await logOrderEvent(service, id, 'status',
       { old: (order.status as string) ?? null, new: status, details: 'разом із ТТН' }, actor)
   }
+
+  await broadcastOrderChange(id, 'ttn')
 
   return NextResponse.json({
     ...result,

@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import { notifyNewOrders } from '@/lib/order-notifications'
 import { rozetkaToken, invalidateRozetkaToken, isTokenError } from '@/lib/rozetka-auth'
+import { broadcastOrderChange } from '@/lib/order-broadcast'
 
 const BASE = process.env.ROZETKA_BASE!
 
@@ -283,6 +284,8 @@ export async function syncRozetka(mode: SyncMode = 'full'): Promise<{ synced: nu
 
     // Only after the rows are safely stored
     await notifyNewOrders(supabase, 'rozetka', freshOrders)
+    // A new order should appear on every open list at once, not at the next poll
+    await broadcastOrderChange('*', 'sync')
   }
 
   return { synced: rows.length }

@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt } from '@/lib/maudau'
 import { notifyNewOrders } from '@/lib/order-notifications'
+import { broadcastOrderChange } from '@/lib/order-broadcast'
 
 const BASE = process.env.MAUDAU_BASE!
 
@@ -224,6 +225,8 @@ export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: num
 
     // Only after the rows are safely stored
     await notifyNewOrders(supabase, 'maudau', freshOrders)
+    // A new order should appear on every open list at once, not at the next poll
+    await broadcastOrderChange('*', 'sync')
   }
 
   return { synced: rows.length }

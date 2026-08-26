@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt, patchMaudauStatus } from '@/lib/maudau'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { rozetkaToken } from '@/lib/rozetka-auth'
+import { broadcastOrderChange } from '@/lib/order-broadcast'
 
 const MAUDAU_STATUS_MAP: Record<string, string> = {
   'Нове': 'new_order',
@@ -50,7 +51,8 @@ export async function PATCH(
 
       // Cancellation must go through the cancel route (needs a reason)
       if (apiStatus === 'canceled') {
-        return NextResponse.json({ success: true })
+        await broadcastOrderChange(id, 'status')
+  return NextResponse.json({ success: true })
       }
 
       const numericId = external_id.replace(/^MD-/, '')
@@ -105,5 +107,6 @@ export async function PATCH(
     )
   }
 
+  await broadcastOrderChange(id, 'status')
   return NextResponse.json({ success: true })
 }

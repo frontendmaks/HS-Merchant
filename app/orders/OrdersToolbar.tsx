@@ -2,14 +2,19 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
+import { useOrderUpdates } from '@/lib/use-order-updates'
 
 export default function OrdersToolbar() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
-  // Orders keep arriving while this page sits open — pull the server view back
-  // in periodically so a new order shows up without a manual reload.
+  // Someone else changing an order should show here at once rather than at the
+  // next poll — a stale status is how two operators work the same order.
+  useOrderUpdates(() => router.refresh())
+
+  // The poll stays as the floor: a dropped socket or a change made while the
+  // tab was asleep still lands, just later.
   useEffect(() => {
     const timer = setInterval(() => router.refresh(), 60_000)
     const onFocus = () => router.refresh()

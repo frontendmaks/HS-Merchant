@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import OrderJournal from './OrderJournal'
 import OrderItemsEditor from './OrderItemsEditor'
 import ShipmentDialog from './ShipmentDialog'
+import { useRouter } from 'next/navigation'
+import { useOrderUpdates } from '@/lib/use-order-updates'
 
 const MAUDAU_STATUSES = ['Нове', 'Прийнято', 'Узгоджено', 'На доставці', 'Прибуло', 'Доставлено', 'Скасовано']
 const ROZETKA_STATUSES = ['Нове', 'Опрацьовується', 'Комплектується', 'Передано в доставку', 'Доставляється', 'Чекає в пункті', 'Доставлено', 'Скасовано']
@@ -92,6 +94,7 @@ interface OrderRowProps {
 
 export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) {
   const readOnly = props.readOnly ?? false
+  const router = useRouter()
   const [status, setStatus] = useState(props.status || '')
   const [ttn, setTtn] = useState(props.ttn || '')
   const [ttnDraft, setTtnDraft] = useState(props.ttn || '')
@@ -103,6 +106,13 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
     setTtnDraft(props.ttn || '')
     setCancelReason(props.cancel_reason || '')
   }, [props.status, props.ttn, props.cancel_reason])
+
+  // This row holds its own copy of status and TTN so typing feels immediate.
+  // That copy goes stale the moment someone else touches the same order, so
+  // pull the server's view back when it does.
+  useOrderUpdates(change => {
+    if (change.orderId === props.id) router.refresh()
+  })
 
   const [journalOpen, setJournalOpen] = useState(false)
   const [statusLoading, setStatusLoading] = useState(false)
