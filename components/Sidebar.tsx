@@ -25,6 +25,28 @@ interface Profile {
   role: string
 }
 
+interface NavCounts {
+  requests: { new: number; inProgress: number }
+  orders: { new: number; processing: number }
+}
+
+const COUNTS_POLL_MS = 30_000
+
+/** Grey = waiting to be picked up, red = already being worked on. */
+function NavBadge({ count, tone, title }: { count: number; tone: 'grey' | 'red'; title: string }) {
+  if (count <= 0) return null
+  return (
+    <span
+      title={title}
+      className={`min-w-[20px] h-5 px-1.5 inline-flex items-center justify-center rounded-full text-[11px] font-semibold tabular-nums ${
+        tone === 'red' ? 'bg-red-600 text-white' : 'bg-zinc-700 text-zinc-200'
+      }`}
+    >
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
+
 export default function Sidebar() {
   const path = usePathname()
   const router = useRouter()
@@ -32,6 +54,7 @@ export default function Sidebar() {
   const [userId, setUserId] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [open, setOpen] = useState(false)
+  const [counts, setCounts] = useState<NavCounts | null>(null)
 
   // Marks this user online on every page for as long as the tab is open
   usePresence(userId)
@@ -56,6 +79,26 @@ export default function Sidebar() {
     return () => subscription.unsubscribe()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Badge figures: polled, and re-read on navigation so acting on a request or
+  // order updates the count as soon as you leave the page.
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      if (!userId) { if (alive) setCounts(null); return }
+      try {
+        const res = await fetch('/api/nav-counts')
+        if (!res.ok) return
+        const data = await res.json()
+        if (alive) setCounts(data)
+      } catch {
+        // A failed poll just leaves the previous figures on screen
+      }
+    }
+    void load()
+    const timer = setInterval(load, COUNTS_POLL_MS)
+    return () => { alive = false; clearInterval(timer) }
+  }, [userId, path])
 
   // Escape closes the drawer, matching the backdrop tap.
   useEffect(() => {
@@ -135,6 +178,17 @@ export default function Sidebar() {
       <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1">
         {visibleNav.map(({ href, label, icon }) => {
           const active = path === href
+          const badges = href === '/requests'
+            ? [
+                { count: counts?.requests.new ?? 0,        tone: 'grey' as const, title: 'Не взяті в роботу' },
+                { count: counts?.requests.inProgress ?? 0, tone: 'red'  as const, title: 'В роботі' },
+              ]
+            : href === '/orders'
+            ? [
+                { count: counts?.orders.new ?? 0,        tone: 'grey' as const, title: 'Нові' },
+                { count: counts?.orders.processing ?? 0, tone: 'red'  as const, title: 'Опрацьовуються' },
+              ]
+            : []
           return (
             <Link
               key={href}
@@ -148,7 +202,14 @@ export default function Sidebar() {
               }`}
             >
               <span className="text-base">{icon}</span>
-              {label}
+              <span className="flex-1 min-w-0 truncate">{label}</span>
+              {badges.length > 0 && (
+                <span className="flex items-center gap-1 shrink-0">
+                  {badges.map(b => (
+                    <NavBadge key={b.title} count={b.count} tone={b.tone} title={b.title} />
+                  ))}
+                </span>
+              )}
             </Link>
           )
         })}
