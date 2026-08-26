@@ -36,3 +36,36 @@ export function plural(n: number, one: string, few: string, many: string): strin
 }
 
 export const orderWord = (n: number) => plural(n, 'замовлення', 'замовлення', 'замовлень')
+
+/** How long ago something happened, in words — "12 хв тому", "вчора о 18:20".
+ *  Falls back to a date once it stops being useful to count backwards. */
+export function timeAgo(iso: string | null | undefined, now = new Date()): string | null {
+  if (!iso) return null
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return null
+
+  const mins = Math.floor((now.getTime() - at.getTime()) / 60000)
+  if (mins < 0) return 'щойно'          // a clock skewed a little ahead
+  if (mins < 1) return 'щойно'
+  if (mins < 60) return `${mins} ${plural(mins, 'хвилину', 'хвилини', 'хвилин')} тому`
+
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours} ${plural(hours, 'годину', 'години', 'годин')} тому`
+
+  // Days apart by the calendar in Kyiv, not by dividing hours — 23:50 and 00:10
+  // are one day apart, not zero.
+  const kyivDay = (d: Date) => new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(d)
+  const at_ = kyivDay(at)
+  const clock = new Intl.DateTimeFormat('uk-UA', {
+    timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(at)
+
+  const yesterday = new Date(now.getTime() - 86_400_000)
+  if (at_ === kyivDay(yesterday)) return `вчора о ${clock}`
+
+  const [y, m, d] = at_.split('-')
+  const sameYear = at_.slice(0, 4) === kyivDay(now).slice(0, 4)
+  return sameYear ? `${d}.${m} о ${clock}` : `${d}.${m}.${y}`
+}

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { assignableRoles, canManageUser, ROLE_LABELS as ROLE_NAMES, type UserRole } from '@/lib/roles'
 import { usePresence } from '@/lib/presence'
+import { timeAgo } from '@/lib/format'
 
 interface Profile {
   id: string
@@ -284,15 +285,28 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
                     <td className="px-4 py-3">
                       {(() => {
                         const isOnline = onlineUsers.has(user.id)
+                        // Only meaningful for someone who is away — while they
+                        // are here, "last seen" is just now.
+                        const seen = isOnline ? null : timeAgo(user.last_seen_at)
                         return (
-                          <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded ${
-                            isOnline ? 'bg-emerald-950/60 text-emerald-400' : 'bg-zinc-800 text-zinc-500'
-                          }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${
-                              isOnline ? 'bg-emerald-400' : 'bg-zinc-600'
-                            }`} />
-                            {isOnline ? 'Online' : 'Offline'}
-                          </span>
+                          <>
+                            <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded ${
+                              isOnline ? 'bg-emerald-950/60 text-emerald-400' : 'bg-zinc-800 text-zinc-500'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${
+                                isOnline ? 'bg-emerald-400' : 'bg-zinc-600'
+                              }`} />
+                              {isOnline ? 'Online' : 'Offline'}
+                            </span>
+                            {!isOnline && (
+                              <div className="text-zinc-600 text-xs mt-1">
+                                {/* An empty stamp is not proof of never having
+                                    logged in — it is only recorded since this
+                                    was added. Say so rather than guess. */}
+                                {seen ?? (user.invite_pending ? 'ще не заходив' : 'невідомо')}
+                              </div>
+                            )}
+                          </>
                         )
                       })()}
                     </td>
