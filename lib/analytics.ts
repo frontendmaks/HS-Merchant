@@ -458,6 +458,8 @@ export interface OperatorEventRow {
   actor_id: string | null
   actor_name: string | null
   type: string
+  /** For a status change, the status it moved to */
+  new_value?: string | null
   created_at: string
 }
 
@@ -478,12 +480,10 @@ export interface OperatorStat {
   ttn: number
   /** How the actions split by kind */
   byType: Record<string, number>
-  /** Median working minutes from an order arriving to this person's first action */
+  /** Average working minutes from an order arriving to it being accepted */
   reactionMins: number | null
-  /** Median working minutes from their first to their last action on an order */
+  /** Average working minutes from acceptance to handing it to the courier */
   handlingMins: number | null
-  /** Share of orders answered within the same shift */
-  sameShiftPct: number | null
 
   // --- measured against the roster --------------------------------------
   /** Days they were rostered inside the period */
@@ -500,12 +500,17 @@ export interface OperatorStat {
   offShiftActions: number
 }
 
-const median = (xs: number[]): number | null => {
-  if (!xs.length) return null
-  const s = [...xs].sort((a, b) => a - b)
-  const mid = Math.floor(s.length / 2)
-  return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2)
-}
+const mean = (xs: number[]): number | null =>
+  xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null
+
+/** Taking the order on. The two marketplaces word it differently. */
+const ACCEPTED = new Set(['Прийнято', 'Опрацьовується'])
+
+/** Handed to the courier — the end of the shop's part. */
+const SHIPPED = new Set([
+  'На доставці', 'Прибуло',
+  'Передано в доставку', 'Доставляється', 'Чекає в пункті',
+])
 
 /**
  * Efficiency per operator, derived from the order journal.
@@ -559,7 +564,7 @@ export function operatorStats(
     const reaction: number[] = []
     const handling: number[] = []
     const byType: Record<string, number> = {}
-    let revenue = 0, delivered = 0, canceled = 0, ttn = 0, sameShift = 0, withArrival = 0
+    let revenue = 0, delivered = 0, canceled = 0, ttn = 0
     let offShiftActions = 0
 
     for (const r of rows) {
@@ -585,22 +590,22 @@ export function operatorStats(
       if (!onShift.length) continue
 
       const sorted = [...onShift].sort((a, b) => a.created_at.localeCompare(b.created_at))
-      const first = sorted[0].created_at
-      const last = sorted[sorted.length - 1].created_at
+
+      // Two named moments rather than "first and last thing they touched":
+      // taking the order on, and handing it to the courier.
+      const acceptedAt = sorted
+        .find(e => e.type === 'status' && ACCEPTED.has(e.new_value ?? ''))?.created_at
+      const shippedAt = sorted
+        .find(e => e.type === 'status' && SHIPPED.has(e.new_value ?? ''))?.created_at
 
       const arrival = arrivalOf.get(orderId)
-      if (arrival) {
-        const mins = businessMinutes(arrival, first, measured ? { workDates } : {})
-        if (mins != null) {
-          reaction.push(mins)
-          withArrival++
-          // One shift is nine hours; answering inside that is same-day service
-          if (mins <= (WORK_END_HOUR - WORK_START_HOUR) * 60) sameShift++
-        }
+      if (arrival && acceptedAt) {
+        const mins = businessMinutes(arrival, acceptedAt, measured ? { workDates } : {})
+        if (mins != null) reaction.push(mins)
       }
 
-      if (sorted.length > 1) {
-        const mins = businessMinutes(first, last, measured ? { workDates } : {})
+      if (acceptedAt && shippedAt && shippedAt >= acceptedAt) {
+        const mins = businessMinutes(acceptedAt, shippedAt, measured ? { workDates } : {})
         if (mins != null) handling.push(mins)
       }
     }
@@ -620,9 +625,8 @@ export function operatorStats(
       canceled,
       ttn,
       byType,
-      reactionMins: median(reaction),
-      handlingMins: median(handling),
-      sameShiftPct: withArrival ? Math.round((sameShift / withArrival) * 100) : null,
+      reactionMins: mean(reaction),
+      handlingMins: mean(handling),
       shifts: workDates.size,
       scheduledMins,
       onlineMins,
@@ -646,5 +650,7 @@ export interface OperatorEventRow {
   actor_id: string | null
   actor_name: string | null
   type: string
+  /** For a status change, the status it moved to */
+  new_value?: string | null
   created_at: string
 }

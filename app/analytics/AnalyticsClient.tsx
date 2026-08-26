@@ -376,12 +376,10 @@ const METRIC_HELP: [string, string][] = [
   ['Серед. чек', 'ця сума, поділена на кількість замовлень'],
   ['Доставлено', 'скільки з його замовлень дійшли до покупця, і яка це частка'],
   ['Скасовано', 'скільки скасовано, і яка це частка — причина може бути й не в операторі'],
-  ['Реакція', 'від надходження замовлення до першої дії оператора. Медіана, не середнє: одне забуте замовлення не псує картину'],
-  ['Опрацювання', 'від першої до останньої його дії по замовленню. Теж медіана'],
-  ['У зміну', 'частка замовлень, на які відповіли не пізніше ніж за одну зміну (8 годин робочого часу)'],
+  ['Реакція', 'скільки замовлення чекало: від моменту, коли воно прийшло, до моменту, коли оператор поставив статус «Прийнято»'],
+  ['Опрацювання', 'скільки зайняла сама робота: від статусу «Прийнято» до моменту, коли замовлення передали в доставку'],
   ['Змін', 'скільки днів оператор стояв у графіку за цей період, і скільки це годин'],
-  ['Онлайн', 'скільки з тих годин панель справді була відкрита — рахується по сигналах від браузера'],
-  ['Присутність', 'онлайн поділити на години за графіком. 100% означає, що людина була на місці всю зміну'],
+  ['Присутність', 'скільки зі своїх годин за графіком оператор справді мав панель відкритою. 100% означає всю зміну на місці'],
   ['Замовл./год', 'замовлень на годину реального часу онлайн — навантаження, а не швидкість'],
 ]
 
@@ -626,9 +624,7 @@ export default function AnalyticsClient({
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Скасовано</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Реакція</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Опрацювання</th>
-                    <th className="text-right px-5 py-2.5 whitespace-nowrap">У зміну</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Змін</th>
-                    <th className="text-right px-5 py-2.5 whitespace-nowrap">Онлайн</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Присутність</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Замовл./год</th>
                   </tr>
@@ -656,21 +652,11 @@ export default function AnalyticsClient({
                       <td className="px-5 py-2.5 text-right text-zinc-300 text-xs whitespace-nowrap">
                         {o.handlingMins != null ? duration(o.handlingMins) : '—'}
                       </td>
-                      <td className="px-5 py-2.5 text-right text-xs whitespace-nowrap">
-                        {o.sameShiftPct != null ? (
-                          <span className={o.sameShiftPct >= 80 ? 'text-emerald-400' : 'text-amber-400'}>
-                            {o.sameShiftPct}%
-                          </span>
-                        ) : '—'}
-                      </td>
                       <td className="px-5 py-2.5 text-right text-zinc-400 text-xs whitespace-nowrap">
                         {o.shifts || '—'}
                         {o.scheduledMins > 0 && (
                           <span className="text-zinc-600"> · {Math.round(o.scheduledMins / 60)} год</span>
                         )}
-                      </td>
-                      <td className="px-5 py-2.5 text-right text-zinc-300 text-xs whitespace-nowrap">
-                        {o.onlineMins ? duration(o.onlineMins) : '—'}
                       </td>
                       <td className="px-5 py-2.5 text-right text-xs whitespace-nowrap">
                         {o.presencePct != null ? (
@@ -698,7 +684,7 @@ export default function AnalyticsClient({
                 format={v => String(v)}
               />
               <OperatorBars
-                title="Медіанна реакція"
+                title="Середня реакція"
                 rows={operators
                   .filter(o => o.reactionMins != null)
                   .map(o => ({ name: o.name, value: o.reactionMins as number }))}
@@ -723,9 +709,10 @@ export default function AnalyticsClient({
 
             <div className="px-5 pb-5 border-t border-zinc-800 pt-4 space-y-3">
               <p className="text-zinc-400 text-xs">
-                Увесь час рахується лише в межах змін, на які оператор стояв у
-                графіку, з 09:00 до 17:00. День не за графіком не зараховується
-                нікому — ані ніч, ані чужий вихідний не потрапляють у цифри.
+                Усі значення — середні. Час рахується лише в межах змін, на які
+                оператор стояв у графіку, з 09:00 до 17:00: день не за графіком
+                не зараховується нікому, тож ані ніч, ані чужий вихідний не
+                потрапляють у цифри.
               </p>
 
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">

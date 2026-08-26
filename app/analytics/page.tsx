@@ -79,7 +79,7 @@ export default async function AnalyticsPage({
   const { data: eventRows } = orders.length
     ? await supabase
         .from('order_events')
-        .select('order_id, actor_id, actor_name, type, created_at')
+        .select('order_id, actor_id, actor_name, type, new_value, created_at')
         .in('order_id', orders.map(o => o.id))
         .limit(50000)
     : { data: [] }
