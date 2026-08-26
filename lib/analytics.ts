@@ -448,7 +448,10 @@ export { isClosed }
 
 // --- Operator efficiency ----------------------------------------------------
 
-import { businessMinutes, WORK_END_HOUR, WORK_START_HOUR } from '@/lib/work-hours'
+import {
+  SHIFT_MINUTES, businessMinutes, localDate, onlineMinutes,
+  WORK_END_HOUR, WORK_START_HOUR,
+} from '@/lib/work-hours'
 
 export interface OperatorEventRow {
   order_id: string
@@ -481,6 +484,20 @@ export interface OperatorStat {
   handlingMins: number | null
   /** Share of orders answered within the same shift */
   sameShiftPct: number | null
+
+  // --- measured against the roster --------------------------------------
+  /** Days they were rostered inside the period */
+  shifts: number
+  /** Minutes those shifts add up to */
+  scheduledMins: number
+  /** Minutes the panel was actually open during them */
+  onlineMins: number
+  /** Online as a share of rostered time */
+  presencePct: number | null
+  /** Orders handled per hour actually online */
+  ordersPerHour: number | null
+  /** Actions taken outside any rostered shift — not counted in the durations */
+  offShiftActions: number
 }
 
 const median = (xs: number[]): number | null => {
@@ -504,6 +521,10 @@ export function operatorStats(
   events: OperatorEventRow[],
   orders: { id: string; total: number | null; status: string | null }[],
   operatorIds: Set<string>,
+  /** Rostered days per operator, and the heartbeat trail — without these the
+   *  durations would charge people for hours they were not due to work. */
+  roster: Map<string, Set<string>> = new Map(),
+  ticks: Map<string, string[]> = new Map(),
 ): OperatorStat[] {
   const orderById = new Map(orders.map(o => [o.id, o]))
   const byActor = new Map<string, { name: string; rows: OperatorEventRow[] }>()
@@ -522,7 +543,16 @@ export function operatorStats(
     byActor.set(e.actor_id, entry)
   }
 
+  // Anyone rostered belongs in the table even if they logged nothing — an
+  // operator who worked a shift and touched no order is a fact worth seeing,
+  // not a missing row.
+  for (const id of roster.keys()) {
+    if (operatorIds.has(id) && !byActor.has(id)) byActor.set(id, { name: 'Оператор', rows: [] })
+  }
+
   return [...byActor.entries()].map(([id, { name, rows }]) => {
+    const workDates = roster.get(id) ?? new Set<string>()
+    const measured = workDates.size > 0
     const perOrder = new Map<string, OperatorEventRow[]>()
     for (const r of rows) perOrder.set(r.order_id, [...(perOrder.get(r.order_id) ?? []), r])
 
@@ -530,10 +560,12 @@ export function operatorStats(
     const handling: number[] = []
     const byType: Record<string, number> = {}
     let revenue = 0, delivered = 0, canceled = 0, ttn = 0, sameShift = 0, withArrival = 0
+    let offShiftActions = 0
 
     for (const r of rows) {
       byType[r.type] = (byType[r.type] ?? 0) + 1
       if (r.type === 'ttn') ttn++
+      if (measured && !workDates.has(localDate(new Date(r.created_at)))) offShiftActions++
     }
 
     for (const [orderId, evs] of perOrder) {
@@ -544,13 +576,21 @@ export function operatorStats(
         if (order.status === 'Скасовано') canceled++
       }
 
-      const sorted = [...evs].sort((a, b) => a.created_at.localeCompare(b.created_at))
+      // Durations are built from work done on shift. An action taken on a day
+      // off still counts as an action, but letting it bound the window would
+      // charge a whole extra shift to an order that was finished long before.
+      const onShift = measured
+        ? evs.filter(e => workDates.has(localDate(new Date(e.created_at))))
+        : evs
+      if (!onShift.length) continue
+
+      const sorted = [...onShift].sort((a, b) => a.created_at.localeCompare(b.created_at))
       const first = sorted[0].created_at
       const last = sorted[sorted.length - 1].created_at
 
       const arrival = arrivalOf.get(orderId)
       if (arrival) {
-        const mins = businessMinutes(arrival, first)
+        const mins = businessMinutes(arrival, first, measured ? { workDates } : {})
         if (mins != null) {
           reaction.push(mins)
           withArrival++
@@ -560,10 +600,14 @@ export function operatorStats(
       }
 
       if (sorted.length > 1) {
-        const mins = businessMinutes(first, last)
+        const mins = businessMinutes(first, last, measured ? { workDates } : {})
         if (mins != null) handling.push(mins)
       }
     }
+
+    const scheduledMins = workDates.size * SHIFT_MINUTES
+    const onlineMins = onlineMinutes(ticks.get(id) ?? [], workDates)
+    const onlineHours = onlineMins / 60
 
     return {
       id,
@@ -579,6 +623,16 @@ export function operatorStats(
       reactionMins: median(reaction),
       handlingMins: median(handling),
       sameShiftPct: withArrival ? Math.round((sameShift / withArrival) * 100) : null,
+      shifts: workDates.size,
+      scheduledMins,
+      onlineMins,
+      // Presence can exceed the roster if someone works beyond their hours;
+      // the honest figure is the ratio, not a capped one
+      presencePct: scheduledMins ? Math.round((onlineMins / scheduledMins) * 100) : null,
+      ordersPerHour: onlineHours >= 0.5
+        ? Math.round((perOrder.size / onlineHours) * 10) / 10
+        : null,
+      offShiftActions,
     }
   }).sort((a, b) => b.orders - a.orders)
 }

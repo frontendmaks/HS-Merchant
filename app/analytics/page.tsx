@@ -86,6 +86,33 @@ export default async function AnalyticsPage({
 
   const events = (eventRows ?? []) as OperatorEventRow[]
 
+  // Efficiency is measured against the roster: a day someone was not due to
+  // work is not their time, and time online can only come from the heartbeat
+  // trail — profiles.last_seen_at is a single overwritten moment.
+  const [{ data: shiftRows }, { data: tickRows }] = await Promise.all([
+    supabase.from('work_shifts')
+      .select('operator_id, work_date')
+      .gte('work_date', from).lte('work_date', to)
+      .limit(20000),
+    supabase.from('presence_ticks')
+      .select('user_id, minute')
+      .gte('minute', `${from}T00:00:00Z`).lte('minute', `${to}T23:59:59Z`)
+      .limit(200000),
+  ])
+
+  const roster = new Map<string, Set<string>>()
+  for (const r of shiftRows ?? []) {
+    const id = r.operator_id as string
+    if (!roster.has(id)) roster.set(id, new Set())
+    roster.get(id)!.add(r.work_date as string)
+  }
+
+  const ticks = new Map<string, string[]>()
+  for (const r of tickRows ?? []) {
+    const id = r.user_id as string
+    ticks.set(id, [...(ticks.get(id) ?? []), r.minute as string])
+  }
+
   /** Everything the page shows, for one slice of the orders. */
   function bundle(rows: OrderWithId[]): Bundle {
     const learned = learnCityOblasts(rows)
@@ -115,6 +142,8 @@ export default async function AnalyticsPage({
         events.filter(e => ids.has(e.order_id)),
         rows.map(o => ({ id: o.id, total: o.total, status: o.status })),
         operatorIds,
+        roster,
+        ticks,
       ),
     }
   }

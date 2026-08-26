@@ -7,8 +7,9 @@
  */
 
 export const WORK_TZ = 'Europe/Kyiv'
-export const WORK_START_HOUR = 8
+export const WORK_START_HOUR = 9
 export const WORK_END_HOUR = 17
+export const SHIFT_MINUTES = (WORK_END_HOUR - WORK_START_HOUR) * 60
 
 const partsIn = (at: Date, timeZone: string) => {
   const f = new Intl.DateTimeFormat('en-US', {
@@ -28,6 +29,13 @@ function offsetMinutes(at: Date, timeZone: string): number {
   const p = partsIn(at, timeZone)
   const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)
   return (asUtc - at.getTime()) / 60000
+}
+
+/** The local calendar date of an instant, as YYYY-MM-DD. */
+export function localDate(at: Date, timeZone = WORK_TZ): string {
+  const p = partsIn(at, timeZone)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}`
 }
 
 /** The UTC instant of a given local wall-clock hour on the local day of `at`. */
@@ -51,7 +59,15 @@ function localHourToUtc(at: Date, hour: number, timeZone: string): number {
 export function businessMinutes(
   fromIso: string | null | undefined,
   toIso: string | null | undefined,
-  opts: { startHour?: number; endHour?: number; timeZone?: string } = {},
+  opts: {
+    startHour?: number
+    endHour?: number
+    timeZone?: string
+    /** Dates (YYYY-MM-DD, Kyiv) the operator was rostered. Days outside it are
+     *  not their time, so they do not count — without this a Sunday would be
+     *  charged to whoever happened to answer on Monday. */
+    workDates?: Set<string>
+  } = {},
 ): number | null {
   if (!fromIso || !toIso) return null
   const from = new Date(fromIso).getTime()
@@ -74,12 +90,55 @@ export function businessMinutes(
 
     const windowStart = Math.max(cursor, open)
     const windowEnd = Math.min(to, close)
-    if (windowEnd > windowStart) total += (windowEnd - windowStart) / 60000
+    const rostered = !opts.workDates || opts.workDates.has(localDate(day, tz))
+    if (rostered && windowEnd > windowStart) total += (windowEnd - windowStart) / 60000
 
     // Jump to the start of the next local day
     const nextDay = localHourToUtc(new Date(close + 12 * 3600_000), startHour, tz)
     cursor = nextDay > cursor ? nextDay : cursor + 24 * 3600_000
   }
 
+  return Math.round(total)
+}
+
+/**
+ * Minutes actually spent with the panel open during rostered shifts.
+ *
+ * Reconstructed from the heartbeat trail: consecutive ticks close enough
+ * together are one stretch of being present, and a longer gap means they were
+ * away. Counting ticks instead would charge a full interval to somebody who
+ * looked in once, which is the opposite of the truth.
+ */
+export function onlineMinutes(
+  ticks: string[],
+  workDates: Set<string>,
+  opts: { startHour?: number; endHour?: number; timeZone?: string; maxGapMin?: number } = {},
+): number {
+  const startHour = opts.startHour ?? WORK_START_HOUR
+  const endHour = opts.endHour ?? WORK_END_HOUR
+  const tz = opts.timeZone ?? WORK_TZ
+  // The heartbeat is every three minutes; twice that allows one missed beat
+  const maxGap = (opts.maxGapMin ?? 7) * 60000
+
+  const times = ticks
+    .map(t => new Date(t).getTime())
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
+  if (times.length < 2) return 0
+
+  let total = 0
+  for (let i = 1; i < times.length; i++) {
+    const gap = times[i] - times[i - 1]
+    if (gap <= 0 || gap > maxGap) continue
+
+    // Charge the stretch only where it overlaps a rostered shift
+    const day = new Date(times[i - 1])
+    if (!workDates.has(localDate(day, tz))) continue
+    const open = localHourToUtc(day, startHour, tz)
+    const close = localHourToUtc(day, endHour, tz)
+    const from = Math.max(times[i - 1], open)
+    const to = Math.min(times[i], close)
+    if (to > from) total += (to - from) / 60000
+  }
   return Math.round(total)
 }

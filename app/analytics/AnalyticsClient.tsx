@@ -581,7 +581,7 @@ export default function AnalyticsClient({
       {/* Operators — no data source yet, stated plainly rather than faked */}
       <Panel
         title="Ефективність операторів"
-        subtitle="Час рахується лише в межах зміни 08:00–17:00"
+        subtitle="Рахується лише в межах змін за графіком, 09:00–17:00"
       >
         {operators.length === 0 ? (
           <div className="px-5 py-8 text-center">
@@ -608,6 +608,10 @@ export default function AnalyticsClient({
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Реакція</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Опрацювання</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">У зміну</th>
+                    <th className="text-right px-5 py-2.5 whitespace-nowrap">Змін</th>
+                    <th className="text-right px-5 py-2.5 whitespace-nowrap">Онлайн</th>
+                    <th className="text-right px-5 py-2.5 whitespace-nowrap">Присутність</th>
+                    <th className="text-right px-5 py-2.5 whitespace-nowrap">Замовл./год</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/60">
@@ -640,6 +644,28 @@ export default function AnalyticsClient({
                           </span>
                         ) : '—'}
                       </td>
+                      <td className="px-5 py-2.5 text-right text-zinc-400 text-xs whitespace-nowrap">
+                        {o.shifts || '—'}
+                        {o.scheduledMins > 0 && (
+                          <span className="text-zinc-600"> · {Math.round(o.scheduledMins / 60)} год</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-2.5 text-right text-zinc-300 text-xs whitespace-nowrap">
+                        {o.onlineMins ? duration(o.onlineMins) : '—'}
+                      </td>
+                      <td className="px-5 py-2.5 text-right text-xs whitespace-nowrap">
+                        {o.presencePct != null ? (
+                          <span className={
+                            o.presencePct >= 85 ? 'text-emerald-400'
+                              : o.presencePct >= 60 ? 'text-amber-400' : 'text-red-400'
+                          }>
+                            {o.presencePct}%
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-5 py-2.5 text-right text-zinc-300 text-xs whitespace-nowrap">
+                        {o.ordersPerHour ?? '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -660,14 +686,42 @@ export default function AnalyticsClient({
                 format={duration}
                 lowerIsBetter
               />
+              <OperatorBars
+                title="Присутність у зміну"
+                rows={operators
+                  .filter(o => o.presencePct != null)
+                  .map(o => ({ name: o.name, value: o.presencePct as number }))}
+                format={v => `${v}%`}
+              />
+              <OperatorBars
+                title="Замовлень за годину онлайн"
+                rows={operators
+                  .filter(o => o.ordersPerHour != null)
+                  .map(o => ({ name: o.name, value: o.ordersPerHour as number }))}
+                format={v => String(v)}
+              />
             </div>
 
-            <div className="px-5 pb-4 text-zinc-600 text-xs">
-              Реакція — від надходження замовлення до першої дії оператора.
-              Опрацювання — від першої до останньої його дії. «У зміну» — частка
-              замовлень, на які відповіли в межах однієї робочої зміни. Час поза
-              графіком 08:00–17:00 не рахується, тож нічне очікування не псує цифри.
-              Обидві тривалості медіанні.
+            <div className="px-5 pb-4 text-zinc-600 text-xs space-y-1">
+              <p>
+                Час рахується лише в межах змін, на які оператор стояв у графіку,
+                з 09:00 до 17:00. День не за графіком не зараховується нікому, тож
+                ані ніч, ані чужий вихідний не псують цифри. Обидві тривалості медіанні.
+              </p>
+              <p>
+                Реакція — від надходження замовлення до першої дії. Опрацювання —
+                від першої до останньої дії. «У зміну» — частка замовлень, на які
+                відповіли в межах однієї зміни. Присутність — скільки зі своїх
+                годин оператор справді мав панель відкритою.
+              </p>
+              {operators.some(o => o.offShiftActions > 0) && (
+                <p className="text-amber-500/70">
+                  Поза графіком:{' '}
+                  {operators.filter(o => o.offShiftActions > 0)
+                    .map(o => `${o.name} — ${o.offShiftActions}`).join(', ')}
+                  {' '}(враховано в кількості дій, але не в тривалостях)
+                </p>
+              )}
             </div>
           </>
         )}

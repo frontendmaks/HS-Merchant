@@ -21,10 +21,24 @@ export async function POST() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ ok: false }, { status: 401 })
 
-    await createServiceClient()
-      .from('profiles')
-      .update({ last_seen_at: new Date().toISOString() })
-      .eq('id', user.id)
+    const service = createServiceClient()
+    const now = new Date()
+
+    // Truncated to the minute so repeated pings inside one minute collapse
+    // onto a single row rather than inflating time online
+    const minute = new Date(now)
+    minute.setSeconds(0, 0)
+
+    await Promise.all([
+      service.from('profiles')
+        .update({ last_seen_at: now.toISOString() })
+        .eq('id', user.id),
+      // The trail time-online is reconstructed from; last_seen_at alone cannot
+      // answer how long anyone was here
+      service.from('presence_ticks')
+        .upsert({ user_id: user.id, minute: minute.toISOString() },
+                { onConflict: 'user_id,minute', ignoreDuplicates: true }),
+    ])
 
     return NextResponse.json({ ok: true })
   } catch {
