@@ -500,8 +500,10 @@ export interface OperatorStat {
   onlineMins: number
   /** Online as a share of the time we were recording */
   presencePct: number | null
-  /** Orders handled per rostered hour worked */
-  ordersPerHour: number | null
+  /** Forward status moves made — the actual throughput */
+  moves: number
+  /** Those moves per rostered hour worked */
+  movesPerHour: number | null
   /** Actions taken outside any rostered shift — not counted in the durations */
   offShiftActions: number
 }
@@ -509,14 +511,23 @@ export interface OperatorStat {
 const mean = (xs: number[]): number | null =>
   xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null
 
-/** Taking the order on. The two marketplaces word it differently. */
+/**
+ * The pipeline an order is pushed along, in both vocabularies:
+ *
+ *   MauDau   Нове → Прийнято     → Узгоджено      → На доставці
+ *   Rozetka  Нове → Опрацьовується → Комплектується → Передано в доставку
+ */
+
+/** Taking the order on — the first step, and what reaction is measured to. */
 const ACCEPTED = new Set(['Прийнято', 'Опрацьовується'])
 
-/** Operators do not always log the acceptance step — some move an order
- *  straight to Узгоджено. Any of these means they picked it up, and reading
- *  only the first would leave the metric empty for most real orders. */
-const PICKED_UP = new Set([
-  ...ACCEPTED, 'Узгоджено', 'Комплектується',
+/** Every forward step. Each one is a piece of work done on an order, which is
+ *  what the throughput figure counts. Read from the status moved *to*, since
+ *  the status moved *from* is not always recorded. */
+const ADVANCING = new Set([
+  ...ACCEPTED,
+  'Узгоджено', 'Комплектується',
+  'На доставці', 'Передано в доставку',
 ])
 
 /** Handed to the courier — the end of the shop's part. */
@@ -592,10 +603,12 @@ export function operatorStats(
     const byType: Record<string, number> = {}
     let revenue = 0, delivered = 0, canceled = 0, ttn = 0
     let offShiftActions = 0
+    let moves = 0
 
     for (const r of rows) {
       byType[r.type] = (byType[r.type] ?? 0) + 1
       if (r.type === 'ttn') ttn++
+      if (r.type === 'status' && ADVANCING.has(r.new_value ?? '')) moves++
       if (measured && !workDates.has(localDate(new Date(r.created_at)))) offShiftActions++
     }
 
@@ -619,10 +632,13 @@ export function operatorStats(
 
       // Two named moments rather than "first and last thing they touched":
       // taking the order on, and handing it to the courier.
-      const acceptedAt = (
-        sorted.find(e => e.type === 'status' && ACCEPTED.has(e.new_value ?? ''))
-        ?? sorted.find(e => e.type === 'status' && PICKED_UP.has(e.new_value ?? ''))
-      )?.created_at
+      // Reaction is measured strictly to taking the order on. Handling may
+      // start from any forward step, so an order whose acceptance went
+      // unlogged still yields a figure.
+      const acceptedAt = sorted
+        .find(e => e.type === 'status' && ACCEPTED.has(e.new_value ?? ''))?.created_at
+      const startedAt = acceptedAt ?? sorted
+        .find(e => e.type === 'status' && ADVANCING.has(e.new_value ?? ''))?.created_at
       const shippedAt = sorted
         .find(e => e.type === 'status' && SHIPPED.has(e.new_value ?? ''))?.created_at
 
@@ -632,8 +648,8 @@ export function operatorStats(
         if (mins != null) reaction.push(mins)
       }
 
-      if (acceptedAt && shippedAt && shippedAt >= acceptedAt) {
-        const mins = businessMinutes(acceptedAt, shippedAt, measured ? { workDates } : {})
+      if (startedAt && shippedAt && shippedAt >= startedAt) {
+        const mins = businessMinutes(startedAt, shippedAt, measured ? { workDates } : {})
         if (mins != null) handling.push(mins)
       }
     }
@@ -668,10 +684,11 @@ export function operatorStats(
       // Presence can exceed the roster if someone works beyond their hours;
       // the honest figure is the ratio, not a capped one
       presencePct: measuredMins ? Math.round((onlineMins / measuredMins) * 100) : null,
-      // Half an hour of shift is enough to divide by; less would turn one order
-      // into a headline number
-      ordersPerHour: workedMins >= 30
-        ? Math.round((perOrder.size / (workedMins / 60)) * 10) / 10
+      moves,
+      // Half an hour of shift is enough to divide by; less would turn a single
+      // move into a headline number
+      movesPerHour: workedMins >= 30
+        ? Math.round((moves / (workedMins / 60)) * 10) / 10
         : null,
       offShiftActions,
     }

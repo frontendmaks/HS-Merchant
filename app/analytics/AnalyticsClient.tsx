@@ -376,10 +376,10 @@ const METRIC_HELP: [string, string][] = [
   ['Серед. чек', 'ця сума, поділена на кількість замовлень'],
   ['Доставлено', 'скільки з його замовлень дійшли до покупця, і яка це частка'],
   ['Скасовано', 'скільки скасовано, і яка це частка — причина може бути й не в операторі'],
-  ['Реакція', 'скільки замовлення чекало: від моменту, коли воно прийшло, до моменту, коли оператор поставив статус «Прийнято»'],
+  ['Реакція', 'скільки замовлення чекало на оператора: від його надходження до статусу «Прийнято» (в Rozetka — «Опрацьовується»). Час поза зміною не рахується, тож нічне очікування не приписується нікому'],
   ['Опрацювання', 'скільки зайняла сама робота: від прийняття замовлення до моменту, коли його передали в доставку. Порожньо, поки оператор не провів замовлення через обидва статуси'],
   ['Присутність', 'скільки з уже відпрацьованих годин панель справді була відкрита. Зміни до 26.08.2026 не вимірювались, тож у них присутності немає'],
-  ['Замовл./год', 'замовлень на годину зміни, що вже минула — навантаження, а не швидкість. Майбутні зміни не рахуються'],
+  ['Просувань/год', 'головний показник: скільки разів на годину зміни оператор просунув замовлення далі — Нове → Прийнято → Узгоджено → На доставці (в Rozetka: Опрацьовується → Комплектується → Передано в доставку). Друге число — усього просувань за період'],
 ]
 
 const MARKETPLACES = [
@@ -624,7 +624,7 @@ export default function AnalyticsClient({
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Реакція</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Опрацювання</th>
                     <th className="text-right px-5 py-2.5 whitespace-nowrap">Присутність</th>
-                    <th className="text-right px-5 py-2.5 whitespace-nowrap">Замовл./год</th>
+                    <th className="text-right px-5 py-2.5 whitespace-nowrap">Просувань/год</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/60">
@@ -660,8 +660,9 @@ export default function AnalyticsClient({
                           </span>
                         ) : '—'}
                       </td>
-                      <td className="px-5 py-2.5 text-right text-zinc-300 text-xs whitespace-nowrap">
-                        {o.ordersPerHour ?? '—'}
+                      <td className="px-5 py-2.5 text-right text-xs whitespace-nowrap">
+                        <span className="text-zinc-300">{o.movesPerHour ?? '—'}</span>
+                        {o.moves > 0 && <span className="text-zinc-600"> · {o.moves}</span>}
                       </td>
                     </tr>
                   ))}
@@ -691,10 +692,10 @@ export default function AnalyticsClient({
                 format={v => `${v}%`}
               />
               <OperatorBars
-                title="Замовлень за годину зміни"
+                title="Просувань за годину зміни"
                 rows={operators
-                  .filter(o => o.ordersPerHour != null)
-                  .map(o => ({ name: o.name, value: o.ordersPerHour as number }))}
+                  .filter(o => o.movesPerHour != null)
+                  .map(o => ({ name: o.name, value: o.movesPerHour as number }))}
                 format={v => String(v)}
               />
             </div>
