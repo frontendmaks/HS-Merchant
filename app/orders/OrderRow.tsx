@@ -276,7 +276,7 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
       </td>
 
       {/* TTN */}
-      <td onClick={e => e.stopPropagation()} className="px-3 py-2 min-w-[120px]">
+      <td onClick={e => e.stopPropagation()} className="px-3 py-2 min-w-[168px]">
         {readOnly ? (
           <span className="text-zinc-400 text-xs font-mono">{ttn || '—'}</span>
         ) : (

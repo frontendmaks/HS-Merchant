@@ -23,6 +23,13 @@ interface Shipment {
     street: string | null; building: string | null; flat: string | null
   }
   sender: { current: string | null; branches: { ref: string; description: string }[] }
+  /** Nova Poshta's own locker boxes, offered instead of typing sizes */
+  cells: { key: string; label: string; length: number; width: number; height: number }[]
+  /** What this particular locker will take */
+  limits: {
+    length: number | null; width: number | null; height: number | null
+    maxWeightKg: number | null; maxDeclaredCost: number | null
+  } | null
   ready: { apiKey: boolean; sender: boolean; cityRef: boolean; destination: boolean }
 }
 
@@ -34,6 +41,32 @@ const MISSING_LABEL: Record<keyof Shipment['ready'], string> = {
   sender: 'дані відправника (таблиця np_settings)',
   cityRef: 'ідентифікатор міста одержувача',
   destination: 'адреса призначення — немає ні відділення, ні вулиці з будинком',
+}
+
+/** Roughly to scale, so the three sizes read apart at a glance. */
+function CellIcon({ size, active }: { size: string; active: boolean }) {
+  const box = size === 'small' ? { w: 7, h: 7 } : size === 'medium' ? { w: 11, h: 8 } : { w: 14, h: 11 }
+  return (
+    <svg width="16" height="14" viewBox="0 0 16 14" className="shrink-0" aria-hidden="true">
+      <rect
+        x={(16 - box.w) / 2} y={(14 - box.h) / 2} width={box.w} height={box.h} rx="1"
+        className={active ? 'fill-red-500/40 stroke-red-400' : 'fill-zinc-700 stroke-zinc-500'}
+        strokeWidth="1"
+      />
+    </svg>
+  )
+}
+
+/** A box fits only if every side is within the locker's own ceiling. Sides are
+ *  compared largest-to-largest, since a parcel can be turned. */
+function tooBigFor(
+  c: { length: number; width: number; height: number },
+  limits: Shipment['limits'],
+): boolean {
+  if (!limits?.length || !limits.width || !limits.height) return false
+  const box = [c.length, c.width, c.height].sort((a, b) => b - a)
+  const cell = [limits.length, limits.width, limits.height].sort((a, b) => b - a)
+  return box.some((side, i) => side > cell[i])
 }
 
 /** Nova Poshta gives hundreds of branches per city, so the list is searchable
@@ -292,6 +325,53 @@ export default function ShipmentDialog({ orderId, onClose, onCreated }: {
                 <input value={seats} onChange={e => setSeats(e.target.value)} inputMode="numeric" className={field} />
               </div>
             </div>
+
+            {data.cells.length > 0 && (
+              <div>
+                <label className="block text-zinc-400 text-xs mb-1.5">Розмір комірки</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {data.cells.map(c => {
+                    const chosen = dims.length === String(c.length)
+                      && dims.width === String(c.width) && dims.height === String(c.height)
+                    const overLimit = tooBigFor(c, data.limits)
+                    return (
+                      <button
+                        key={c.key}
+                        type="button"
+                        disabled={overLimit}
+                        onClick={() => setDims({
+                          length: String(c.length), width: String(c.width), height: String(c.height),
+                        })}
+                        title={overLimit ? 'Не влізе в цей поштомат' : undefined}
+                        className={`rounded-lg border px-2 py-2 text-left transition-colors ${
+                          overLimit
+                            ? 'border-zinc-800 bg-zinc-900 opacity-40 cursor-not-allowed'
+                            : chosen
+                              ? 'border-red-500 bg-red-950/30'
+                              : 'border-zinc-700 bg-zinc-800 hover:border-zinc-600'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <CellIcon size={c.key} active={chosen} />
+                          <span className={`text-xs ${chosen ? 'text-white' : 'text-zinc-300'}`}>
+                            {c.label}
+                          </span>
+                        </span>
+                        <span className="block text-zinc-500 text-[11px] mt-1">
+                          {c.length}×{c.width}×{c.height}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                {data.limits && (
+                  <div className="text-zinc-600 text-xs mt-1.5">
+                    Цей поштомат приймає до {data.limits.length}×{data.limits.width}×{data.limits.height} см
+                    {data.limits.maxWeightKg && <> та {data.limits.maxWeightKg} кг</>}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div>
               <label className="block text-zinc-400 text-xs mb-1.5">

@@ -47,6 +47,60 @@ export interface SenderWarehouse {
   description: string
 }
 
+/**
+ * Nova Poshta's own boxes for parcel lockers, which is what a cell has to take.
+ *
+ * The API publishes no catalogue of cell sizes, only each locker's overall
+ * ceiling, so these come from Nova Poshta's shop where the boxes are sold —
+ * small and medium read off the product pages directly, large from their
+ * listing. Sizes are the outside of the box, which is the figure that matters
+ * for whether the door shuts.
+ */
+export interface CellPreset {
+  key: 'small' | 'medium' | 'large'
+  label: string
+  length: number
+  width: number
+  height: number
+}
+
+export const CELL_PRESETS: CellPreset[] = [
+  { key: 'small',  label: 'Мала',     length: 21, width: 11, height: 11 },
+  { key: 'medium', label: 'Середня',  length: 33, width: 23, height: 11 },
+  { key: 'large',  label: 'Велика',   length: 41, width: 33, height: 23 },
+]
+
+export interface WarehouseLimits {
+  /** Centimetres the locker will accept */
+  length: number | null
+  width: number | null
+  height: number | null
+  maxWeightKg: number | null
+  maxDeclaredCost: number | null
+}
+
+/** What one particular locker will take. Sizes differ between machines, so
+ *  this is asked of the machine rather than assumed. */
+export async function warehouseLimits(ref: string): Promise<WarehouseLimits | null> {
+  const r = await call<{
+    ReceivingLimitationsOnDimensions?: { Width?: number; Height?: number; Length?: number }
+    TotalMaxWeightAllowed?: string | number
+    MaxDeclaredCost?: string | number
+  }>('AddressGeneral', 'getWarehouses', { Ref: ref })
+
+  const w = r.data?.[0]
+  if (!w) return null
+  const d = w.ReceivingLimitationsOnDimensions ?? {}
+  const num = (v: unknown) => (Number(v) > 0 ? Number(v) : null)
+  return {
+    length: num(d.Length),
+    width: num(d.Width),
+    height: num(d.Height),
+    maxWeightKg: num(w.TotalMaxWeightAllowed),
+    maxDeclaredCost: num(w.MaxDeclaredCost),
+  }
+}
+
 /** Branches the sender can hand a parcel over at, for the dispatch dropdown. */
 export async function senderWarehouses(cityRef: string): Promise<SenderWarehouse[]> {
   const r = await call<{ Ref: string; Description: string }>(

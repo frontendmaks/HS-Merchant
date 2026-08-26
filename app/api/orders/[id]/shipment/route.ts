@@ -2,7 +2,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { shipmentWeight, orderTotals, type OrderLine } from '@/lib/order-items'
-import { createWaybill, hasNpKey, senderWarehouses, type NpSettings } from '@/lib/nova-poshta'
+import {
+  CELL_PRESETS, createWaybill, hasNpKey, senderWarehouses, warehouseLimits,
+  type NpSettings,
+} from '@/lib/nova-poshta'
 import { pushTtnToMarketplace } from '@/lib/marketplace-ttn'
 
 // GET — what would go on the waybill, computed from the corrected lines
@@ -55,11 +58,18 @@ export async function GET(
     ? await senderWarehouses(settings.city_sender_ref)
     : []
 
+  // Lockers differ from one another, so ask this one what it takes
+  const limits = toPostomat && hasNpKey() && warehouseRef
+    ? await warehouseLimits(warehouseRef)
+    : null
+
   return NextResponse.json({
     delivery: {
       toBranch, toPostomat,
       street: street ?? null, building: building ?? null, flat: flat ?? null,
     },
+    cells: toPostomat ? CELL_PRESETS : [],
+    limits,
     sender: {
       current: settings?.sender_address_ref ?? null,
       branches,
