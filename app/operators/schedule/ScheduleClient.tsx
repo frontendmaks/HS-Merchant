@@ -1,11 +1,12 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import {
-  STATUS_LABELS, WEEKDAYS, addDays, canApprove, dayLabel, isOverdue, isPastWeek,
-  kyivToday, nextWeekStart, thisWeekStart, weekDates, weekLabel,
-  type ScheduleStatus,
+  ACTION_LABELS, EVENT_LABELS, STATUS_LABELS, STATUS_TONES, WEEKDAYS,
+  actionsFor, canApprove, canParticipate, dayLabel, holdsPen, isOverdue,
+  isPlannable, kyivToday, maxPlannableWeek, nextWeekStart, thisWeekStart,
+  weekDates, weekLabel, weekStartOf,
+  type ScheduleAction, type ScheduleStatus,
 } from '@/lib/schedule'
 import { timeAgo } from '@/lib/format'
 
@@ -20,76 +21,101 @@ interface Schedule {
   id: string; week_start: string; status: ScheduleStatus
   submitted_at: string | null; approved_at: string | null
 }
+interface EventRow {
+  id: string; type: string; created_at: string
+  details: { added?: string[]; removed?: string[] } | null
+  actor: { full_name: string | null; email: string } | null
+}
+interface Week {
+  schedule: Schedule; shifts: Shift[]; swaps: Swap[]
+  operators: Operator[]; events: EventRow[]
+}
 
 /** One colour per operator, so a glance at a column says who is on. */
 const TONES = [
-  { chip: 'bg-sky-500/80',     cell: 'bg-sky-500/25 hover:bg-sky-500/40',       ring: 'ring-sky-400/60' },
-  { chip: 'bg-amber-400/90',   cell: 'bg-amber-400/25 hover:bg-amber-400/40',   ring: 'ring-amber-300/60' },
+  { chip: 'bg-sky-500/80',     cell: 'bg-sky-500/25 hover:bg-sky-500/40',        ring: 'ring-sky-400/60' },
+  { chip: 'bg-amber-400/90',   cell: 'bg-amber-400/25 hover:bg-amber-400/40',    ring: 'ring-amber-300/60' },
   { chip: 'bg-emerald-500/80', cell: 'bg-emerald-500/25 hover:bg-emerald-500/40', ring: 'ring-emerald-400/60' },
-  { chip: 'bg-violet-500/80',  cell: 'bg-violet-500/25 hover:bg-violet-500/40', ring: 'ring-violet-400/60' },
-  { chip: 'bg-rose-500/80',    cell: 'bg-rose-500/25 hover:bg-rose-500/40',     ring: 'ring-rose-400/60' },
-  { chip: 'bg-teal-500/80',    cell: 'bg-teal-500/25 hover:bg-teal-500/40',     ring: 'ring-teal-400/60' },
+  { chip: 'bg-violet-500/80',  cell: 'bg-violet-500/25 hover:bg-violet-500/40',  ring: 'ring-violet-400/60' },
+  { chip: 'bg-rose-500/80',    cell: 'bg-rose-500/25 hover:bg-rose-500/40',      ring: 'ring-rose-400/60' },
+  { chip: 'bg-teal-500/80',    cell: 'bg-teal-500/25 hover:bg-teal-500/40',      ring: 'ring-teal-400/60' },
 ]
 
-const nameOf = (o: Operator | undefined) =>
-  o ? (o.full_name || o.email) : '—'
+const nameOf = (o: Operator | undefined) => (o ? o.full_name || o.email : '—')
+const actorName = (a: EventRow['actor']) => a?.full_name || a?.email || 'Хтось'
 
-const STATUS_TONE: Record<ScheduleStatus, string> = {
-  draft: 'bg-zinc-800 text-zinc-400',
-  submitted: 'bg-amber-950/60 text-amber-300',
-  approved: 'bg-emerald-950/60 text-emerald-400',
+const ACTION_STYLE: Record<ScheduleAction, string> = {
+  submit: 'bg-red-600 hover:bg-red-500 text-white font-medium',
+  approve: 'bg-emerald-700 hover:bg-emerald-600 text-white font-medium',
+  agree: 'bg-emerald-700 hover:bg-emerald-600 text-white font-medium',
+  amend: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200',
+  send_back: 'bg-red-600 hover:bg-red-500 text-white font-medium',
 }
 
-export default function ScheduleClient({ week, role, meId, knownWeeks }: {
-  week: string
+export default function ScheduleClient({ initialWeek, role, meId }: {
+  initialWeek: string
   role: string
   meId: string
-  knownWeeks: { week_start: string; status: string }[]
 }) {
-  const router = useRouter()
-  const [schedule, setSchedule] = useState<Schedule | null>(null)
-  const [operators, setOperators] = useState<Operator[]>([])
-  const [swaps, setSwaps] = useState<Swap[]>([])
-  const [marks, setMarks] = useState<Set<string>>(new Set())   // `${operatorId}|${date}`
+  const [week, setWeek] = useState(initialWeek)
+  const [data, setData] = useState<Week | null>(null)
+  // Weeks already fetched, so going back to one is instant
+  const [cache, setCache] = useState<Record<string, Week>>({})
+  const [marks, setMarks] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
-  const [swapFor, setSwapFor] = useState<{ date: string } | null>(null)
+  const [swapFor, setSwapFor] = useState<string | null>(null)
+  const [journalOpen, setJournalOpen] = useState(false)
 
   const days = useMemo(() => weekDates(week), [week])
   const today = kyivToday()
+  const participates = canParticipate(role)
   const manages = canApprove(role)
-  const isOperator = role === 'operator'
-  const past = isPastWeek(week)
+  const plannable = isPlannable(week)
+  const status = data?.schedule.status ?? 'draft'
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const applyWeek = useCallback((w: Week) => {
+    setData(w)
+    setMarks(new Set(w.shifts.map(s => `${s.operator_id}|${s.work_date}`)))
+    setDirty(false)
+  }, [])
+
+  const load = useCallback(async (target: string, { fresh = false } = {}) => {
+    const cached = cache[target]
+    // Show what we already have at once, refresh behind it
+    if (cached && !fresh) { applyWeek(cached); setLoading(false) }
+    else setLoading(true)
+
     setError('')
     try {
-      const res = await fetch(`/api/schedule?week=${week}`)
+      const res = await fetch(`/api/schedule?week=${target}`)
       const d = await res.json()
       if (d.error) { setError(d.error); return }
-      setSchedule(d.schedule)
-      setOperators(d.operators)
-      setSwaps(d.swaps)
-      setMarks(new Set((d.shifts as Shift[]).map(s => `${s.operator_id}|${s.work_date}`)))
-      setDirty(false)
+      setCache(c => ({ ...c, [target]: d }))
+      applyWeek(d)
     } catch {
       setError('Не вдалося завантажити графік')
     } finally {
       setLoading(false)
     }
-  }, [week])
+  }, [cache, applyWeek])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load(week) /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [week])
 
-  const toneOf = (index: number) => TONES[index % TONES.length]
+  /** Switching weeks stays inside the page — a navigation would re-render the
+   *  whole route on the server for data this component fetches anyway. */
+  function goto(target: string) {
+    const w = weekStartOf(target)
+    setWeek(w)
+    const q = new URLSearchParams({ week: w })
+    window.history.replaceState(null, '', `/operators/schedule?${q}`)
+  }
+
   const key = (op: string, date: string) => `${op}|${date}`
-
-  // Approved weeks change through a swap, not by clicking — that is the whole
-  // point of the approval. Management can still reopen the week.
-  const editable = !past && (schedule?.status !== 'approved' || manages)
+  const editable = participates && plannable && holdsPen(status, role)
+  const actions = actionsFor(status, role, participates && plannable)
 
   function toggle(op: string, date: string) {
     if (!editable) return
@@ -102,32 +128,27 @@ export default function ScheduleClient({ week, role, meId, knownWeeks }: {
     setDirty(true)
   }
 
-  async function save() {
-    setSaving(true)
-    setError('')
-    try {
-      const shifts = [...marks].map(k => {
-        const [operator_id, work_date] = k.split('|')
-        return { operator_id, work_date }
-      })
-      const res = await fetch('/api/schedule', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week, shifts }),
-      })
-      const d = await res.json()
-      if (d.error) { setError(d.error); return }
-      setDirty(false)
-    } finally {
-      setSaving(false)
-    }
+  async function save(): Promise<boolean> {
+    const shifts = [...marks].map(k => {
+      const [operator_id, work_date] = k.split('|')
+      return { operator_id, work_date }
+    })
+    const res = await fetch('/api/schedule', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ week, shifts }),
+    })
+    const d = await res.json()
+    if (d.error) { setError(d.error); return false }
+    setDirty(false)
+    return true
   }
 
-  async function act(action: 'submit' | 'approve' | 'reopen') {
-    setSaving(true)
+  async function act(action: ScheduleAction) {
+    setBusy(true)
     setError('')
     try {
-      if (dirty) await save()
+      if (dirty && !(await save())) return
       const res = await fetch('/api/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -135,17 +156,17 @@ export default function ScheduleClient({ week, role, meId, knownWeeks }: {
       })
       const d = await res.json()
       if (d.error) { setError(d.error); return }
-      await load()
-      router.refresh()
+      await load(week, { fresh: true })
     } finally {
-      setSaving(false)
+      setBusy(false)
     }
   }
 
-  const go = (w: string) => router.push(`/operators/schedule?week=${w}`)
-
+  const operators = data?.operators ?? []
+  const swaps = data?.swaps ?? []
   const pending = swaps.filter(s => s.status === 'pending')
-  const nextMissing = knownWeeks.every(w => w.week_start !== nextWeekStart() || w.status === 'draft')
+  const nextWeek = nextWeekStart()
+  const maxWeek = maxPlannableWeek()
 
   return (
     <div className="space-y-5">
@@ -154,43 +175,54 @@ export default function ScheduleClient({ week, role, meId, knownWeeks }: {
           <h1 className="text-xl sm:text-2xl font-bold text-white">Графік роботи</h1>
           <p className="text-zinc-400 text-sm mt-0.5">
             {weekLabel(week)}
-            {schedule && (
-              <span className={`ml-2 text-xs px-2 py-0.5 rounded ${STATUS_TONE[schedule.status]}`}>
-                {STATUS_LABELS[schedule.status]}
+            {data && (
+              <span className={`ml-2 text-xs px-2 py-0.5 rounded ${STATUS_TONES[status]}`}>
+                {STATUS_LABELS[status]}
               </span>
             )}
+            {loading && <span className="ml-2 text-zinc-600 text-xs">оновлення…</span>}
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={() => go(addDays(week, -7))}
-            className="px-2.5 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-400 hover:text-white transition-colors">
-            ‹ Попередній
-          </button>
-          <button onClick={() => go(thisWeekStart())}
-            className="px-2.5 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-400 hover:text-white transition-colors">
+          <button
+            onClick={() => goto(thisWeekStart())}
+            className={`px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
+              week === thisWeekStart() ? 'bg-zinc-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+            }`}
+          >
             Поточний
           </button>
-          <button onClick={() => go(nextWeekStart())}
-            className="px-2.5 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-400 hover:text-white transition-colors">
+          <button
+            onClick={() => goto(nextWeek)}
+            className={`px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
+              week === nextWeek ? 'bg-zinc-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+            }`}
+          >
             Наступний
           </button>
-          <button onClick={() => go(addDays(week, 7))}
-            className="px-2.5 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-400 hover:text-white transition-colors">
-            Далі ›
-          </button>
+
+          {/* Any past week is one date away; planning stops at next week */}
+          <label className="flex items-center gap-2 bg-zinc-800 rounded-lg px-2.5 py-1">
+            <span className="text-zinc-500 text-xs">Тиждень</span>
+            <input
+              type="date"
+              value={week}
+              max={maxWeek}
+              onChange={e => e.target.value && goto(e.target.value)}
+              onClick={e => { try { e.currentTarget.showPicker?.() } catch { /* needs a gesture */ } }}
+              className="bg-transparent text-white text-xs focus:outline-none cursor-pointer [color-scheme:dark]"
+            />
+          </label>
         </div>
       </div>
 
-      {/* The Friday deadline, said plainly rather than left to be remembered */}
-      {isOverdue() && nextMissing && week !== nextWeekStart() && (
+      {participates && isOverdue() && week !== nextWeek && (
         <div className="bg-amber-950/40 border border-amber-900/60 rounded-xl px-4 py-3">
-          <div className="text-amber-300 text-sm">
-            Графік на наступний тиждень ще не подано
-          </div>
-          <button onClick={() => go(nextWeekStart())}
+          <div className="text-amber-300 text-sm">Дедлайн на наступний тиждень — сьогодні до 16:00</div>
+          <button onClick={() => goto(nextWeek)}
             className="text-amber-400 hover:text-amber-300 text-xs mt-1 underline underline-offset-2">
-            Скласти на {weekLabel(nextWeekStart())}
+            Перейти до {weekLabel(nextWeek)}
           </button>
         </div>
       )}
@@ -201,9 +233,8 @@ export default function ScheduleClient({ week, role, meId, knownWeeks }: {
         </div>
       )}
 
-      {/* The grid */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-        {loading ? (
+        {!data && loading ? (
           <div className="px-5 py-10 text-center text-zinc-600 text-sm">Завантаження...</div>
         ) : operators.length === 0 ? (
           <div className="px-5 py-10 text-center text-zinc-500 text-sm">
@@ -236,10 +267,10 @@ export default function ScheduleClient({ week, role, meId, knownWeeks }: {
               </thead>
               <tbody>
                 {operators.map((op, i) => {
-                  const tone = toneOf(i)
+                  const tone = TONES[i % TONES.length]
                   const count = days.filter(d => marks.has(key(op.id, d))).length
                   return (
-                    <tr key={op.id} className="group">
+                    <tr key={op.id}>
                       <td className="sticky left-0 z-10 bg-zinc-900 px-4 py-2 border-b border-zinc-800/60">
                         <div className="flex items-center gap-2">
                           <span className={`w-2.5 h-2.5 rounded-sm shrink-0 ${tone.chip}`} />
@@ -259,13 +290,11 @@ export default function ScheduleClient({ week, role, meId, knownWeeks }: {
                               type="button"
                               onClick={() => toggle(op.id, d)}
                               disabled={!editable}
-                              title={editable ? (on ? 'Прибрати зміну' : 'Поставити зміну') : 'Графік закрито для редагування'}
+                              title={editable ? (on ? 'Прибрати зміну' : 'Поставити зміну') : undefined}
                               className={`w-full h-9 rounded-md transition-colors relative ${
                                 on
                                   ? `${tone.cell} ${swapPending ? `ring-2 ${tone.ring}` : ''}`
-                                  : editable
-                                    ? 'bg-zinc-800/40 hover:bg-zinc-800'
-                                    : 'bg-zinc-800/20'
+                                  : editable ? 'bg-zinc-800/40 hover:bg-zinc-800' : 'bg-zinc-800/20'
                               } ${editable ? 'cursor-pointer' : 'cursor-default'}`}
                             >
                               {swapPending && (
@@ -282,7 +311,7 @@ export default function ScheduleClient({ week, role, meId, knownWeeks }: {
                   )
                 })}
 
-                {/* Days nobody covers are the thing a manager actually looks for */}
+                {/* An uncovered day is the thing a manager is actually scanning for */}
                 <tr>
                   <td className="sticky left-0 z-10 bg-zinc-900 px-4 py-2">
                     <span className="text-zinc-500 text-xs">На зміні</span>
@@ -291,9 +320,7 @@ export default function ScheduleClient({ week, role, meId, knownWeeks }: {
                     const n = operators.filter(o => marks.has(key(o.id, d))).length
                     return (
                       <td key={d} className={`px-2 py-2 text-center ${d === today ? 'bg-zinc-800/30' : ''}`}>
-                        <span className={`text-xs ${
-                          n === 0 ? 'text-red-400 font-medium' : 'text-zinc-400'
-                        }`}>
+                        <span className={`text-xs ${n === 0 ? 'text-red-400 font-medium' : 'text-zinc-400'}`}>
                           {n === 0 ? 'нікого' : n}
                         </span>
                       </td>
@@ -306,76 +333,60 @@ export default function ScheduleClient({ week, role, meId, knownWeeks }: {
           </div>
         )}
 
-        {/* Actions */}
-        {!loading && operators.length > 0 && (
+        {data && operators.length > 0 && (
           <div className="px-4 py-3 border-t border-zinc-800 flex items-center gap-3 flex-wrap">
-            {editable && (
+            {/* People who do not take part get no buttons at all — not greyed
+                ones, none — so the grid reads as what it is to them: a notice */}
+            {actions.map(a => (
               <button
-                onClick={save}
-                disabled={saving || !dirty}
-                className="px-3.5 py-1.5 rounded-lg text-xs bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-200 transition-colors"
+                key={a}
+                onClick={() => act(a)}
+                disabled={busy}
+                className={`px-3.5 py-1.5 rounded-lg text-xs transition-colors disabled:opacity-40 ${ACTION_STYLE[a]}`}
               >
-                {saving ? 'Збереження...' : dirty ? 'Зберегти' : 'Збережено'}
+                {busy ? '...' : ACTION_LABELS[a]}
               </button>
+            ))}
+
+            {editable && dirty && (
+              <span className="text-amber-400/80 text-xs">є незбережені зміни</span>
             )}
 
-            {editable && schedule?.status !== 'submitted' && (
+            {role === 'operator' && plannable && status === 'approved' && (
               <button
-                onClick={() => act('submit')}
-                disabled={saving}
-                className="px-3.5 py-1.5 rounded-lg text-xs bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white font-medium transition-colors"
-              >
-                Надіслати на підтвердження
-              </button>
-            )}
-
-            {manages && schedule?.status === 'submitted' && (
-              <button
-                onClick={() => act('approve')}
-                disabled={saving}
-                className="px-3.5 py-1.5 rounded-lg text-xs bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white font-medium transition-colors"
-              >
-                Затвердити
-              </button>
-            )}
-
-            {manages && schedule?.status === 'approved' && !past && (
-              <button
-                onClick={() => act('reopen')}
-                disabled={saving}
+                onClick={() => setSwapFor(days.find(d => marks.has(key(meId, d))) ?? days[0])}
                 className="px-3.5 py-1.5 rounded-lg text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
-              >
-                Відкрити для змін
-              </button>
-            )}
-
-            {isOperator && !past && (
-              <button
-                onClick={() => setSwapFor({ date: days.find(d => marks.has(key(meId, d))) ?? days[0] })}
-                className="px-3.5 py-1.5 rounded-lg text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors ml-auto"
               >
                 Попросити заміну
               </button>
             )}
 
+            <button
+              onClick={() => setJournalOpen(o => !o)}
+              className="px-3 py-1.5 rounded-lg text-xs bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 transition-colors ml-auto"
+            >
+              Журнал {data.events.length > 0 && `· ${data.events.length}`}
+            </button>
+
             <span className="text-zinc-600 text-xs">
-              {schedule?.approved_at
-                ? `Затверджено ${timeAgo(schedule.approved_at)}`
-                : schedule?.submitted_at
-                  ? `Подано ${timeAgo(schedule.submitted_at)}`
-                  : past ? 'Архів' : 'Дедлайн — пʼятниця до 16:00'}
+              {!participates
+                ? 'Перегляд'
+                : !plannable
+                  ? 'Архів — лише перегляд'
+                  : data.schedule.approved_at
+                    ? `Затверджено ${timeAgo(data.schedule.approved_at)}`
+                    : 'Дедлайн — пʼятниця до 16:00'}
             </span>
           </div>
         )}
+
+        {journalOpen && data && <Journal events={data.events} operators={operators} />}
       </div>
 
       {swaps.length > 0 && (
         <SwapList
-          swaps={swaps}
-          operators={operators}
-          meId={meId}
-          manages={manages}
-          onChanged={() => { void load(); router.refresh() }}
+          swaps={swaps} operators={operators} meId={meId} manages={manages}
+          onChanged={() => void load(week, { fresh: true })}
         />
       )}
 
@@ -384,21 +395,58 @@ export default function ScheduleClient({ week, role, meId, knownWeeks }: {
           days={days}
           myDays={days.filter(d => marks.has(key(meId, d)))}
           operators={operators.filter(o => o.id !== meId)}
-          initialDate={swapFor.date}
+          initialDate={swapFor}
           onClose={() => setSwapFor(null)}
-          onDone={() => { setSwapFor(null); void load(); router.refresh() }}
+          onDone={() => { setSwapFor(null); void load(week, { fresh: true }) }}
         />
       )}
     </div>
   )
 }
 
+/** How the week got to where it is: every handover and every edit. */
+function Journal({ events, operators }: { events: EventRow[]; operators: Operator[] }) {
+  const byId = new Map(operators.map(o => [o.id, o]))
+  const describe = (k: string) => {
+    const [op, date] = k.split('|')
+    return `${nameOf(byId.get(op))} ${dayLabel(date)}`
+  }
+
+  if (!events.length) {
+    return <div className="px-5 py-5 border-t border-zinc-800 text-zinc-600 text-xs">Поки нічого не відбувалось.</div>
+  }
+
+  return (
+    <div className="border-t border-zinc-800 divide-y divide-zinc-800/60">
+      {events.map(e => (
+        <div key={e.id} className="px-5 py-2.5">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-zinc-200 text-xs">{actorName(e.actor)}</span>
+            <span className="text-zinc-500 text-xs">{EVENT_LABELS[e.type] ?? e.type}</span>
+            <span className="text-zinc-600 text-xs ml-auto">{timeAgo(e.created_at)}</span>
+          </div>
+          {e.type === 'edited' && e.details && (
+            <div className="mt-1 space-y-0.5">
+              {!!e.details.added?.length && (
+                <div className="text-emerald-400/80 text-[11px]">
+                  + {e.details.added.map(describe).join(', ')}
+                </div>
+              )}
+              {!!e.details.removed?.length && (
+                <div className="text-red-400/80 text-[11px]">
+                  − {e.details.removed.map(describe).join(', ')}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function SwapList({ swaps, operators, meId, manages, onChanged }: {
-  swaps: Swap[]
-  operators: Operator[]
-  meId: string
-  manages: boolean
-  onChanged: () => void
+  swaps: Swap[]; operators: Operator[]; meId: string; manages: boolean; onChanged: () => void
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const byId = new Map(operators.map(o => [o.id, o]))
@@ -435,43 +483,30 @@ function SwapList({ swaps, operators, meId, manages, onChanged }: {
       </div>
       <div className="divide-y divide-zinc-800/60">
         {swaps.map(s => {
-          // Either half may still be outstanding, and saying which is the useful part
           const canPeer = s.status === 'pending' && s.to_operator === meId && !s.peer_ok_at
           const canManager = s.status === 'pending' && manages && !s.manager_ok_at
           return (
             <div key={s.id} className="px-5 py-3 flex items-center gap-3 flex-wrap">
-              <span className="text-zinc-300 text-xs whitespace-nowrap">
-                {dayLabel(s.work_date)}
-              </span>
+              <span className="text-zinc-300 text-xs whitespace-nowrap">{dayLabel(s.work_date)}</span>
               <span className="text-zinc-400 text-xs">
                 {nameOf(byId.get(s.from_operator))} → {nameOf(byId.get(s.to_operator))}
               </span>
               {s.reason && <span className="text-zinc-600 text-xs truncate">· {s.reason}</span>}
-
               <span className={`text-xs ml-auto ${TONE[s.status]}`}>{LABEL[s.status]}</span>
-
               {s.status === 'pending' && (
                 <span className="text-zinc-600 text-xs">
-                  {s.peer_ok_at ? '✓ оператор' : '· оператор'}
-                  {' '}
+                  {s.peer_ok_at ? '✓ оператор' : '· оператор'}{' '}
                   {s.manager_ok_at ? '✓ керівник' : '· керівник'}
                 </span>
               )}
-
               {(canPeer || canManager) && (
                 <span className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => decide(s.id, 'approve')}
-                    disabled={busy === s.id}
-                    className="px-2.5 py-1 rounded-lg text-xs bg-emerald-800/70 hover:bg-emerald-700 text-white transition-colors disabled:opacity-40"
-                  >
+                  <button onClick={() => decide(s.id, 'approve')} disabled={busy === s.id}
+                    className="px-2.5 py-1 rounded-lg text-xs bg-emerald-800/70 hover:bg-emerald-700 text-white transition-colors disabled:opacity-40">
                     Підтвердити
                   </button>
-                  <button
-                    onClick={() => decide(s.id, 'decline')}
-                    disabled={busy === s.id}
-                    className="px-2.5 py-1 rounded-lg text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors disabled:opacity-40"
-                  >
+                  <button onClick={() => decide(s.id, 'decline')} disabled={busy === s.id}
+                    className="px-2.5 py-1 rounded-lg text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors disabled:opacity-40">
                     Відхилити
                   </button>
                 </span>
@@ -485,12 +520,8 @@ function SwapList({ swaps, operators, meId, manages, onChanged }: {
 }
 
 function SwapDialog({ days, myDays, operators, initialDate, onClose, onDone }: {
-  days: string[]
-  myDays: string[]
-  operators: Operator[]
-  initialDate: string
-  onClose: () => void
-  onDone: () => void
+  days: string[]; myDays: string[]; operators: Operator[]
+  initialDate: string; onClose: () => void; onDone: () => void
 }) {
   const [date, setDate] = useState(myDays.includes(initialDate) ? initialDate : (myDays[0] ?? days[0]))
   const [to, setTo] = useState(operators[0]?.id ?? '')
@@ -526,34 +557,25 @@ function SwapDialog({ days, myDays, operators, initialDate, onClose, onDone }: {
           <span className="text-white font-semibold">Запит на заміну</span>
           <button onClick={onClose} className="text-zinc-500 hover:text-white text-xl leading-none">×</button>
         </div>
-
         <div className="p-5 space-y-4">
           {myDays.length === 0 ? (
-            <p className="text-zinc-400 text-sm">
-              У вас немає зміни на цьому тижні, тож передавати нічого.
-            </p>
+            <p className="text-zinc-400 text-sm">У вас немає зміни на цьому тижні, тож передавати нічого.</p>
           ) : (
             <>
               <div>
                 <label className="block text-zinc-400 text-xs mb-1.5">Який день передаєте</label>
                 <select value={date} onChange={e => setDate(e.target.value)} className={field}>
                   {myDays.map(d => (
-                    <option key={d} value={d}>
-                      {WEEKDAYS[days.indexOf(d)]}, {dayLabel(d)}
-                    </option>
+                    <option key={d} value={d}>{WEEKDAYS[days.indexOf(d)]}, {dayLabel(d)}</option>
                   ))}
                 </select>
               </div>
-
               <div>
                 <label className="block text-zinc-400 text-xs mb-1.5">Кому</label>
                 <select value={to} onChange={e => setTo(e.target.value)} className={field}>
-                  {operators.map(o => (
-                    <option key={o.id} value={o.id}>{nameOf(o)}</option>
-                  ))}
+                  {operators.map(o => <option key={o.id} value={o.id}>{nameOf(o)}</option>)}
                 </select>
               </div>
-
               <div>
                 <label className="block text-zinc-400 text-xs mb-1.5">
                   Причина <span className="text-zinc-600">— необовʼязково</span>
@@ -561,20 +583,13 @@ function SwapDialog({ days, myDays, operators, initialDate, onClose, onDone }: {
                 <input value={reason} onChange={e => setReason(e.target.value)} className={field}
                   placeholder="напр. сімейні обставини" />
               </div>
-
               {error && <p className="text-red-400 text-xs">{error}</p>}
-
-              <button
-                onClick={send}
-                disabled={sending || !to}
-                className="w-full px-4 py-2.5 rounded-lg text-sm bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-medium transition-colors"
-              >
+              <button onClick={send} disabled={sending || !to}
+                className="w-full px-4 py-2.5 rounded-lg text-sm bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-medium transition-colors">
                 {sending ? 'Надсилання...' : 'Надіслати запит'}
               </button>
-
               <p className="text-zinc-600 text-xs">
-                Запит піде другому оператору і керівнику. День перейде, коли обидва
-                погодяться.
+                Запит піде другому оператору і керівнику. День перейде, коли обидва погодяться.
               </p>
             </>
           )}

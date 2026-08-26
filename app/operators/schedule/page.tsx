@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
-import { createServiceClient } from '@/lib/supabase/service'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { thisWeekStart, weekStartOf } from '@/lib/schedule'
@@ -30,20 +29,8 @@ export default async function SchedulePage({
     ? weekStartOf(sp.week)
     : thisWeekStart()
 
-  // Which weeks already exist, so the picker can offer the archive
-  const service = createServiceClient()
-  const { data: weeks } = await service
-    .from('work_schedules')
-    .select('week_start, status')
-    .order('week_start', { ascending: false })
-    .limit(60)
-
-  return (
-    <ScheduleClient
-      week={week}
-      role={role ?? ''}
-      meId={user.id}
-      knownWeeks={weeks ?? []}
-    />
-  )
+  // The grid itself is fetched by the client, which also handles switching
+  // weeks — going through the server for that would re-render the whole route
+  // for data this page does not hold.
+  return <ScheduleClient initialWeek={week} role={role ?? ''} meId={user.id} />
 }
