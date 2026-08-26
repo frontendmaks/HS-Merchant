@@ -7,6 +7,7 @@ import {
 } from '@/lib/order-items'
 import { canPushToMaudau, packsFor, pushOrderItems, type PushResult } from '@/lib/maudau-order-sync'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { canEditItems } from '@/lib/order-statuses'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -109,6 +110,18 @@ export async function PATCH(
   }
 
   const service = createServiceClient()
+
+  // An agreed order has been promised to somebody; its contents are settled.
+  // Checked here as well as hidden in the interface, since a hidden button is
+  // not a rule.
+  const { data: order } = await service
+    .from('orders').select('status').eq('id', id).single()
+  if (!canEditItems(order?.status as string)) {
+    return NextResponse.json(
+      { error: `Замовлення у статусі «${order?.status}» — позиції вже не редагуються` },
+      { status: 409 },
+    )
+  }
 
   // Snapshot first — the journal needs before/after per line, not just a total
   const { data: prior } = await service

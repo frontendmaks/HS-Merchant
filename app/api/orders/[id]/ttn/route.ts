@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { pushTtnToMarketplace } from '@/lib/marketplace-ttn'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { isHandedOver } from '@/lib/order-statuses'
 
 export async function PATCH(
   req: NextRequest,
@@ -16,6 +17,16 @@ export async function PATCH(
   }
 
   const supabase = createServiceClient()
+
+  // A parcel already with the courier is driven by the marketplace from here
+  const { data: current } = await supabase
+    .from('orders').select('status, ttn').eq('id', id).single()
+  if (isHandedOver(current?.status as string, current?.ttn as string)) {
+    return NextResponse.json(
+      { success: false, error: 'Замовлення вже в доставці — ТТН не змінюється' },
+      { status: 409 },
+    )
+  }
 
   const { data: before } = await supabase
     .from('orders').select('ttn, status').eq('id', id).single()

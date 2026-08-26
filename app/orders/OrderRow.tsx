@@ -5,6 +5,7 @@ import OrderJournal from './OrderJournal'
 import OrderItemsEditor from './OrderItemsEditor'
 import ShipmentDialog from './ShipmentDialog'
 import { useRouter } from 'next/navigation'
+import { canEditItems, isHandedOver } from '@/lib/order-statuses'
 import { useOrderUpdates } from '@/lib/use-order-updates'
 
 const MAUDAU_STATUSES = ['Нове', 'Прийнято', 'Узгоджено', 'На доставці', 'Прибуло', 'Доставлено', 'Скасовано']
@@ -228,6 +229,9 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
     'bg-zinc-800 text-white border border-zinc-700 rounded px-1 py-0.5 text-xs w-full disabled:opacity-50 cursor-pointer'
 
   const isTerminal = TERMINAL_STATUSES.has(status)
+  // With the courier and carrying a number, the marketplace drives it from here
+  const handedOver = isHandedOver(status, ttn)
+  const locked = isTerminal || handedOver
 
   return (
     <>
@@ -271,7 +275,7 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
           <>
             <select
               value={status}
-              disabled={statusLoading || isTerminal}
+              disabled={statusLoading || locked}
               onChange={e => handleStatusChange(e.target.value)}
               className={selectCls}
             >
@@ -294,13 +298,16 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
             <input
               type="text"
               value={ttnDraft}
-              disabled={ttnLoading || isTerminal}
+              disabled={ttnLoading || locked}
               onChange={e => setTtnDraft(e.target.value)}
               onBlur={handleTtnBlur}
               className="bg-zinc-800 text-white border border-zinc-700 rounded px-1 py-0.5 text-xs font-mono w-full disabled:opacity-50 read-only:cursor-default"
               placeholder="ТТН"
-              readOnly={isTerminal}
+              readOnly={locked}
             />
+            {handedOver && !ttnLoading && (
+              <div className="text-zinc-600 text-xs mt-0.5">в доставці</div>
+            )}
             {ttnLoading && <div className="text-zinc-500 text-xs mt-0.5">Збереження...</div>}
             {ttnError && <div className="text-red-400 text-xs mt-0.5">{ttnError}</div>}
           </>
@@ -372,6 +379,9 @@ function OrderDetailModal(
 ) {
   const { onClose } = props
   const [shipmentOpen, setShipmentOpen] = useState(false)
+  const itemsEditable = canEditItems(props.status)
+  // Either already gone, or a waybill exists — nothing to create twice
+  const shipped = isHandedOver(props.status, props.ttn) || !!props.ttn
   return (
     <tr>
       <td colSpan={13} className="p-0">
@@ -426,18 +436,28 @@ function OrderDetailModal(
             <div className="px-5 pb-5">
               <div className="text-zinc-400 text-xs mb-3">
                 Товари та коригування
-                <span className="text-zinc-600"> — впишіть фактичну вагу з накладної</span>
+                {itemsEditable
+                  ? <span className="text-zinc-600"> — впишіть фактичну вагу з накладної</span>
+                  : <span className="text-zinc-600">
+                      {' '}— замовлення у статусі «{props.status}», склад уже погоджено
+                    </span>}
               </div>
-              <OrderItemsEditor orderId={props.id} />
+              <OrderItemsEditor orderId={props.id} readOnly={!itemsEditable} />
             </div>
 
             <div className="px-5 py-3 border-t border-zinc-800 flex justify-between items-center gap-3">
-              <button
-                onClick={() => setShipmentOpen(true)}
-                className="px-4 py-2 rounded-lg text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-              >
-                ▤ Створити ТТН
-              </button>
+              {shipped ? (
+                <span className="text-zinc-500 text-sm">
+                  Передано в доставку · ТТН {props.ttn}
+                </span>
+              ) : (
+                <button
+                  onClick={() => setShipmentOpen(true)}
+                  className="px-4 py-2 rounded-lg text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+                >
+                  ▤ Створити ТТН
+                </button>
+              )}
               <button
                 onClick={onClose}
                 className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm rounded-lg transition-colors"

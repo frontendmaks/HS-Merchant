@@ -4,6 +4,7 @@ import { getMaudauJwt, patchMaudauStatus } from '@/lib/maudau'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { rozetkaToken } from '@/lib/rozetka-auth'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { isHandedOver } from '@/lib/order-statuses'
 
 const MAUDAU_STATUS_MAP: Record<string, string> = {
   'Нове': 'new_order',
@@ -27,6 +28,16 @@ export async function PATCH(
   }
 
   const supabase = createServiceClient()
+
+  // A parcel already with the courier is driven by the marketplace from here
+  const { data: current } = await supabase
+    .from('orders').select('status, ttn').eq('id', id).single()
+  if (isHandedOver(current?.status as string, current?.ttn as string)) {
+    return NextResponse.json(
+      { success: false, error: 'Замовлення вже в доставці — статус не змінюється' },
+      { status: 409 },
+    )
+  }
 
   // Read the previous value first so the journal can show the transition
   const { data: before } = await supabase

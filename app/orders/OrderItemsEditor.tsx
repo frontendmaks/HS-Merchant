@@ -44,9 +44,11 @@ const localCorrected = (l: Line, draft: string) => {
   return Math.round(q * l.price_per_unit * 100) / 100
 }
 
-export default function OrderItemsEditor({ orderId, onSaved }: {
+export default function OrderItemsEditor({ orderId, onSaved, readOnly = false }: {
   orderId: string
   onSaved?: (totals: Totals) => void
+  /** An agreed order is read-only: the contents have been promised already */
+  readOnly?: boolean
 }) {
   const [lines, setLines] = useState<Line[] | null>(null)
   const [totals, setTotals] = useState<Totals | null>(null)
@@ -176,7 +178,7 @@ export default function OrderItemsEditor({ orderId, onSaved }: {
                   <td className="px-2 py-2 text-right">
                     <input
                       value={drafts[l.id] ?? ''}
-                      disabled={isRemoved}
+                      disabled={isRemoved || readOnly}
                       onChange={e => setDrafts(d => ({ ...d, [l.id]: e.target.value }))}
                       placeholder={String(l.ordered_qty)}
                       inputMode="decimal"
@@ -196,15 +198,17 @@ export default function OrderItemsEditor({ orderId, onSaved }: {
                     )}
                   </td>
                   <td className="px-2 py-2 text-right">
-                    <button
-                      onClick={() => setRemoved(r => ({ ...r, [l.id]: !isRemoved }))}
-                      title={isRemoved ? 'Повернути позицію' : 'Прибрати позицію з чеку'}
-                      className={`px-1.5 py-0.5 rounded transition-colors ${
-                        isRemoved ? 'text-zinc-400 hover:text-white' : 'text-red-500 hover:text-red-400'
-                      }`}
-                    >
-                      {isRemoved ? '↩' : '✕'}
-                    </button>
+                    {!readOnly && (
+                      <button
+                        onClick={() => setRemoved(r => ({ ...r, [l.id]: !isRemoved }))}
+                        title={isRemoved ? 'Повернути позицію' : 'Прибрати позицію з чеку'}
+                        className={`px-1.5 py-0.5 rounded transition-colors ${
+                          isRemoved ? 'text-zinc-400 hover:text-white' : 'text-red-500 hover:text-red-400'
+                        }`}
+                      >
+                        {isRemoved ? '↩' : '✕'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               )
@@ -214,12 +218,14 @@ export default function OrderItemsEditor({ orderId, onSaved }: {
       </div>
 
       <div className="flex items-center justify-between gap-3 flex-wrap border-t border-zinc-800 pt-3">
-        <button
-          onClick={() => setPicker(true)}
-          className="px-3 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
-        >
-          + Додати товар
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => setPicker(true)}
+            className="px-3 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+          >
+            + Додати товар
+          </button>
+        )}
 
         {t && (
           <div className="flex items-center gap-5 text-xs">
@@ -262,15 +268,17 @@ export default function OrderItemsEditor({ orderId, onSaved }: {
         </div>
       )}
 
-      <div className="flex justify-end">
-        <button
-          onClick={() => save()}
-          disabled={saving || !dirty}
-          className="px-4 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white transition-colors"
-        >
-          {saving ? 'Збереження...' : 'Зберегти коригування'}
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="flex justify-end">
+          <button
+            onClick={() => save()}
+            disabled={saving || !dirty}
+            className="px-4 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white transition-colors"
+          >
+            {saving ? 'Збереження...' : 'Зберегти коригування'}
+          </button>
+        </div>
+      )}
 
       {picker && (
         <ProductPicker

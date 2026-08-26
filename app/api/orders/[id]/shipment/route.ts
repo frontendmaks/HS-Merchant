@@ -8,6 +8,7 @@ import {
 } from '@/lib/nova-poshta'
 import { pushTtnToMarketplace } from '@/lib/marketplace-ttn'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { isHandedOver } from '@/lib/order-statuses'
 
 // GET — what would go on the waybill, computed from the corrected lines
 export async function GET(
@@ -158,6 +159,10 @@ export async function POST(
   if (!order) return NextResponse.json({ error: 'Замовлення не знайдено' }, { status: 404 })
   if (order.ttn) {
     return NextResponse.json({ error: `ТТН вже створено: ${order.ttn}` }, { status: 400 })
+  }
+  if (isHandedOver(order.status as string, order.ttn as string)) {
+    return NextResponse.json(
+      { error: 'Замовлення вже передано в доставку' }, { status: 409 })
   }
   if (!hasNpKey()) return NextResponse.json({ error: 'NOVA_POSHTA_API_KEY не налаштовано' }, { status: 400 })
   if (!settings?.sender_ref) {
