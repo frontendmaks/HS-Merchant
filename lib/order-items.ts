@@ -4,8 +4,12 @@
  * A weighted product is listed as a fixed pack — "Ковбаса «Ласун» в/г, 650 г" —
  * and the marketplace charges per pack. What the customer actually wants is
  * weight: 0.65 kg × 2 packs = 1.3 kg. Meat never comes out exact, so the
- * operator types the invoice weight and the line is re-priced from our own
- * price list, per kilogram.
+ * operator types the invoice weight and the line is re-priced per kilogram.
+ *
+ * The rate is the marketplace's own, not our price list: the customer agreed to
+ * the price they saw, and it is that figure the corrected total, the commission
+ * and the waybill's declared value all have to agree with. Where the two
+ * differ, using ours would quietly bill a different amount than was shown.
  */
 
 /** Cyrillic letters that look identical to Latin ones. Our SKUs are typed with
@@ -100,12 +104,32 @@ export interface OrderLine {
   marketplace_qty: number | null
   /** What the marketplace charged for this line */
   ordered_total: number
-  /** Our price list, per kg or per piece */
+  /** The marketplace's own rate, per kg or per piece */
   price_per_unit: number
   /** Ordered amount expressed in `unit`: kg for weighted, pieces otherwise */
   ordered_qty: number
   actual_qty: number | null
   removed: boolean
+}
+
+/**
+ * The marketplace's rate in the unit the line is corrected in.
+ *
+ * Falls back to our price list only when the marketplace sent no price at all —
+ * without it a missing price would silently zero the line, which reads as a
+ * free product rather than as missing data.
+ */
+export function marketplaceRate(
+  unitPrice: number | null | undefined,
+  unit: Unit,
+  unitWeight: number,
+  listPrice?: number | null,
+): number {
+  const price = Number(unitPrice ?? 0)
+  if (price > 0) {
+    return round2(unit === 'кг' ? price / (unitWeight || 1) : price)
+  }
+  return round2(Number(listPrice ?? 0))
 }
 
 /** Builds an editable line from what the marketplace sent. */
@@ -118,13 +142,10 @@ export function buildLine(
   const unit = unitOf(product, line.title)
   const unitWeight = unitWeightOf(product, line.title, unit)
 
-  // Our own price list decides the corrected sum. For weighted goods it is
-  // already per kilogram; for piece goods it is per piece.
-  const listPrice = Number(product?.price ?? 0)
-  const price_per_unit = listPrice > 0
-    ? listPrice
-    // Not in the catalogue any more — fall back to what the marketplace charged
-    : (unit === 'кг' ? line.unitPrice / (unitWeight || 1) : line.unitPrice)
+  // The marketplace price decides the corrected sum. It is quoted per pack, so
+  // a weighted line is divided by the pack weight to get a rate per kilogram;
+  // a piece line is already the rate.
+  const price_per_unit = marketplaceRate(line.unitPrice, unit, unitWeight, product?.price)
 
   return {
     position,
@@ -138,7 +159,7 @@ export function buildLine(
     marketplace_unit_price: line.unitPrice,
     marketplace_qty: line.quantity,
     ordered_total: round2(line.unitPrice * line.quantity),
-    price_per_unit: round2(price_per_unit),
+    price_per_unit,
     ordered_qty: unit === 'кг'
       ? round3(unitWeight * line.quantity)
       : line.quantity,
