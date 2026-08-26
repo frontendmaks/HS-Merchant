@@ -19,6 +19,18 @@ const nav = [
   { href: '/users',    label: 'Користувачі',    icon: '◉', roles: PAGE_ROLES.users },
 ]
 
+/** Sections with more than one page. Rendered as a collapsible group whose
+ *  visibility follows the items left after the role filter. */
+const groups = [
+  {
+    label: 'Оператори',
+    icon: '☰',
+    items: [
+      { href: '/operators/schedule', label: 'Графік роботи', roles: PAGE_ROLES.schedule },
+    ],
+  },
+]
+
 interface Profile {
   full_name: string | null
   email: string
@@ -44,6 +56,58 @@ function NavBadge({ count, tone, title }: { count: number; tone: 'grey' | 'red';
     >
       {count > 99 ? '99+' : count}
     </span>
+  )
+}
+
+/** A section that expands to its pages. Opens itself when one of them is the
+ *  page you are on, so a reload never hides where you are. */
+function NavGroup({ group, path, onNavigate }: {
+  group: { label: string; icon: string; items: { href: string; label: string }[] }
+  path: string
+  onNavigate: () => void
+}) {
+  const holdsCurrent = group.items.some(i => path === i.href || path.startsWith(i.href + '/'))
+  const [open, setOpen] = useState(holdsCurrent)
+
+  useEffect(() => { if (holdsCurrent) setOpen(true) }, [holdsCurrent])
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+          holdsCurrent && !open
+            ? 'text-white bg-zinc-800/60'
+            : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+        }`}
+      >
+        <span className="text-base">{group.icon}</span>
+        <span className="flex-1 text-left">{group.label}</span>
+        <span className={`text-[10px] text-zinc-500 transition-transform ${open ? 'rotate-90' : ''}`}>›</span>
+      </button>
+
+      {open && (
+        <div className="mt-1 ml-4 pl-3 border-l border-zinc-800 space-y-1">
+          {group.items.map(item => {
+            const active = path === item.href || path.startsWith(item.href + '/')
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onNavigate}
+                className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
+                  active ? 'bg-red-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                }`}
+              >
+                {item.label}
+              </Link>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -119,6 +183,12 @@ export default function Sidebar() {
   const role = profile?.role
   const visibleNav = loaded && role
     ? nav.filter(item => (item.roles as readonly string[]).includes(role))
+    : []
+
+  const visibleGroups = loaded && role
+    ? groups
+        .map(g => ({ ...g, items: g.items.filter(i => (i.roles as readonly string[]).includes(role)) }))
+        .filter(g => g.items.length > 0)
     : []
 
   return (

@@ -59,6 +59,8 @@ export const PAGE_ROLES = {
   orders:    ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
   requests:  ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
   users:     ['super_admin', 'admin', 'manager'],
+  /** Operators plan their own week here; management approves it */
+  schedule:  ['super_admin', 'admin', 'manager', 'operator'],
   /** The change journal exposes who did what — management only */
   orderJournal: ['super_admin', 'admin', 'manager'],
 } as const

@@ -1,0 +1,49 @@
+import { redirect } from 'next/navigation'
+import { getCurrentRole, canAccess } from '@/lib/getRole'
+import { createServiceClient } from '@/lib/supabase/service'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+import { thisWeekStart, weekStartOf } from '@/lib/schedule'
+import ScheduleClient from './ScheduleClient'
+
+export const dynamic = 'force-dynamic'
+
+export default async function SchedulePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ week?: string }>
+}) {
+  const role = await getCurrentRole()
+  if (!canAccess('schedule', role)) redirect('/orders')
+
+  const cookieStore = await cookies()
+  const auth = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } },
+  )
+  const { data: { user } } = await auth.auth.getUser()
+  if (!user) redirect('/login')
+
+  const sp = await searchParams
+  const week = sp.week && /^\d{4}-\d{2}-\d{2}$/.test(sp.week)
+    ? weekStartOf(sp.week)
+    : thisWeekStart()
+
+  // Which weeks already exist, so the picker can offer the archive
+  const service = createServiceClient()
+  const { data: weeks } = await service
+    .from('work_schedules')
+    .select('week_start, status')
+    .order('week_start', { ascending: false })
+    .limit(60)
+
+  return (
+    <ScheduleClient
+      week={week}
+      role={role ?? ''}
+      meId={user.id}
+      knownWeeks={weeks ?? []}
+    />
+  )
+}

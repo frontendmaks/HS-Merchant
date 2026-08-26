@@ -11,6 +11,8 @@
 --   orders-full-sync          2 */3 * * *   ~26 requests, ~8s (re-reads the year)
 --   hourly-wc-sync            10 * * * *    full WooCommerce product sync, 135-225s
 --   order-sync-logs-cleanup   30 4 * * *    drops auto logs older than 7 days
+--   schedule-reminder-morning 0 7,8 * * 5    nudge operators to file next week
+--   schedule-reminder-deadline 5 13,14 * * 5 same, and tell management if late
 --
 -- The full run is offset by two minutes so it never coincides with a quick run.
 --
@@ -117,3 +119,16 @@ SELECT cron.schedule(
 -- Change cadence: SELECT cron.schedule('orders-quick-sync', '*/3 * * * *',
 --                   $$SELECT public.trigger_order_sync('quick')$$);
 -- Pause:          SELECT cron.unschedule('orders-quick-sync');
+
+
+-- Friday reminder to file next week's schedule.
+--
+-- pg_cron runs in UTC while Kyiv moves between UTC+2 and UTC+3, so each
+-- reminder is scheduled at both offsets and the route decides from Kyiv
+-- wall-clock time. It refuses any day but Friday and will not repeat a
+-- reminder of the same kind within twelve hours, so the extra pass is inert.
+--
+-- SELECT cron.schedule('schedule-reminder-morning',  '0 7,8 * * 5',
+--   $$SELECT public.trigger_schedule_reminder()$$);
+-- SELECT cron.schedule('schedule-reminder-deadline', '5 13,14 * * 5',
+--   $$SELECT public.trigger_schedule_reminder()$$);
