@@ -1,43 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { getMaudauJwt, patchMaudauStatus, patchMaudauTtn } from '@/lib/maudau'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
-import { rozetkaToken } from '@/lib/rozetka-auth'
-
-interface RozetkaStatusEntry {
-  child_id: number
-  title: string
-}
-
-async function fetchRozetkaOrder(numericId: string): Promise<{
-  statusAvailable: RozetkaStatusEntry[]
-}> {
-  const res = await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
-    headers: { Authorization: `Bearer ${await rozetkaToken()}` },
-  })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const detail: any = await res.json()
-  const statusAvailable: RozetkaStatusEntry[] =
-    detail?.data?.status_available ?? detail?.content?.status_available ?? []
-  return { statusAvailable }
-}
-
-async function advanceRozetka(
-  numericId: string,
-  targetId: number,
-  statusAvailable: RozetkaStatusEntry[],
-): Promise<void> {
-  const entry = statusAvailable.find(s => s.child_id === targetId)
-  if (!entry) return // already past this step or not available — skip
-  await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${await rozetkaToken()}`,
-    },
-    body: JSON.stringify({ status: entry.child_id }),
-  })
-}
+import { pushTtnToMarketplace } from '@/lib/marketplace-ttn'
 
 export async function PATCH(
   req: NextRequest,
@@ -53,7 +17,7 @@ export async function PATCH(
   const supabase = createServiceClient()
 
   const { data: before } = await supabase
-    .from('orders').select('ttn').eq('id', id).single()
+    .from('orders').select('ttn, status').eq('id', id).single()
 
   const { error: dbError } = await supabase
     .from('orders')
@@ -67,59 +31,21 @@ export async function PATCH(
       { old: before?.ttn ?? null, new: ttn || null }, await currentActor())
   }
 
-  try {
-    if (platform === 'maudau') {
-      // Spec: must chain accepted → approved → delivering+TTN
-      const numericId = external_id.replace(/^MD-/, '')
-      const jwt = await getMaudauJwt()
-
-      try { await patchMaudauStatus(numericId, 'accepted', undefined, jwt) } catch { /* continue */ }
-      try { await patchMaudauStatus(numericId, 'approved', undefined, jwt) } catch { /* continue */ }
-      // Main step — sets TTN and advances to 'delivering'
-      await patchMaudauTtn(numericId, ttn, jwt)
-    } else if (platform === 'rozetka') {
-      // Spec: chain 1→26→2, then set TTN + advance to 3
-      const numericId = external_id.replace(/^RZ-/, '')
-
-      // Step 1: advance to 26 (Опрацьовується)
-      const { statusAvailable: sa1 } = await fetchRozetkaOrder(numericId)
-      await advanceRozetka(numericId, 26, sa1)
-
-      // Step 2: advance to 2 (Комплектується)
-      const { statusAvailable: sa2 } = await fetchRozetkaOrder(numericId)
-      await advanceRozetka(numericId, 2, sa2)
-
-      // Step 3: set TTN + advance to 3 (Передано)
-      const { statusAvailable: sa3 } = await fetchRozetkaOrder(numericId)
-      const transferEntry = sa3.find(s => s.child_id === 3)
-
-      if (transferEntry) {
-        await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${await rozetkaToken()}`,
-          },
-          body: JSON.stringify({ status: transferEntry.child_id, ttn }),
-        })
-      } else {
-        // TTN may be settable separately even without status advance
-        await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${await rozetkaToken()}`,
-          },
-          body: JSON.stringify({ ttn }),
-        })
-      }
-    }
-  } catch (e) {
-    return NextResponse.json(
-      { success: false, error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
-    )
+  const pushed = await pushTtnToMarketplace(platform, external_id, ttn)
+  if (!pushed.ok) {
+    return NextResponse.json({ success: false, error: pushed.error }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true })
+  // Handing the number over is what marks the order shipped, so record the
+  // status the marketplace just moved it to rather than leaving ours stale
+  if (pushed.status && pushed.status !== before?.status) {
+    await supabase.from('orders')
+      .update({ status: pushed.status, updated_at: new Date().toISOString() })
+      .eq('id', id)
+    await logOrderEvent(supabase, id, 'status',
+      { old: before?.status ?? null, new: pushed.status, details: 'разом із ТТН' },
+      await currentActor())
+  }
+
+  return NextResponse.json({ success: true, status: pushed.status })
 }

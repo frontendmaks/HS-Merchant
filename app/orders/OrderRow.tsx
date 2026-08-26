@@ -330,6 +330,12 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
         ttn={ttn}
         cancelReason={cancelReason}
         onClose={() => setJournalOpen(false)}
+        // The waybill is created inside the modal but the row owns these fields
+        onShipmentCreated={({ ttn: created, status: newStatus }) => {
+          setTtn(created)
+          setTtnDraft(created)
+          if (newStatus) setStatus(newStatus)
+        }}
       />
     )}
     </>
@@ -346,7 +352,11 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function OrderDetailModal(
-  props: OrderRowProps & { status: string; ttn: string; cancelReason: string; onClose: () => void },
+  props: OrderRowProps & {
+    status: string; ttn: string; cancelReason: string
+    onClose: () => void
+    onShipmentCreated: (r: { ttn: string; status?: string }) => void
+  },
 ) {
   const { onClose } = props
   const [shipmentOpen, setShipmentOpen] = useState(false)
@@ -423,7 +433,11 @@ function OrderDetailModal(
           </div>
 
           {shipmentOpen && (
-            <ShipmentDialog orderId={props.id} onClose={() => setShipmentOpen(false)} />
+            <ShipmentDialog
+              orderId={props.id}
+              onClose={() => setShipmentOpen(false)}
+              onCreated={props.onShipmentCreated}
+            />
           )}
         </div>
       </td>

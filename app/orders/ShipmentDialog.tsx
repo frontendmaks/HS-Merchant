@@ -31,9 +31,11 @@ const MISSING_LABEL: Record<keyof Shipment['ready'], string> = {
   destination: 'адреса призначення — немає ні відділення, ні вулиці з будинком',
 }
 
-export default function ShipmentDialog({ orderId, onClose }: {
+export default function ShipmentDialog({ orderId, onClose, onCreated }: {
   orderId: string
   onClose: () => void
+  /** Lets the order row show the new number and status without a reload */
+  onCreated?: (result: { ttn: string; status?: string }) => void
 }) {
   const [data, setData] = useState<Shipment | null>(null)
   const [error, setError] = useState('')
@@ -44,7 +46,10 @@ export default function ShipmentDialog({ orderId, onClose }: {
   const [senderRef, setSenderRef] = useState('')
   const [dims, setDims] = useState({ length: '', width: '', height: '' })
   const [creating, setCreating] = useState(false)
-  const [created, setCreated] = useState<{ ttn?: string; cost?: number; estimatedDelivery?: string } | null>(null)
+  const [created, setCreated] = useState<{
+    ttn?: string; cost?: number; estimatedDelivery?: string
+    status?: string; marketplaceError?: string
+  } | null>(null)
   const [createError, setCreateError] = useState('')
 
   useEffect(() => {
@@ -96,6 +101,7 @@ export default function ShipmentDialog({ orderId, onClose }: {
       const d = await res.json()
       if (!res.ok || d.error) { setCreateError(d.error || 'Не вдалося створити ТТН'); return }
       setCreated(d)
+      if (d.ttn) onCreated?.({ ttn: d.ttn, status: d.status })
     } catch {
       setCreateError('Помилка мережі')
     } finally {
@@ -238,10 +244,23 @@ export default function ShipmentDialog({ orderId, onClose }: {
                     ✓ ТТН {created?.ttn ?? data.order.ttn}
                   </div>
                   {created && (
-                    <div className="text-emerald-400/80 text-xs mt-1">
-                      Вартість доставки {created.cost} грн
-                      {created.estimatedDelivery && <> · орієнтовно {created.estimatedDelivery}</>}
-                    </div>
+                    <>
+                      <div className="text-emerald-400/80 text-xs mt-1">
+                        Вартість доставки {created.cost} грн
+                        {created.estimatedDelivery && <> · орієнтовно {created.estimatedDelivery}</>}
+                      </div>
+                      {created.status && (
+                        <div className="text-emerald-400/80 text-xs mt-0.5">
+                          Статус замовлення — {created.status}
+                        </div>
+                      )}
+                      {created.marketplaceError && (
+                        <div className="text-amber-400 text-xs mt-1.5">
+                          ТТН створено, але маркетплейс його не прийняв: {created.marketplaceError}.
+                          Номер збережено — спробуйте передати його вручну.
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               ) : missing.length === 0 ? (

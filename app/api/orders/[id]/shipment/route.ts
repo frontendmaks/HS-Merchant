@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { shipmentWeight, orderTotals, type OrderLine } from '@/lib/order-items'
 import { createWaybill, hasNpKey, senderWarehouses, type NpSettings } from '@/lib/nova-poshta'
+import { pushTtnToMarketplace } from '@/lib/marketplace-ttn'
 
 // GET — what would go on the waybill, computed from the corrected lines
 export async function GET(
@@ -131,7 +132,7 @@ export async function POST(
   const service = createServiceClient()
   const [{ data: order }, { data: settings }, { data: items }] = await Promise.all([
     service.from('orders')
-      .select('customer_name, customer_phone, total, ttn, np_ttn_ref, raw')
+      .select('customer_name, customer_phone, total, ttn, np_ttn_ref, raw, platform, external_id, status')
       .eq('id', id).single(),
     service.from('np_settings').select('*').eq('id', true).maybeSingle(),
     service.from('order_items').select('*').eq('order_id', id),
@@ -192,5 +193,26 @@ export async function POST(
   await logOrderEvent(service, id, 'ttn',
     { new: `${result.ttn} · ${weight} кг · оцінка ₴${declaredValue} · доставка ${result.estimatedDelivery}` }, actor)
 
-  return NextResponse.json(result)
+  // A number Nova Poshta issued is no use to the buyer until the marketplace
+  // has it — this is the same handover as typing one in by hand, and it is what
+  // moves the order to shipped.
+  const pushed = await pushTtnToMarketplace(
+    order.platform as string, order.external_id as string, result.ttn!)
+
+  let status: string | undefined
+  if (pushed.ok && pushed.status && pushed.status !== order.status) {
+    status = pushed.status
+    await service.from('orders')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', id)
+    await logOrderEvent(service, id, 'status',
+      { old: (order.status as string) ?? null, new: status, details: 'разом із ТТН' }, actor)
+  }
+
+  return NextResponse.json({
+    ...result,
+    status,
+    // The waybill exists either way; a failed handover is worth saying out loud
+    marketplaceError: pushed.ok ? undefined : pushed.error,
+  })
 }
