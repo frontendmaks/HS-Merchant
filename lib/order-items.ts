@@ -2,9 +2,14 @@
  * Turning a marketplace order line into something an operator can correct.
  *
  * A weighted product is listed as a fixed pack — "Ковбаса «Ласун» в/г, 650 г" —
- * and the marketplace charges per pack. What the customer actually wants is
- * weight: 0.65 kg × 2 packs = 1.3 kg. Meat never comes out exact, so the
- * operator types the invoice weight and the line is re-priced per kilogram.
+ * and the marketplace charges per pack, whether the goods are sold by weight or
+ * by the piece. So a correction is a change in the number of packs, never a
+ * weight: MauDau accepts whole packs and silently discards anything else, which
+ * is checked, not assumed — 10.4, 2.5 and "2.5" were all ignored on a live
+ * order while the integer 3 went through on the same one.
+ *
+ * Weight and money follow from the pack count: 2 packs of 650 g is 1.3 kg, and
+ * two pack prices.
  *
  * The rate is the marketplace's own, not our price list: the customer agreed to
  * the price they saw, and it is that figure the corrected total, the commission
@@ -171,13 +176,32 @@ export function buildLine(
 export const round2 = (n: number) => Math.round(n * 100) / 100
 export const round3 = (n: number) => Math.round(n * 1000) / 1000
 
-/** Effective amount: the invoice figure once entered, the ordered one until then. */
-export const effectiveQty = (l: Pick<OrderLine, 'ordered_qty' | 'actual_qty'>): number =>
-  l.actual_qty != null ? l.actual_qty : l.ordered_qty
+/** Packs the marketplace charged for. */
+export const orderedPacks = (l: Pick<OrderLine, 'marketplace_qty' | 'ordered_qty' | 'unit' | 'unit_weight'>): number =>
+  l.marketplace_qty != null
+    ? l.marketplace_qty
+    // A line added by hand was never on the marketplace, so its own amount is
+    // the pack count
+    : (l.unit === 'кг' && l.unit_weight > 0 ? Math.round(l.ordered_qty / l.unit_weight) : l.ordered_qty)
 
-/** What the line costs after correction. */
+/** Packs after correction: what the operator counted, or the ordered figure. */
+export const effectivePacks = (
+  l: Pick<OrderLine, 'marketplace_qty' | 'ordered_qty' | 'actual_qty' | 'unit' | 'unit_weight'>,
+): number => (l.actual_qty != null ? l.actual_qty : orderedPacks(l))
+
+/** The amount in the line's own unit — kilograms for weighted goods, pieces
+ *  otherwise. Derived from packs rather than stored, so the two cannot drift. */
+export const effectiveQty = (
+  l: Pick<OrderLine, 'marketplace_qty' | 'ordered_qty' | 'actual_qty' | 'unit' | 'unit_weight'>,
+): number => {
+  const packs = effectivePacks(l)
+  return l.unit === 'кг' ? round3(packs * (l.unit_weight || 1)) : packs
+}
+
+/** What the line costs after correction — pack count times the pack price. */
 export const correctedTotal = (
-  l: Pick<OrderLine, 'ordered_qty' | 'actual_qty' | 'price_per_unit' | 'removed'>
+  l: Pick<OrderLine, 'marketplace_qty' | 'ordered_qty' | 'actual_qty' | 'unit'
+    | 'unit_weight' | 'price_per_unit' | 'removed'>,
 ): number => (l.removed ? 0 : round2(effectiveQty(l) * l.price_per_unit))
 
 export interface OrderTotals {

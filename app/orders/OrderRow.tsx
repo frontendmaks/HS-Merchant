@@ -5,7 +5,7 @@ import OrderJournal from './OrderJournal'
 import OrderItemsEditor from './OrderItemsEditor'
 import ShipmentDialog from './ShipmentDialog'
 import { useRouter } from 'next/navigation'
-import { canEditItems, isHandedOver } from '@/lib/order-statuses'
+import { canCreateWaybill, canEditItems, isHandedOver } from '@/lib/order-statuses'
 import { useOrderUpdates } from '@/lib/use-order-updates'
 
 const MAUDAU_STATUSES = ['Нове', 'Прийнято', 'Узгоджено', 'На доставці', 'Прибуло', 'Доставлено', 'Скасовано']
@@ -382,6 +382,7 @@ function OrderDetailModal(
   const itemsEditable = canEditItems(props.status)
   // Either already gone, or a waybill exists — nothing to create twice
   const shipped = isHandedOver(props.status, props.ttn) || !!props.ttn
+  const canShip = canCreateWaybill(props.status, props.ttn)
   return (
     <tr>
       <td colSpan={13} className="p-0">
@@ -449,6 +450,10 @@ function OrderDetailModal(
               {shipped ? (
                 <span className="text-zinc-500 text-sm">
                   Передано в доставку · ТТН {props.ttn}
+                </span>
+              ) : !canShip ? (
+                <span className="text-zinc-600 text-sm">
+                  ТТН створюється з погодженого замовлення — зараз «{props.status}»
                 </span>
               ) : (
                 <button

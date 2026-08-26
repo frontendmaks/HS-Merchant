@@ -2,10 +2,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import {
-  buildLine, indexCatalog, correctedTotal, effectiveQty, orderTotals,
+  buildLine, indexCatalog, correctedTotal, effectivePacks, effectiveQty, orderTotals,
   type CatalogProduct, type MarketplaceLine, type OrderLine,
 } from '@/lib/order-items'
-import { canPushToMaudau, packsFor, pushOrderItems, type PushResult } from '@/lib/maudau-order-sync'
+import { canPushToMaudau, pushOrderItems, type PushResult } from '@/lib/maudau-order-sync'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { canEditItems } from '@/lib/order-statuses'
 
@@ -257,7 +257,8 @@ async function pushToMarketplace(
     .filter(l => l.source === 'marketplace' && !l.removed && l.marketplace_item_id)
     .map(l => ({
       itemId: l.marketplace_item_id as string,
-      quantity: packsFor(effectiveQty(l), l.unit_weight),
+      // The corrected figure is already a pack count — the unit MauDau takes
+      quantity: effectivePacks(l),
     }))
 
   if (!sendable.length) return null

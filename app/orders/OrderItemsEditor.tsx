@@ -36,12 +36,26 @@ const qty = (n: number, unit: string) =>
     ? `${Number(n).toLocaleString('uk-UA', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} кг`
     : `${n} шт`
 
+/** Packs the marketplace charged for. */
+const orderedPacks = (l: Line) =>
+  l.marketplace_qty ?? (l.unit === 'кг' && l.unit_weight > 0
+    ? Math.round(l.ordered_qty / l.unit_weight)
+    : l.ordered_qty)
+
+/** Packs the operator has typed, or the ordered count until they do. */
+const draftPacks = (l: Line, draft: string) => {
+  const parsed = draft.trim() === '' ? null : Number(draft.replace(',', '.'))
+  return parsed != null && Number.isFinite(parsed) && parsed >= 0 ? parsed : orderedPacks(l)
+}
+
+/** The line's own unit follows from the pack count — 2 packs of 650 g is 1.3 kg. */
+const packsToQty = (l: Line, packs: number) =>
+  l.unit === 'кг' ? Math.round(packs * (l.unit_weight || 1) * 1000) / 1000 : packs
+
 /** Local copy of the corrected sum so the table reacts as the operator types. */
 const localCorrected = (l: Line, draft: string) => {
   if (l.removed) return 0
-  const parsed = draft.trim() === '' ? null : Number(draft.replace(',', '.'))
-  const q = parsed != null && Number.isFinite(parsed) ? parsed : l.ordered_qty
-  return Math.round(q * l.price_per_unit * 100) / 100
+  return Math.round(packsToQty(l, draftPacks(l, draft)) * l.price_per_unit * 100) / 100
 }
 
 export default function OrderItemsEditor({ orderId, onSaved, readOnly = false }: {
@@ -147,7 +161,7 @@ export default function OrderItemsEditor({ orderId, onSaved, readOnly = false }:
               <th className="text-left px-2 py-2">Товар</th>
               <th className="text-right px-2 py-2 whitespace-nowrap">Ціна</th>
               <th className="text-right px-2 py-2 whitespace-nowrap">Замовлено</th>
-              <th className="text-right px-2 py-2 whitespace-nowrap">Факт</th>
+              <th className="text-right px-2 py-2 whitespace-nowrap">Факт, уп.</th>
               <th className="text-right px-2 py-2 whitespace-nowrap">Сума замовлення</th>
               <th className="text-right px-2 py-2 whitespace-nowrap">Сума факт</th>
               <th className="px-2 py-2" />
@@ -173,18 +187,28 @@ export default function OrderItemsEditor({ orderId, onSaved, readOnly = false }:
                     {money(l.price_per_unit)}<span className="text-zinc-600">/{l.unit}</span>
                   </td>
                   <td className="px-2 py-2 text-right text-zinc-300 whitespace-nowrap">
-                    {qty(l.ordered_qty, l.unit)}
+                    {orderedPacks(l)} шт
+                    {l.unit === 'кг' && (
+                      <div className="text-zinc-600">{qty(l.ordered_qty, l.unit)}</div>
+                    )}
                   </td>
                   <td className="px-2 py-2 text-right">
+                    {/* Packs, not kilograms: the marketplace charges per pack
+                        and accepts nothing but whole ones */}
                     <input
                       value={drafts[l.id] ?? ''}
                       disabled={isRemoved || readOnly}
-                      onChange={e => setDrafts(d => ({ ...d, [l.id]: e.target.value }))}
-                      placeholder={String(l.ordered_qty)}
-                      inputMode="decimal"
-                      title={l.unit === 'кг' ? 'Фактична вага з накладної, кг' : 'Фактична кількість, шт'}
-                      className="w-20 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-right text-white disabled:opacity-40 focus:outline-none focus:border-red-500"
+                      onChange={e => setDrafts(d => ({ ...d, [l.id]: e.target.value.replace(/[^\d]/g, '') }))}
+                      placeholder={String(orderedPacks(l))}
+                      inputMode="numeric"
+                      title="Фактична кількість упаковок"
+                      className="w-16 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-right text-white disabled:opacity-40 focus:outline-none focus:border-red-500"
                     />
+                    {l.unit === 'кг' && !isRemoved && (
+                      <div className="text-zinc-600 mt-0.5">
+                        {qty(packsToQty(l, draftPacks(l, drafts[l.id] ?? '')), 'кг')}
+                      </div>
+                    )}
                   </td>
                   <td className="px-2 py-2 text-right text-zinc-400 whitespace-nowrap">
                     {l.source === 'manual' ? '—' : money(l.ordered_total)}

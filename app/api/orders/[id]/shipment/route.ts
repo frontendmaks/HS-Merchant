@@ -8,7 +8,7 @@ import {
 } from '@/lib/nova-poshta'
 import { pushTtnToMarketplace } from '@/lib/marketplace-ttn'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
-import { isHandedOver } from '@/lib/order-statuses'
+import { canCreateWaybill, isHandedOver } from '@/lib/order-statuses'
 
 // GET — what would go on the waybill, computed from the corrected lines
 export async function GET(
@@ -23,7 +23,7 @@ export async function GET(
 
   const [{ data: order }, { data: items }, { data: settings }] = await Promise.all([
     service.from('orders')
-      .select('external_id, customer_name, customer_phone, branch, address, total, weight, seats_amount, ttn, np_ttn_ref, raw')
+      .select('external_id, customer_name, customer_phone, branch, address, total, weight, seats_amount, ttn, np_ttn_ref, status, raw')
       .eq('id', id).single(),
     service.from('order_items').select('*').eq('order_id', id).order('position'),
     service.from('np_settings').select('*').eq('id', true).maybeSingle(),
@@ -94,6 +94,9 @@ export async function GET(
     seats: order.seats_amount ?? 1,
     recipientRefs: { cityRef, warehouseRef },
     // Without these a waybill cannot be created, so the UI can say which is missing
+    // Agreed and not yet shipped: the point at which the contents are settled
+    readyToShip: canCreateWaybill(order.status as string, order.ttn as string),
+    status: order.status,
     ready: {
       apiKey: hasNpKey(),
       sender: !!settings?.sender_ref,
@@ -163,6 +166,12 @@ export async function POST(
   if (isHandedOver(order.status as string, order.ttn as string)) {
     return NextResponse.json(
       { error: 'Замовлення вже передано в доставку' }, { status: 409 })
+  }
+  if (!canCreateWaybill(order.status as string, order.ttn as string)) {
+    return NextResponse.json(
+      { error: `ТТН створюється лише з погодженого замовлення — зараз «${order.status}»` },
+      { status: 409 },
+    )
   }
   if (!hasNpKey()) return NextResponse.json({ error: 'NOVA_POSHTA_API_KEY не налаштовано' }, { status: 400 })
   if (!settings?.sender_ref) {

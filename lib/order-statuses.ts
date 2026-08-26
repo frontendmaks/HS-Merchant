@@ -70,3 +70,18 @@ export const isHandedOver = (
   status: string | null | undefined,
   ttn: string | null | undefined,
 ): boolean => isShipping(status ?? null) && !!(ttn ?? '').trim()
+
+/**
+ * A waybill is made once the order is agreed and its contents are settled —
+ * the same point at which line editing closes. Before that the composition can
+ * still change, and a waybill carrying the wrong weight or declared value has
+ * to be cancelled and redone.
+ *
+ * Rozetka words the same stage Комплектується.
+ */
+export const READY_TO_SHIP_STATUSES = ['Узгоджено', 'Комплектується']
+
+export const canCreateWaybill = (
+  status: string | null | undefined,
+  ttn: string | null | undefined,
+): boolean => READY_TO_SHIP_STATUSES.includes(status ?? '') && !(ttn ?? '').trim()
