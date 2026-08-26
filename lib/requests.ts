@@ -93,6 +93,14 @@ export const isClosed = (status: string) => status === 'done' || status === 'can
 /** Statuses the assignee drives the work through. */
 export const ASSIGNEE_STATUSES: RequestStatus[] = ['new', 'in_progress', 'pending_review']
 
+/** Statuses that mean "I have finished this" — and so must say what was done.
+ *  Both are covered: work handed up for sign-off, and work the assignee closes
+ *  themselves because they raised it. */
+export const RESOLUTION_REQUIRED_STATUSES: string[] = ['pending_review', 'done']
+
+/** Enough to be a sentence rather than a shrug. */
+export const MIN_RESOLUTION_LENGTH = 10
+
 /** The author's only dropdown choice — closing and rework go through the
  *  confirm / return buttons instead, so they are deliberate decisions. */
 export const AUTHOR_STATUSES: RequestStatus[] = ['canceled']

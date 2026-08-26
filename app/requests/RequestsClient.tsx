@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   REQUEST_CATEGORIES, STATUS_META, PRIORITY_META, STATUS_KEYS, PRIORITY_KEYS,
   EVENT_META, eventValue, categoryByKey, categoryLabel, sortForInbox,
-  deadlineState, DEADLINE_TONE, isClosed, statusOptionsFor,
+  deadlineState, DEADLINE_TONE, isClosed, statusOptionsFor, MIN_RESOLUTION_LENGTH,
   type RequestStatus, type RequestPriority, type RequestEventType,
 } from '@/lib/requests'
+import { timeAgo } from '@/lib/format'
 
 const POLL_MS = 15_000
 
@@ -42,6 +43,11 @@ export interface WorkRequest {
   assignees: Person[]
   notes: Note[] | null
   events: Event[] | null
+  /** What the assignee said they did, recorded when they handed it over */
+  resolution: string | null
+  resolution_url: string | null
+  resolution_files: { path: string; name: string; size: number; type?: string }[] | null
+  resolved_at: string | null
 }
 
 const name = (p: { full_name: string | null; email: string } | null | undefined) =>
@@ -474,18 +480,39 @@ function Inbox({ rows, me, onOpen, onPatch, busy }: {
   onPatch: (id: string, payload: Record<string, unknown>) => Promise<void>
   busy: boolean
 }) {
+  const [tab, setTab] = useState<'all' | 'in_progress'>('all')
+  const [resolving, setResolving] = useState<{ request: WorkRequest; target: 'done' | 'pending_review' } | null>(null)
+  const shown = tab === 'all' ? rows : rows.filter(r => r.status === 'in_progress')
+  const inProgress = rows.filter(r => r.status === 'in_progress').length
+
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-      <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
+      <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-3 flex-wrap">
         <h2 className="text-white font-semibold text-sm">Мені треба зробити</h2>
-        <span className="text-zinc-600 text-xs">{rows.length}</span>
+        <div className="inline-flex bg-zinc-800 rounded-lg p-0.5 ml-auto">
+          {([['all', 'Всі', rows.length], ['in_progress', 'В роботі', inProgress]] as const).map(
+            ([key, label, count]) => (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
+                  tab === key ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                {label} <span className="text-zinc-500">{count}</span>
+              </button>
+            ),
+          )}
+        </div>
       </div>
 
-      {rows.length === 0 ? (
-        <div className="px-4 py-10 text-center text-zinc-600 text-sm">Активних запитів немає</div>
+      {shown.length === 0 ? (
+        <div className="px-4 py-10 text-center text-zinc-600 text-sm">
+          {tab === 'in_progress' ? 'Нічого не взято в роботу' : 'Активних запитів немає'}
+        </div>
       ) : (
         <div className="divide-y divide-zinc-800/60 max-h-[560px] overflow-y-auto">
-          {rows.map(r => {
+          {shown.map(r => {
             const dl = deadlineState(r.deadline, r.status)
             // Self-assigned work needs no sign-off from anyone else
             const selfAssigned = r.created_by === me.id
@@ -533,7 +560,7 @@ function Inbox({ rows, me, onOpen, onPatch, busy }: {
                     )}
                     <button
                       disabled={busy}
-                      onClick={() => onPatch(r.id, { status: selfAssigned ? 'done' : 'pending_review' })}
+                      onClick={() => setResolving({ request: r, target: selfAssigned ? 'done' : 'pending_review' })}
                       className="px-2.5 py-1 rounded-lg text-xs bg-emerald-900/60 text-emerald-300 hover:bg-emerald-800/60 disabled:opacity-50 transition-colors whitespace-nowrap"
                       title={selfAssigned ? 'Закрити запит' : 'Надіслати на підтвердження автору'}
                     >
@@ -546,6 +573,168 @@ function Inbox({ rows, me, onOpen, onPatch, busy }: {
           })}
         </div>
       )}
+
+      {resolving && (
+        <ResolutionDialog
+          request={resolving.request}
+          target={resolving.target}
+          onClose={() => setResolving(null)}
+          onDone={async payload => {
+            await onPatch(resolving.request.id, payload)
+            setResolving(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+interface ResolutionFile { path: string; name: string; size: number; type?: string }
+
+/**
+ * What was done, asked for at the moment the work is handed over.
+ *
+ * A note is required — "Виконано" with nothing behind it leaves the author to
+ * go and ask. A link and screenshots are optional because much of this work is
+ * a page to look at or a screen to see, and describing those in words is worse
+ * than showing them.
+ */
+function ResolutionDialog({ request, target, onClose, onDone }: {
+  request: WorkRequest
+  target: 'done' | 'pending_review'
+  onClose: () => void
+  onDone: (payload: Record<string, unknown>) => Promise<void>
+}) {
+  const [text, setText] = useState(request.resolution ?? '')
+  const [url, setUrl] = useState(request.resolution_url ?? '')
+  const [files, setFiles] = useState<ResolutionFile[]>(request.resolution_files ?? [])
+  const [uploading, setUploading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const enough = text.trim().length >= MIN_RESOLUTION_LENGTH
+
+  async function upload(list: FileList | null) {
+    if (!list?.length) return
+    setUploading(true)
+    setError('')
+    try {
+      for (const file of Array.from(list)) {
+        const fd = new FormData()
+        fd.append('file', file)
+        fd.append('request_id', request.id)
+        const res = await fetch('/api/requests/files', { method: 'POST', body: fd })
+        const d = await res.json()
+        if (d.error) { setError(d.error); continue }
+        setFiles(f => [...f, d.file])
+      }
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function submit() {
+    if (!enough) return
+    setSaving(true)
+    setError('')
+    try {
+      await onDone({
+        status: target,
+        resolution: text.trim(),
+        resolution_url: url.trim(),
+        resolution_files: files,
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не вдалося зберегти')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const field = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500'
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/70 flex items-start justify-center p-4 overflow-y-auto"
+         onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-lg my-12"
+           onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-zinc-800 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-white font-semibold">
+              {target === 'done' ? 'Закрити запит' : 'Надіслати на підтвердження'}
+            </div>
+            <div className="text-zinc-500 text-xs mt-0.5 truncate">{request.subject}</div>
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="block text-zinc-400 text-xs mb-1.5">
+              Що зроблено <span className="text-red-400">*</span>
+            </label>
+            <textarea
+              autoFocus
+              value={text}
+              onChange={e => setText(e.target.value)}
+              rows={4}
+              placeholder="Напр. Оновив ціни на 12 позиціях у фіді MauDau, перевірив вивантаження"
+              className={`${field} resize-y`}
+            />
+            <div className={`text-xs mt-1 ${enough ? 'text-zinc-600' : 'text-amber-500/80'}`}>
+              {enough
+                ? 'Це побачить той, хто поставив запит'
+                : `Ще ${MIN_RESOLUTION_LENGTH - text.trim().length} символів`}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-zinc-400 text-xs mb-1.5">
+              Посилання <span className="text-zinc-600">— необовʼязково</span>
+            </label>
+            <input value={url} onChange={e => setUrl(e.target.value)} className={field}
+                   placeholder="https://..." inputMode="url" />
+          </div>
+
+          <div>
+            <label className="block text-zinc-400 text-xs mb-1.5">
+              Скріншоти <span className="text-zinc-600">— необовʼязково, до 10 МБ</span>
+            </label>
+            <label className="inline-block px-3 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer transition-colors">
+              {uploading ? 'Завантаження...' : '＋ Додати файл'}
+              <input type="file" multiple accept="image/*,application/pdf" className="hidden"
+                     onChange={e => { void upload(e.target.files); e.target.value = '' }} />
+            </label>
+
+            {files.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {files.map(f => (
+                  <li key={f.path} className="flex items-center gap-2 text-xs">
+                    <a href={`/api/requests/files?path=${encodeURIComponent(f.path)}`}
+                       target="_blank" rel="noreferrer"
+                       className="text-zinc-300 hover:text-white truncate flex-1">
+                      {f.name}
+                    </a>
+                    <span className="text-zinc-600">{Math.round(f.size / 1024)} КБ</span>
+                    <button onClick={() => setFiles(list => list.filter(x => x.path !== f.path))}
+                            className="text-zinc-600 hover:text-red-400">×</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+
+          <button
+            onClick={submit}
+            disabled={!enough || saving || uploading}
+            className="w-full px-4 py-2.5 rounded-lg text-sm bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white font-medium transition-colors"
+          >
+            {saving ? 'Збереження...' : target === 'done' ? 'Закрити запит' : 'Надіслати на підтвердження'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -876,6 +1065,42 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
               <div className="text-zinc-400 text-xs mb-1.5">Опис</div>
               <div className="text-zinc-200 text-sm whitespace-pre-wrap bg-zinc-800/40 rounded-lg px-3 py-2.5">
                 {r.description}
+              </div>
+            </div>
+          )}
+
+          {/* The author decides from this, so it sits above the status control
+              rather than at the bottom of the modal */}
+          {r.resolution && (
+            <div>
+              <div className="text-zinc-400 text-xs mb-1.5">
+                Що зроблено
+                {r.resolved_at && (
+                  <span className="text-zinc-600"> · {timeAgo(r.resolved_at)}</span>
+                )}
+              </div>
+              <div className="bg-emerald-950/20 border border-emerald-900/40 rounded-lg px-3 py-2.5 space-y-2">
+                <div className="text-zinc-200 text-sm whitespace-pre-wrap">{r.resolution}</div>
+
+                {r.resolution_url && (
+                  <a href={r.resolution_url} target="_blank" rel="noreferrer"
+                     className="block text-cyan-400 hover:text-cyan-300 text-xs truncate">
+                    {r.resolution_url}
+                  </a>
+                )}
+
+                {!!r.resolution_files?.length && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {r.resolution_files.map(f => (
+                      <a key={f.path}
+                         href={`/api/requests/files?path=${encodeURIComponent(f.path)}`}
+                         target="_blank" rel="noreferrer"
+                         className="px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:text-white text-xs">
+                        ▤ {f.name}
+                      </a>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -6,11 +6,13 @@ import { isAdmin, type UserRole } from '@/lib/getRole'
 import {
   NOTIFICATION_TYPES, normalizeRequest, PRIORITY_META,
   ASSIGNEE_STATUSES, AUTHOR_DECISION_STATUSES, AUTHOR_STATUSES,
+  RESOLUTION_REQUIRED_STATUSES, MIN_RESOLUTION_LENGTH,
   type RequestStatus, type RequestPriority,
 } from '@/lib/requests'
 
 const SELECT = `
   id, category, subject, description, status, priority, deadline,
+  resolution, resolution_url, resolution_files, resolved_at,
   created_at, updated_at, completed_at, created_by,
   author:profiles!requests_created_by_fkey(id, full_name, email),
   assignees:request_assignees(user:profiles!request_assignees_user_id_fkey(id, full_name, email)),
@@ -154,20 +156,26 @@ export async function PATCH(request: NextRequest) {
   const caller = await getCaller()
   if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { id, status, deadline, priority, description, assignees } = await request.json() as {
+  const {
+    id, status, deadline, priority, description, assignees,
+    resolution, resolution_url, resolution_files,
+  } = await request.json() as {
     id: string
     status?: RequestStatus
     deadline?: string | null
     priority?: RequestPriority
     description?: string
     assignees?: string[]
+    resolution?: string
+    resolution_url?: string
+    resolution_files?: { path: string; name: string; size: number; type?: string }[]
   }
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
   const service = createServiceClient()
   const { data: before } = await service
     .from('requests')
-    .select('id, created_by, subject, status, deadline, priority, description')
+    .select('id, created_by, subject, status, deadline, priority, description, resolution')
     .eq('id', id)
     .single()
 
@@ -203,6 +211,20 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json(
         { error: 'Рухати запит по статусах може лише виконавець' }, { status: 403 })
     }
+
+    // Handing work back for sign-off without saying what was done leaves the
+    // author to go and ask. A description settles it; a link or a screenshot
+    // are offered because much of this work is a page to look at.
+    if (RESOLUTION_REQUIRED_STATUSES.includes(status)) {
+      const text = (resolution ?? before.resolution ?? '').trim()
+      if (text.length < MIN_RESOLUTION_LENGTH) {
+        return NextResponse.json(
+          { error: `Опишіть, що зроблено — щонайменше ${MIN_RESOLUTION_LENGTH} символів`,
+            needsResolution: true },
+          { status: 422 },
+        )
+      }
+    }
   }
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
@@ -213,6 +235,14 @@ export async function PATCH(request: NextRequest) {
   if (deadline !== undefined) updates.deadline = deadline || null
   if (priority !== undefined) updates.priority = priority
   if (description !== undefined) updates.description = description.trim() || null
+
+  if (resolution !== undefined) {
+    updates.resolution = resolution.trim() || null
+    updates.resolved_at = resolution.trim() ? new Date().toISOString() : null
+    updates.resolved_by = resolution.trim() ? caller.id : null
+  }
+  if (resolution_url !== undefined) updates.resolution_url = resolution_url.trim() || null
+  if (resolution_files !== undefined) updates.resolution_files = resolution_files
 
   const { error } = await service.from('requests').update(updates).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
