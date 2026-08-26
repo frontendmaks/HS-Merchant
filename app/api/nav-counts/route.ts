@@ -29,9 +29,20 @@ export async function GET() {
   // head: true returns the count alone — no rows travel back.
   const opts = { count: 'exact' as const, head: true }
 
+  // Requests are personal: the badge counts what is on this user's own plate,
+  // matching the requests page, where "mine" means being one of the assignees.
+  // The inner join cannot double-count, since it is filtered to a single user.
+  const assignedTo = (status: string) =>
+    db
+      .from('requests')
+      .select('id, request_assignees!inner(user_id)', opts)
+      .eq('status', status)
+      .eq('request_assignees.user_id', userId)
+
+  // Orders are a shared queue — everyone sees the same figures.
   const [reqNew, reqInProgress, ordNew, ordProcessing] = await Promise.all([
-    db.from('requests').select('id', opts).eq('status', 'new'),
-    db.from('requests').select('id', opts).eq('status', 'in_progress'),
+    assignedTo('new'),
+    assignedTo('in_progress'),
     db.from('orders').select('id', opts).in('status', NEW_STATUSES),
     db.from('orders').select('id', opts).in('status', PROCESSING_STATUSES),
   ])
