@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   REQUEST_CATEGORIES, STATUS_META, PRIORITY_META, STATUS_KEYS, PRIORITY_KEYS,
   EVENT_META, eventValue, categoryByKey, categoryLabel, sortForInbox,
-  deadlineState, DEADLINE_TONE, isClosed, statusOptionsFor, MIN_RESOLUTION_LENGTH,
+  deadlineState, DEADLINE_TONE, isClosed, statusOptionsFor,
+  MIN_RESOLUTION_LENGTH, RESOLUTION_REQUIRED_STATUSES,
   type RequestStatus, type RequestPriority, type RequestEventType,
 } from '@/lib/requests'
 import { timeAgo } from '@/lib/format'
@@ -708,11 +709,13 @@ function ResolutionDialog({ request, target, onClose, onDone }: {
 
           <div>
             <label className="block text-zinc-400 text-xs mb-1.5">
-              Скріншоти <span className="text-zinc-600">— необовʼязково, до 10 МБ</span>
+              Скріншоти <span className="text-zinc-600">— необовʼязково, до 15 МБ</span>
             </label>
             <label className="inline-block px-3 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer transition-colors">
               {uploading ? 'Завантаження...' : '＋ Додати файл'}
-              <input type="file" multiple accept="image/*,application/pdf" className="hidden"
+              {/* image/* covers HEIC from an iPhone; naming formats explicitly
+                  would hide the camera option on some phones */}
+              <input type="file" multiple accept="image/*,.pdf,application/pdf" className="hidden"
                      onChange={e => { void upload(e.target.files); e.target.value = '' }} />
             </label>
 
@@ -1008,6 +1011,7 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
   // happen through the decision buttons below the dropdown
   const statusOptions = statusOptionsFor({ isAuthor, isAssignee, current: r.status })
   const awaitingMyDecision = r.status === 'pending_review' && isAuthor
+  const [resolveTo, setResolveTo] = useState<RequestStatus | null>(null)
 
   async function addNote(e: React.FormEvent) {
     e.preventDefault()
@@ -1121,7 +1125,15 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
               <select
                 value={r.status}
                 disabled={!canEdit || busy || statusOptions.length < 2}
-                onChange={e => onPatch(r.id, { status: e.target.value })}
+                onChange={e => {
+                  const next = e.target.value as RequestStatus
+                  // Finishing work needs a description. Asking for it here is
+                  // the same ask the Виконано button makes — sending the change
+                  // first and reporting the refusal afterwards is what turned
+                  // it into an alert about a field the person never saw.
+                  if (RESOLUTION_REQUIRED_STATUSES.includes(next)) setResolveTo(next)
+                  else void onPatch(r.id, { status: next })
+                }}
                 className={`${control} w-full`}
               >
                 {statusOptions.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
@@ -1276,6 +1288,18 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
           </button>
         </div>
       </div>
+
+      {resolveTo && (
+        <ResolutionDialog
+          request={r}
+          target={resolveTo as 'done' | 'pending_review'}
+          onClose={() => setResolveTo(null)}
+          onDone={async payload => {
+            await onPatch(r.id, payload)
+            setResolveTo(null)
+          }}
+        />
+      )}
     </div>
   )
 }

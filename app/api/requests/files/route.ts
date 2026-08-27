@@ -13,8 +13,36 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor } from '@/lib/order-events'
 
 const BUCKET = 'request-files'
-const MAX_BYTES = 10 * 1024 * 1024
-const ALLOWED = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf']
+const MAX_BYTES = 15 * 1024 * 1024
+
+/**
+ * What a phone actually sends, not what a desktop browser does.
+ *
+ * An iPhone hands over HEIC unless the user changed a setting, and some Android
+ * browsers send an empty type for a photo taken with the camera. Whitelisting
+ * only the four desktop formats rejected both — which is why uploading from a
+ * phone did nothing.
+ */
+const ALLOWED = [
+  'image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif',
+  'image/heic', 'image/heif', 'image/avif', 'application/pdf',
+]
+
+const EXT_TYPES: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+  gif: 'image/gif', heic: 'image/heic', heif: 'image/heif', avif: 'image/avif',
+  pdf: 'application/pdf',
+}
+
+/** The browser's word for it, or the extension when it says nothing. */
+function resolveType(file: File): string | null {
+  const declared = (file.type || '').toLowerCase()
+  if (ALLOWED.includes(declared)) return declared
+  if (declared && !declared.startsWith('image/')) return null
+
+  const ext = (file.name.split('.').pop() ?? '').toLowerCase()
+  return EXT_TYPES[ext] ?? (declared.startsWith('image/') ? declared : null)
+}
 
 export async function POST(req: NextRequest) {
   const actor = await currentActor()
@@ -28,9 +56,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Некоректний запит' }, { status: 400 })
   }
   if (file.size > MAX_BYTES) {
-    return NextResponse.json({ error: 'Файл більший за 10 МБ' }, { status: 400 })
+    return NextResponse.json({ error: 'Файл більший за 15 МБ' }, { status: 400 })
   }
-  if (!ALLOWED.includes(file.type)) {
+  const contentType = resolveType(file)
+  if (!contentType) {
     return NextResponse.json({ error: 'Приймаються зображення та PDF' }, { status: 400 })
   }
 
@@ -41,12 +70,12 @@ export async function POST(req: NextRequest) {
 
   const { error } = await createServiceClient().storage
     .from(BUCKET)
-    .upload(path, await file.arrayBuffer(), { contentType: file.type, upsert: false })
+    .upload(path, await file.arrayBuffer(), { contentType, upsert: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json({
-    file: { path, name: file.name.slice(0, 120), size: file.size, type: file.type },
+    file: { path, name: file.name.slice(0, 120), size: file.size, type: contentType },
   })
 }
 
