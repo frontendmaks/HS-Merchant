@@ -9,7 +9,7 @@
  *
  * Endpoints (from spec / Code.gs):
  *   Status change : PATCH /v1/merchant_public_api/orders/{id}/status  { status, cancellation_reason_id? }
- *   TTN update    : PATCH /v1/merchant_public_api/orders/{id}          { delivery_tracking_number, status: 'delivering' }
+ *   TTN update    : PATCH /v1/merchant_public_api/orders/{id}          { delivery_tracking_number }
  */
 
 import { createServiceClient } from '@/lib/supabase/service'
@@ -151,8 +151,12 @@ export async function patchMaudauStatus(
 }
 
 /**
- * Update MauDau order TTN (tracking number).
- * Endpoint: PATCH /v1/merchant_public_api/orders/{id}  { delivery_tracking_number, status: 'delivering' }
+ * Sets the tracking number.
+ *
+ * Only the number: passing `status` in the same request is accepted with a 200
+ * and ignored — checked against a live order, where the response echoed the
+ * order back still `approved` while the number did land. Moving the order on
+ * takes the dedicated status endpoint, which callers must do separately.
  */
 export async function patchMaudauTtn(
   numericId: string,
@@ -165,7 +169,7 @@ export async function patchMaudauTtn(
   const res = await fetch(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ delivery_tracking_number: ttn, status: 'delivering' }),
+    body: JSON.stringify({ delivery_tracking_number: ttn }),
   })
 
   if (res.status === 401) {
@@ -174,7 +178,7 @@ export async function patchMaudauTtn(
     const retry = await fetch(url, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${freshToken}` },
-      body: JSON.stringify({ delivery_tracking_number: ttn, status: 'delivering' }),
+      body: JSON.stringify({ delivery_tracking_number: ttn }),
     })
     if (!retry.ok) {
       const errBody = await retry.text().catch(() => '')

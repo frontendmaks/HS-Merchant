@@ -71,7 +71,14 @@ export async function pushTtnToMarketplace(
       // The first two may already be behind us; only the last one must land
       try { await patchMaudauStatus(numericId, 'accepted', undefined, jwt) } catch { /* already past */ }
       try { await patchMaudauStatus(numericId, 'approved', undefined, jwt) } catch { /* already past */ }
+
+      // Two calls, deliberately. The number goes on the order; the move to
+      // delivering only happens through the status endpoint — sending it inline
+      // with the number returns 200 and changes nothing, which left orders
+      // sitting at Узгоджено with a waybill until the next sync pulled our
+      // optimistic status back.
       await patchMaudauTtn(numericId, ttn, jwt)
+      await patchMaudauStatus(numericId, 'delivering', undefined, jwt)
       return { ok: true, status: SHIPPED_STATUS.maudau }
     }
 

@@ -59,17 +59,24 @@ export const canEditItems = (status: string | null | undefined): boolean =>
   !ITEMS_LOCKED_STATUSES.includes(status ?? '')
 
 /**
- * Handed to the courier and carrying a number: the waybill exists, the parcel
- * is moving, and the marketplace drives the status from here.
+ * Handed over: a waybill exists, so the parcel is with the courier and the
+ * marketplace drives the order from here.
  *
- * Both halves matter. A shipping status without a number means the waybill
- * still has to be made; a number on an order not yet shipped is one an operator
- * typed ahead of time.
+ * The number alone decides this, not the status. The status is the
+ * marketplace's to set and lags behind — an order can sit at Узгоджено with a
+ * waybill already printed while the marketplace catches up, and during that
+ * window the fields must already be closed. Tying the lock to the status meant
+ * it let go every time a sync pulled an older value back.
  */
 export const isHandedOver = (
   status: string | null | undefined,
   ttn: string | null | undefined,
-): boolean => isShipping(status ?? null) && !!(ttn ?? '').trim()
+): boolean => hasWaybill(ttn) || isShipping(status ?? null)
+
+/** A real waybill number, not a note somebody left in the field — one order
+ *  carries the text "нема товару" there, and that must not lock anything. */
+export const hasWaybill = (ttn: string | null | undefined): boolean =>
+  /^\d{10,}$/.test((ttn ?? '').replace(/\s/g, ''))
 
 /**
  * A waybill is made once the order is agreed and its contents are settled —
@@ -85,3 +92,5 @@ export const canCreateWaybill = (
   status: string | null | undefined,
   ttn: string | null | undefined,
 ): boolean => READY_TO_SHIP_STATUSES.includes(status ?? '') && !(ttn ?? '').trim()
+
+// hasWaybill is declared below, next to the rule that uses it
