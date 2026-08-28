@@ -58,6 +58,61 @@ export interface PushTtnResult {
   error?: string
 }
 
+/**
+ * Puts the number on the order, and nothing else.
+ *
+ * Split from the move to shipped on purpose. The two are separate requests at
+ * MauDau anyway — sending the status inline with the number returns 200 and
+ * changes nothing — and separating them lets the panel save a waybill straight
+ * away and mark the order shipped a moment later, rather than making the
+ * operator wait on the marketplace before the dialog will close.
+ */
+export async function pushTtnNumber(
+  platform: string,
+  externalId: string,
+  ttn: string,
+): Promise<PushTtnResult> {
+  try {
+    if (platform === 'maudau') {
+      const numericId = externalId.replace(/^MD-/, '')
+      const jwt = await getMaudauJwt()
+      // These two may already be behind us
+      try { await patchMaudauStatus(numericId, 'accepted', undefined, jwt) } catch { /* already past */ }
+      try { await patchMaudauStatus(numericId, 'approved', undefined, jwt) } catch { /* already past */ }
+      await patchMaudauTtn(numericId, ttn, jwt)
+      return { ok: true }
+    }
+
+    if (platform === 'rozetka') {
+      // Rozetka takes the number only alongside its own status move, so its
+      // number and status genuinely are one step
+      return await pushTtnToMarketplace(platform, externalId, ttn)
+    }
+
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** Marks the order shipped at the marketplace. MauDau only moves through its
+ *  own status endpoint; the number must already be on the order. */
+export async function markShippedAtMarketplace(
+  platform: string,
+  externalId: string,
+): Promise<PushTtnResult> {
+  try {
+    if (platform === 'maudau') {
+      await patchMaudauStatus(externalId.replace(/^MD-/, ''), 'delivering')
+      return { ok: true, status: SHIPPED_STATUS.maudau }
+    }
+    // Rozetka was already moved when its number went over
+    return { ok: true, status: SHIPPED_STATUS[platform] }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export async function pushTtnToMarketplace(
   platform: string,
   externalId: string,
@@ -65,18 +120,14 @@ export async function pushTtnToMarketplace(
 ): Promise<PushTtnResult> {
   try {
     if (platform === 'maudau') {
-      // Spec: must chain accepted → approved → delivering+TTN
+      // Spec: must chain accepted → approved, then number, then delivering
       const numericId = externalId.replace(/^MD-/, '')
       const jwt = await getMaudauJwt()
-      // The first two may already be behind us; only the last one must land
       try { await patchMaudauStatus(numericId, 'accepted', undefined, jwt) } catch { /* already past */ }
       try { await patchMaudauStatus(numericId, 'approved', undefined, jwt) } catch { /* already past */ }
 
-      // Two calls, deliberately. The number goes on the order; the move to
-      // delivering only happens through the status endpoint — sending it inline
-      // with the number returns 200 and changes nothing, which left orders
-      // sitting at Узгоджено with a waybill until the next sync pulled our
-      // optimistic status back.
+      // Two calls, deliberately: sending the status inline with the number
+      // returns 200 and changes nothing
       await patchMaudauTtn(numericId, ttn, jwt)
       await patchMaudauStatus(numericId, 'delivering', undefined, jwt)
       return { ok: true, status: SHIPPED_STATUS.maudau }

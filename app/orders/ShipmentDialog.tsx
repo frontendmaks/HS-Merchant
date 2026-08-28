@@ -160,6 +160,10 @@ function BranchPicker({ branches, value, onChange }: {
   )
 }
 
+/** Long enough for the marketplace to register the number before the order is
+ *  marked shipped, short enough that nobody waits on it. */
+const SHIP_DELAY_S = 10
+
 export default function ShipmentDialog({ orderId, onClose, onCreated }: {
   orderId: string
   onClose: () => void
@@ -175,6 +179,7 @@ export default function ShipmentDialog({ orderId, onClose, onCreated }: {
   const [senderRef, setSenderRef] = useState('')
   const [dims, setDims] = useState({ length: '', width: '', height: '' })
   const [creating, setCreating] = useState(false)
+  const [shipCountdown, setShipCountdown] = useState<number | null>(null)
   const [created, setCreated] = useState<{
     ttn?: string; cost?: number; estimatedDelivery?: string
     status?: string; marketplaceError?: string
@@ -230,13 +235,44 @@ export default function ShipmentDialog({ orderId, onClose, onCreated }: {
       const d = await res.json()
       if (!res.ok || d.error) { setCreateError(d.error || 'Не вдалося створити ТТН'); return }
       setCreated(d)
-      if (d.ttn) onCreated?.({ ttn: d.ttn, status: d.status })
+      if (!d.ttn) return
+
+      // The number lands and the fields lock right away; the marketplace is
+      // given a moment to register it before the order is marked shipped.
+      onCreated?.({ ttn: d.ttn })
+      setShipCountdown(SHIP_DELAY_S)
     } catch {
       setCreateError('Помилка мережі')
     } finally {
       setCreating(false)
     }
   }
+
+  // Counts down after a waybill is made, then moves the order to shipped
+  useEffect(() => {
+    if (shipCountdown == null) return
+    if (shipCountdown > 0) {
+      const t = setTimeout(() => setShipCountdown(n => (n ?? 1) - 1), 1000)
+      return () => clearTimeout(t)
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/orders/${orderId}/ship`, { method: 'POST' })
+        const d = await res.json()
+        if (cancelled) return
+        if (d.error) setCreateError(`ТТН збережено, але статус не змінився: ${d.error}`)
+        else {
+          setCreated(c => (c ? { ...c, status: d.status } : c))
+          onCreated?.({ ttn: created?.ttn ?? '', status: d.status })
+        }
+      } finally {
+        if (!cancelled) setShipCountdown(null)
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shipCountdown])
 
   const missing = data
     ? (Object.keys(data.ready) as (keyof Shipment['ready'])[]).filter(k => !data.ready[k])
@@ -429,6 +465,13 @@ export default function ShipmentDialog({ orderId, onClose, onCreated }: {
                         Вартість доставки {created.cost} грн
                         {created.estimatedDelivery && <> · орієнтовно {created.estimatedDelivery}</>}
                       </div>
+                      {shipCountdown != null && (
+                        <div className="text-zinc-400 text-xs mt-1">
+                          {shipCountdown > 0
+                            ? `Статус зміниться на «На доставці» через ${shipCountdown} с`
+                            : 'Переводимо в доставку…'}
+                        </div>
+                      )}
                       {created.status && (
                         <div className="text-emerald-400/80 text-xs mt-0.5">
                           Статус замовлення — {created.status}

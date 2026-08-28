@@ -2,6 +2,8 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt } from '@/lib/maudau'
 import { notifyNewOrders } from '@/lib/order-notifications'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { hasWaybill } from '@/lib/order-statuses'
+import { patchMaudauStatus } from '@/lib/maudau'
 
 const BASE = process.env.MAUDAU_BASE!
 
@@ -176,7 +178,7 @@ export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: num
     const externalIds = rows.map(r => r.external_id)
     const { data: existing } = await supabase
       .from('orders')
-      .select('id, external_id, cancel_reason, status')
+      .select('id, external_id, cancel_reason, status, ttn')
       .in('external_id', externalIds)
       .eq('platform', 'maudau')
 
@@ -221,6 +223,22 @@ export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: num
 
     if (statusEvents.length) {
       await supabase.from('order_events').insert(statusEvents)
+    }
+
+    // An order with a waybill that MauDau still shows as approved never got
+    // its move to delivering — the operator closed the panel before it ran, or
+    // the call failed. Finish it here rather than leaving the parcel shipped in
+    // our records and pending in theirs.
+    const stranded = rows.filter(r => {
+      const mine = beforeById.get(r.external_id) as { ttn?: string | null } | undefined
+      return hasWaybill(mine?.ttn) && (r.status === 'Узгоджено' || r.status === 'Прийнято')
+    })
+    for (const r of stranded.slice(0, 20)) {
+      try {
+        await patchMaudauStatus(r.external_id.replace(/^MD-/, ''), 'delivering')
+      } catch {
+        // Next run tries again; a stuck order must not fail the whole sync
+      }
     }
 
     // Only after the rows are safely stored

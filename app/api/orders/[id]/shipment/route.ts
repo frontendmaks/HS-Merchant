@@ -6,7 +6,7 @@ import {
   CELL_PRESETS, createWaybill, hasNpKey, senderWarehouses, warehouseLimits,
   type NpSettings,
 } from '@/lib/nova-poshta'
-import { pushTtnToMarketplace } from '@/lib/marketplace-ttn'
+import { pushTtnNumber } from '@/lib/marketplace-ttn'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { canCreateWaybill, isHandedOver } from '@/lib/order-statuses'
 
@@ -226,27 +226,16 @@ export async function POST(
   await logOrderEvent(service, id, 'ttn',
     { new: `${result.ttn} · ${weight} кг · оцінка ₴${declaredValue} · доставка ${result.estimatedDelivery}` }, actor)
 
-  // A number Nova Poshta issued is no use to the buyer until the marketplace
-  // has it — this is the same handover as typing one in by hand, and it is what
-  // moves the order to shipped.
-  const pushed = await pushTtnToMarketplace(
+  // The number goes over at once — the buyer's tracking depends on it. The move
+  // to shipped is a separate step the caller makes shortly after, so the dialog
+  // can close on a saved waybill rather than waiting on the marketplace.
+  const pushed = await pushTtnNumber(
     order.platform as string, order.external_id as string, result.ttn!)
-
-  let status: string | undefined
-  if (pushed.ok && pushed.status && pushed.status !== order.status) {
-    status = pushed.status
-    await service.from('orders')
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq('id', id)
-    await logOrderEvent(service, id, 'status',
-      { old: (order.status as string) ?? null, new: status, details: 'разом із ТТН' }, actor)
-  }
 
   await broadcastOrderChange(id, 'ttn')
 
   return NextResponse.json({
     ...result,
-    status,
     // The waybill exists either way; a failed handover is worth saying out loud
     marketplaceError: pushed.ok ? undefined : pushed.error,
   })

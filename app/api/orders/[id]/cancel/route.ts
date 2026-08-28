@@ -21,6 +21,18 @@ export async function PATCH(
   }
 
   const supabase = createServiceClient()
+
+  // A cancellation is a record of a decision, not a field to revise. Checked
+  // here as well as hidden in the row, since a hidden control is not a rule.
+  const { data: before } = await supabase
+    .from('orders').select('status, cancel_reason').eq('id', id).single()
+  if (before?.status === 'Скасовано') {
+    return NextResponse.json(
+      { success: false, error: 'Замовлення вже скасовано — причина не змінюється' },
+      { status: 409 },
+    )
+  }
+
   const { error: dbError } = await supabase
     .from('orders')
     .update({ status: 'Скасовано', cancel_reason: reason, updated_at: new Date().toISOString() })

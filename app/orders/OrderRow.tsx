@@ -318,6 +318,9 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
       <td onClick={e => e.stopPropagation()} className="px-3 py-2 min-w-[160px]">
         {readOnly ? (
           <span className="text-zinc-400 text-xs">{cancelReason || '—'}</span>
+        ) : status === 'Скасовано' ? (
+          // Already cancelled — the reason is on record, not up for revision
+          <span className="text-zinc-400 text-xs">{cancelReason || '—'}</span>
         ) : status !== 'Доставлено' && (
           <>
             <select
