@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 
 interface Notification {
@@ -77,6 +78,8 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
   const [items, setItems] = useState<Notification[]>([])
   const [unread, setUnread] = useState(0)
   const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({})
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>('default')
   const [soundOn, setSoundOn] = useState(true)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -153,12 +156,54 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
 
   useEffect(() => {
     if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setOpen(false)
+    // pointerdown, not mousedown: a phone reports a tap as a pointer event, so
+    // the panel would never close by tapping outside it
+    const onDown = (e: Event) => {
+      const t = e.target as Node
+      if (panelRef.current?.contains(t) || triggerRef.current?.contains(t)) return
+      setOpen(false)
     }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
   }, [open])
+
+  /**
+   * Positions the panel against the viewport instead of its parent.
+   *
+   * In the sidebar the bell sits at the bottom and the list belongs above it.
+   * On a phone the bell is in a 56px top bar, where opening upwards puts the
+   * whole panel off the screen — which is why it could not be opened at all.
+   * So the side is chosen from where there is room, and a narrow screen gets a
+   * panel that fits it rather than a fixed 320px box hanging off the edge.
+   */
+  const place = useCallback(() => {
+    const el = triggerRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const width = Math.min(320, vw - 16)
+    const below = vh - r.bottom
+
+    setPanelStyle({
+      width,
+      left: Math.min(Math.max(8, r.left), Math.max(8, vw - width - 8)),
+      ...(below > r.top
+        ? { top: r.bottom + 8, maxHeight: Math.max(220, below - 16) }
+        : { bottom: vh - r.top + 8, maxHeight: Math.max(220, r.top - 16) }),
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open, place])
 
   async function askPermission() {
     if (!('Notification' in window)) return
@@ -212,8 +257,9 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
   if (!enabled) return null
 
   return (
-    <div className="relative" ref={panelRef}>
+    <>
       <button
+        ref={triggerRef}
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
       >
@@ -228,8 +274,14 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
         Сповіщення
       </button>
 
-      {open && (
-        <div className="absolute bottom-full left-0 mb-2 w-80 max-h-[440px] bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden flex flex-col z-50">
+      {open && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={panelRef}
+          style={panelStyle}
+          // Fixed and portalled: the phone's top bar is 56px tall and would
+          // clip the panel away entirely
+          className="fixed bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden flex flex-col z-[100]"
+        >
           <div className="px-3.5 py-2.5 border-b border-zinc-800 flex items-center justify-between">
             <span className="text-white text-sm font-medium">Сповіщення</span>
             <div className="flex items-center gap-2">
@@ -302,8 +354,9 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   )
 }
