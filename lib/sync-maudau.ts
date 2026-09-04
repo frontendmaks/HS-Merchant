@@ -194,6 +194,14 @@ export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: num
         .map(r => [r.external_id as string, r.customer_comment as string])
     )
 
+    // A waybill we created ourselves lives only here: MauDau has no number for
+    // an order it delivers itself, and would otherwise blank ours every pass
+    const existingTtns = new Map(
+      (existing ?? [])
+        .filter(r => r.ttn)
+        .map(r => [r.external_id as string, r.ttn as string])
+    )
+
     const existingReasons = new Map(
       (existing ?? [])
         .filter(r => r.cancel_reason != null)
@@ -205,6 +213,7 @@ export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: num
       cancel_reason: r.cancel_reason ?? existingReasons.get(r.external_id) ?? null,
       // A pass that brings no comment must not erase one we already have
       customer_comment: r.customer_comment ?? existingComments.get(r.external_id) ?? null,
+      ttn: r.ttn ?? existingTtns.get(r.external_id) ?? null,
     }))
 
     const { error } = await supabase

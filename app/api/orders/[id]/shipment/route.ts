@@ -242,8 +242,14 @@ export async function POST(
   // The number goes over at once — the buyer's tracking depends on it. The move
   // to shipped is a separate step the caller makes shortly after, so the dialog
   // can close on a saved waybill rather than waiting on the marketplace.
-  const pushed = await pushTtnNumber(
-    order.platform as string, order.external_id as string, result.ttn!)
+  //
+  // Except where the marketplace delivers the order itself: MauDau refuses a
+  // number there outright ("Не можна додати ТТН для способу доставки
+  // продавця"), so sending one only produces a 422 to explain away. The
+  // waybill is still ours to use — it is simply not something they track.
+  const pushed = dest.byMerchant
+    ? { ok: true, error: undefined }
+    : await pushTtnNumber(order.platform as string, order.external_id as string, result.ttn!)
 
   await broadcastOrderChange(id, 'ttn')
 
@@ -251,5 +257,8 @@ export async function POST(
     ...result,
     // The waybill exists either way; a failed handover is worth saying out loud
     marketplaceError: pushed.ok ? undefined : pushed.error,
+    marketplaceNote: dest.byMerchant
+      ? 'Замовлення на доставці продавця — маркетплейс не приймає ТТН для таких. Номер збережено лише в нас.'
+      : undefined,
   })
 }

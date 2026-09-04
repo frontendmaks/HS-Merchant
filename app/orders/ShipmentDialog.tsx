@@ -184,7 +184,7 @@ export default function ShipmentDialog({ orderId, onClose, onCreated }: {
   const [shipCountdown, setShipCountdown] = useState<number | null>(null)
   const [created, setCreated] = useState<{
     ttn?: string; cost?: number; estimatedDelivery?: string
-    status?: string; marketplaceError?: string
+    status?: string; marketplaceError?: string; marketplaceNote?: string
   } | null>(null)
   const [createError, setCreateError] = useState('')
 
@@ -477,6 +477,14 @@ export default function ShipmentDialog({ orderId, onClose, onCreated }: {
                       {created.status && (
                         <div className="text-emerald-400/80 text-xs mt-0.5">
                           Статус замовлення — {created.status}
+                        </div>
+                      )}
+                      {/* Not a failure — the marketplace has nothing to
+                          track here, and the operator should not go hunting
+                          for a handover that was never meant to happen */}
+                      {created.marketplaceNote && (
+                        <div className="text-zinc-400 text-xs mt-1.5">
+                          {created.marketplaceNote}
                         </div>
                       )}
                       {created.marketplaceError && (

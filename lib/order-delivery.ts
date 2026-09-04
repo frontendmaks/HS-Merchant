@@ -15,6 +15,9 @@ export interface Destination {
   flat: string | null
   toBranch: boolean
   toPostomat: boolean
+  /** The marketplace is having this delivered itself — it will not take a
+   *  tracking number for it, and never supplies a carrier id either */
+  byMerchant: boolean
 }
 
 interface ExternalId { id?: string | null; delivery_provider?: string | null }
@@ -29,6 +32,12 @@ function npExternalId(ids: unknown): string | null {
   const list = Array.isArray(ids) ? (ids as ExternalId[]) : []
   const byName = list.find(e => e?.id && /nova/i.test(e.delivery_provider ?? ''))
   return byName?.id ?? list.find(e => e?.id)?.id ?? null
+}
+
+/** Which delivery this order belongs to, as the marketplace sees it. */
+function providerOf(ids: unknown): string | null {
+  const list = Array.isArray(ids) ? (ids as ExternalId[]) : []
+  return list[0]?.delivery_provider ?? null
 }
 
 export function readDestination(
@@ -52,5 +61,6 @@ export function readDestination(
     toBranch: !!warehouseRef,
     toPostomat: (warehouse.type as string) === 'parcel_locker'
       || /поштомат/i.test(String(branchLabel ?? '')),
+    byMerchant: providerOf(city.external_ids) === 'merchant',
   }
 }

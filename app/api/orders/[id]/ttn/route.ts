@@ -4,6 +4,7 @@ import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { pushTtnToMarketplace } from '@/lib/marketplace-ttn'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { isHandedOver } from '@/lib/order-statuses'
+import { readDestination } from '@/lib/order-delivery'
 
 export async function PATCH(
   req: NextRequest,
@@ -29,7 +30,11 @@ export async function PATCH(
   }
 
   const { data: before } = await supabase
-    .from('orders').select('ttn, status').eq('id', id).single()
+    .from('orders').select('ttn, status, raw').eq('id', id).single()
+  // Delivered by the shop itself: the marketplace refuses a number for these,
+  // so the row keeps it and nothing is sent
+  const byMerchant = readDestination(
+    before?.raw as Record<string, unknown> | null).byMerchant
 
   const { error: dbError } = await supabase
     .from('orders')
@@ -41,6 +46,14 @@ export async function PATCH(
   if ((before?.ttn ?? null) !== (ttn || null)) {
     await logOrderEvent(supabase, id, 'ttn',
       { old: before?.ttn ?? null, new: ttn || null }, await currentActor())
+  }
+
+  if (byMerchant) {
+    await broadcastOrderChange(id, 'ttn')
+    return NextResponse.json({
+      success: true,
+      note: 'Доставка продавця — маркетплейс не приймає ТТН, номер збережено лише в нас.',
+    })
   }
 
   const pushed = await pushTtnToMarketplace(platform, external_id, ttn)
