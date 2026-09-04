@@ -3,12 +3,13 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { shipmentWeight, orderTotals, type OrderLine } from '@/lib/order-items'
 import {
-  CELL_PRESETS, createWaybill, hasNpKey, senderWarehouses, warehouseLimits,
-  type NpSettings,
+  CELL_PRESETS, cityRefByName, createWaybill, hasNpKey, senderWarehouses,
+  warehouseLimits, type NpSettings,
 } from '@/lib/nova-poshta'
 import { pushTtnNumber } from '@/lib/marketplace-ttn'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { canCreateWaybill, isHandedOver } from '@/lib/order-statuses'
+import { readDestination } from '@/lib/order-delivery'
 
 // GET — what would go on the waybill, computed from the corrected lines
 export async function GET(
@@ -38,22 +39,27 @@ export async function GET(
   // The waybill insures what is actually in the box, so the corrected sum wins
   const declared = lines.length ? totals.corrected : Number(order.total ?? 0)
 
-  // Nova Poshta wants its own refs for the recipient's city and branch. MauDau
-  // passes them straight through, so no lookup is needed.
-  const raw = order.raw as Record<string, unknown> | null
-  const delivery = (raw?.delivery_address ?? {}) as Record<string, unknown>
-  const city = (delivery.city ?? {}) as Record<string, unknown>
-  const warehouse = (delivery.warehouse ?? {}) as Record<string, unknown>
-  const cityRef = (city.external_ids as { id?: string }[] | undefined)?.[0]?.id ?? null
-  const warehouseRef = (warehouse.external_id as string | undefined) ?? null
+  // Nova Poshta wants its own ref for the recipient's city. A branch order
+  // carries one; inside MauDau's courier zone only the name comes over, so
+  // that case is resolved against Nova Poshta here.
+  const dest = readDestination(
+    order.raw as Record<string, unknown> | null, order.branch as string | null)
+  const { warehouseRef, toBranch, toPostomat } = dest
+  const street = dest.street ?? undefined
+  const building = dest.building ?? undefined
+  const flat = dest.flat ?? undefined
 
-  const street = ((delivery.street ?? {}) as Record<string, unknown>).name as string | undefined
-  const building = delivery.building as string | undefined
-  const flat = delivery.apartment as string | undefined
-  const toBranch = !!warehouseRef
-  // parcel_locker vs branch, straight from the marketplace payload
-  const toPostomat = (warehouse.type as string) === 'parcel_locker'
-    || /поштомат/i.test(String(order.branch ?? ''))
+  let cityRef = dest.cityRef
+  let cityNote: string | null = null
+  if (!cityRef && dest.cityName && hasNpKey()) {
+    const found = await cityRefByName(dest.cityName)
+    if (found.ok) {
+      cityRef = found.ref
+      cityNote = `Місто визначено за назвою: ${found.present}`
+    } else {
+      cityNote = found.error
+    }
+  }
 
   // Dispatch branch can change day to day, so the operator picks it
   const branches = hasNpKey() && settings?.city_sender_ref
@@ -93,6 +99,8 @@ export async function GET(
     },
     seats: order.seats_amount ?? 1,
     recipientRefs: { cityRef, warehouseRef },
+    // Says whether the city was matched for us, or why it could not be
+    cityNote,
     // Without these a waybill cannot be created, so the UI can say which is missing
     // Agreed and not yet shipped: the point at which the contents are settled
     readyToShip: canCreateWaybill(order.status as string, order.ttn as string),
@@ -178,11 +186,16 @@ export async function POST(
     return NextResponse.json({ error: 'Не заповнені дані відправника' }, { status: 400 })
   }
 
-  const raw = order.raw as Record<string, unknown> | null
-  const delivery = (raw?.delivery_address ?? {}) as Record<string, unknown>
-  const city = (delivery.city ?? {}) as Record<string, unknown>
-  const warehouse = (delivery.warehouse ?? {}) as Record<string, unknown>
-  const toPostomat = (warehouse.type as string) === 'parcel_locker'
+  const dest = readDestination(order.raw as Record<string, unknown> | null)
+
+  // Same resolution the dialog did when it enabled the button — repeated
+  // rather than trusted, since the client is free to send anything
+  let cityRef = dest.cityRef
+  if (!cityRef && dest.cityName) {
+    const found = await cityRefByName(dest.cityName)
+    if (!found.ok) return NextResponse.json({ error: found.error }, { status: 400 })
+    cityRef = found.ref
+  }
 
   // Insure the corrected value — what actually goes in the box
   const lines = (items ?? []) as unknown as OrderLine[]
@@ -193,18 +206,18 @@ export async function POST(
   const result = await createWaybill(settings as NpSettings, {
     recipientName: order.customer_name ?? '',
     recipientPhone: order.customer_phone ?? '',
-    cityRecipientRef: (city.external_ids as { id?: string }[] | undefined)?.[0]?.id ?? '',
-    warehouseRecipientRef: (warehouse.external_id as string | undefined) ?? null,
-    street: ((delivery.street ?? {}) as Record<string, unknown>).name as string | undefined,
-    building: delivery.building as string | undefined,
-    flat: delivery.apartment as string | undefined,
+    cityRecipientRef: cityRef ?? '',
+    warehouseRecipientRef: dest.warehouseRef,
+    street: dest.street ?? undefined,
+    building: dest.building ?? undefined,
+    flat: dest.flat,
     weightKg: Number(weight) || 1,
     seats: Number(seats) || 1,
     cost: declaredValue,
     description,
     senderAddressRef,
     dimensions,
-    toPostomat,
+    toPostomat: dest.toPostomat,
   })
 
   if (!result.ok) {

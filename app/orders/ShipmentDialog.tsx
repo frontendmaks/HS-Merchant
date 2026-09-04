@@ -31,6 +31,8 @@ interface Shipment {
     maxWeightKg: number | null; maxDeclaredCost: number | null
   } | null
   ready: { apiKey: boolean; sender: boolean; cityRef: boolean; destination: boolean }
+  /** Set when the city had to be matched by name — either which one, or why not */
+  cityNote: string | null
 }
 
 const money = (n: number) =>
@@ -505,10 +507,17 @@ export default function ShipmentDialog({ orderId, onClose, onCreated }: {
                   </div>
                   <ul className="mt-1.5 space-y-0.5">
                     {missing.map(k => (
-                      <li key={k} className="text-amber-400/90 text-xs">· {MISSING_LABEL[k]}</li>
+                      <li key={k} className="text-amber-400/90 text-xs">
+                        · {k === 'cityRef' && data.cityNote ? data.cityNote : MISSING_LABEL[k]}
+                      </li>
                     ))}
                   </ul>
                 </div>
+              )}
+              {/* The marketplace gave a name, not an id, and we matched it —
+                  worth saying which place, since names repeat across oblasts */}
+              {data.cityNote && (
+                <div className="text-zinc-500 text-xs mt-2">{data.cityNote}</div>
               )}
               {createError && (
                 <div className="text-red-400 text-xs mt-2">{createError}</div>

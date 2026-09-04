@@ -131,6 +131,62 @@ async function deliveryCityRef(settlementRef: string): Promise<string | null> {
   return found.data?.[0]?.Addresses?.find(a => a.Ref === settlementRef)?.DeliveryCity || null
 }
 
+/** Apostrophes and case differ between the marketplaces and Nova Poshta. */
+const foldPlace = (s: string) =>
+  s.trim().toLowerCase().replace(/[\u2019\u02bc\u2018`']/g, "'").replace(/\s+/g, ' ')
+
+export type CityLookup =
+  | { ok: true; ref: string; present: string }
+  | { ok: false; error: string }
+
+/**
+ * A Nova Poshta city ref for a settlement we know only by name.
+ *
+ * MauDau sends a ref only when the buyer picked a Nova Poshta branch. Inside
+ * its own courier zone it sends the name and nothing else, which is where
+ * waybill creation used to stop.
+ *
+ * A name alone is not an identity — three settlements are called Львів. What
+ * separates them here is that courier delivery needs a street, and only one of
+ * the three has streets at all, so that is the filter rather than a guess at
+ * which is biggest. If more than one survives it, say so instead of picking:
+ * the wrong choice sends the parcel to another oblast.
+ */
+export async function cityRefByName(name: string): Promise<CityLookup> {
+  const wanted = foldPlace(name)
+  if (!wanted) return { ok: false, error: 'Місто одержувача не вказано' }
+
+  const found = await call<{
+    Addresses?: {
+      Ref: string; DeliveryCity: string; MainDescription: string
+      Present: string; StreetsAvailability: boolean
+    }[]
+  }>('AddressGeneral', 'searchSettlements', { CityName: name, Limit: '50' })
+
+  const all = found.data?.[0]?.Addresses ?? []
+  // searchSettlements answers on similarity, so "Львів" also brings back
+  // Львівка and Миколаїв — only an exact name is the place that was meant
+  const exact = all.filter(a => foldPlace(a.MainDescription) === wanted)
+  const withStreets = exact.filter(a => a.StreetsAvailability && a.DeliveryCity)
+
+  if (withStreets.length === 1) {
+    return { ok: true, ref: withStreets[0].DeliveryCity, present: withStreets[0].Present }
+  }
+  if (withStreets.length === 0) {
+    return {
+      ok: false,
+      error: exact.length
+        ? `Нова Пошта не має вулиць у «${name}» — курʼєрська доставка туди неможлива`
+        : `Нова Пошта не знає населеного пункту «${name}»`,
+    }
+  }
+  return {
+    ok: false,
+    error: `Назва «${name}» неоднозначна: ${withStreets.map(a => a.Present).join('; ')}. ` +
+      'Оберіть місто вручну.',
+  }
+}
+
 /**
  * Finds a street, given whichever kind of ref the marketplace supplied.
  *
@@ -144,16 +200,39 @@ async function deliveryCityRef(settlementRef: string): Promise<string | null> {
  * exists" — so it is no use here.
  */
 async function findStreetRef(ref: string, street: string): Promise<string | null> {
-  const direct = await call<{ Ref: string }>(
-    'AddressGeneral', 'getStreet', { CityRef: ref, FindByString: street, Limit: '5' })
-  if (direct.data?.[0]?.Ref) return direct.data[0].Ref
+  const direct = await streetRefIn(ref, street)
+  if (direct) return direct
 
   const cityRef = await deliveryCityRef(ref)
   if (!cityRef) return null
 
-  const viaCity = await call<{ Ref: string }>(
-    'AddressGeneral', 'getStreet', { CityRef: cityRef, FindByString: street, Limit: '5' })
-  return viaCity.data?.[0]?.Ref ?? null
+  return await streetRefIn(cityRef, street)
+}
+
+/**
+ * One city, one street name — with the name as written and then shortened.
+ *
+ * getStreet matches from the start of its own description, so a name carrying
+ * a word Nova Poshta does not have finds nothing at all: the marketplace sends
+ * "Грабовського Павла", Nova Poshta stores "Грабовського". Dropping words from
+ * the end recovers those, but a shortened name is a weaker claim — "Володимира
+ * Великого" cut to "Володимира" would match several streets — so a trimmed
+ * query is accepted only when exactly one street answers it.
+ */
+async function streetRefIn(cityRef: string, street: string): Promise<string | null> {
+  const words = street.trim().split(/\s+/).filter(Boolean)
+
+  for (let take = words.length; take > 0; take--) {
+    const r = await call<{ Ref: string }>('AddressGeneral', 'getStreet',
+      { CityRef: cityRef, FindByString: words.slice(0, take).join(' '), Limit: '10' })
+    const hits = r.data ?? []
+    if (!hits.length) continue
+    // The name exactly as the marketplace gave it — trust the best match
+    if (take === words.length) return hits[0].Ref
+    // Shortened, and more than one street fits: refuse rather than guess
+    return hits.length === 1 ? hits[0].Ref : null
+  }
+  return null
 }
 
 /** Pins a street address to the recipient — courier delivery is refused
