@@ -7,6 +7,7 @@ import { getCurrentRole, canAccess } from '@/lib/getRole'
 import { IN_PROGRESS_STATUSES, SHIPPING_STATUSES, isInProgress, isShipping } from '@/lib/order-statuses'
 import OrdersToolbar from './OrdersToolbar'
 import OrderRow from './OrderRow'
+import WideScroll from './WideScroll'
 import { arrivalTime } from '@/lib/order-arrival'
 
 const UA_MONTHS = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень']
@@ -196,7 +197,7 @@ export default async function OrdersPage({
             {tableOrders && <span className="ml-2 text-zinc-500">({tableOrders.length})</span>}
           </h2>
         </div>
-        <div className="overflow-x-auto">
+        <WideScroll>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
@@ -251,7 +252,7 @@ export default async function OrdersPage({
               )}
             </tbody>
           </table>
-        </div>
+        </WideScroll>
       </div>
     </div>
   )

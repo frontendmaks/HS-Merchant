@@ -52,3 +52,20 @@ body {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
+
+/* The sideways bar on a wide table has to be visible without being hovered —
+   overlay scrollbars fade out, and a bar nobody can see is a table nobody can
+   scroll with a mouse. */
+.wide-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #52525b transparent;
+}
+.wide-scroll::-webkit-scrollbar { height: 12px; }
+.wide-scroll::-webkit-scrollbar-track { background: transparent; }
+.wide-scroll::-webkit-scrollbar-thumb {
+  background-color: #52525b;
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.wide-scroll::-webkit-scrollbar-thumb:hover { background-color: #71717a; }
