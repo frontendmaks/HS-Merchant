@@ -242,13 +242,26 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
       title="Натисніть, щоб побачити журнал змін"
       className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors align-top cursor-pointer"
     >
-      <td className="px-3 py-2 whitespace-nowrap text-zinc-400 text-xs">{props.order_date || '—'}</td>
+      <td className="px-3 py-2 whitespace-nowrap text-zinc-400 text-xs">
+        {props.order_date || '—'}
+        {props.customer_comment && (
+          <div className="text-amber-400 mt-0.5" title="Клієнт залишив коментар">✎ коментар</div>
+        )}
+      </td>
       <td className="px-3 py-2 whitespace-nowrap text-zinc-300 font-mono text-xs">{props.external_id}</td>
       <td className="px-3 py-2 whitespace-nowrap">{platformBadge(props.platform)}</td>
       <td className="px-3 py-2 whitespace-nowrap text-zinc-300 text-xs">{props.customer_name || '—'}</td>
       <td className="px-3 py-2 whitespace-nowrap text-zinc-400 text-xs">{props.customer_phone || '—'}</td>
       <td className="px-3 py-2 text-zinc-400 text-xs min-w-[160px] max-w-[220px] break-words">
         {props.address || '—'}
+        {/* Right under the address, because that is most often what the
+            comment corrects — an operator scanning the list has to see the
+            two together, not one of them behind a click */}
+        {props.customer_comment && (
+          <div className="text-amber-200 mt-1 whitespace-pre-wrap border-l-2 border-amber-600/60 pl-2">
+            {props.customer_comment}
+          </div>
+        )}
       </td>
       <td className="px-3 py-2 text-zinc-300 text-xs min-w-[150px] max-w-[210px] break-words">
         {props.branch || '—'}
