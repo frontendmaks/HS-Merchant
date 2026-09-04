@@ -91,6 +91,8 @@ interface OrderRowProps {
   cancel_reason: string | null
   /** What the buyer wrote when ordering — delivery notes, corrected addresses */
   customer_comment: string | null
+  /** Our own note — why it stalled, what is out of stock. Ours alone. */
+  operator_comment: string | null
   readOnly?: boolean
   canSeeJournal?: boolean
 }
@@ -102,13 +104,17 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
   const [ttn, setTtn] = useState(props.ttn || '')
   const [ttnDraft, setTtnDraft] = useState(props.ttn || '')
   const [cancelReason, setCancelReason] = useState(props.cancel_reason || '')
+  const [note, setNote] = useState(props.operator_comment || '')
+  const [noteDraft, setNoteDraft] = useState(props.operator_comment || '')
 
   useEffect(() => {
     setStatus(props.status || '')
     setTtn(props.ttn || '')
     setTtnDraft(props.ttn || '')
     setCancelReason(props.cancel_reason || '')
-  }, [props.status, props.ttn, props.cancel_reason])
+    setNote(props.operator_comment || '')
+    setNoteDraft(props.operator_comment || '')
+  }, [props.status, props.ttn, props.cancel_reason, props.operator_comment])
 
   // This row holds its own copy of status and TTN so typing feels immediate.
   // That copy goes stale the moment someone else touches the same order, so
@@ -121,10 +127,12 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
   const [statusLoading, setStatusLoading] = useState(false)
   const [ttnLoading, setTtnLoading] = useState(false)
   const [cancelLoading, setCancelLoading] = useState(false)
+  const [noteLoading, setNoteLoading] = useState(false)
 
   const [statusError, setStatusError] = useState('')
   const [ttnError, setTtnError] = useState('')
   const [cancelError, setCancelError] = useState('')
+  const [noteError, setNoteError] = useState('')
 
   // MauDau dynamic cancel reasons
   const [maudauReasons, setMaudauReasons] = useState<{ id: number; name: string }[]>([])
@@ -194,6 +202,30 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
     }
   }
 
+  async function handleNoteBlur() {
+    if (noteDraft.trim() === note.trim()) return
+    setNoteError('')
+    setNoteLoading(true)
+    try {
+      const res = await fetch(`/api/orders/${props.id}/comment`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comment: noteDraft }),
+      })
+      const data = (await res.json()) as { success: boolean; comment?: string | null; error?: string }
+      if (!data.success) throw new Error(data.error || 'Помилка збереження коментаря')
+      const saved = data.comment ?? ''
+      setNote(saved)
+      setNoteDraft(saved)
+    } catch (e) {
+      setNoteError(e instanceof Error ? e.message : String(e))
+      // Keep what was typed — losing someone's sentence to a failed request
+      // is worse than showing it unsaved
+    } finally {
+      setNoteLoading(false)
+    }
+  }
+
   async function handleCancelReasonChange(reason: string) {
     if (!reason) return
     setCancelError('')
@@ -251,6 +283,29 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
           <div className="mt-1 min-w-[180px] max-w-[240px] font-sans whitespace-pre-wrap break-words text-amber-200 border-l-2 border-amber-600/60 pl-2">
             {props.customer_comment}
           </div>
+        )}
+      </td>
+
+      {/* Our own note, right beside the number: the operator writing it is
+          looking at the order id, and the person reading the list needs it
+          before anything else on the row */}
+      <td onClick={e => e.stopPropagation()} className="px-3 py-2 align-top min-w-[170px] max-w-[220px]">
+        {readOnly ? (
+          <span className="text-zinc-400 text-xs whitespace-pre-wrap break-words">{note || '—'}</span>
+        ) : (
+          <>
+            <textarea
+              value={noteDraft}
+              rows={2}
+              disabled={noteLoading}
+              onChange={e => setNoteDraft(e.target.value)}
+              onBlur={handleNoteBlur}
+              placeholder="Нотатка…"
+              className="bg-zinc-800 text-white border border-zinc-700 rounded px-1.5 py-1 text-xs w-full resize-y disabled:opacity-50 placeholder:text-zinc-600"
+            />
+            {noteLoading && <div className="text-zinc-500 text-xs mt-0.5">Збереження...</div>}
+            {noteError && <div className="text-red-400 text-xs mt-0.5">{noteError}</div>}
+          </>
         )}
       </td>
       <td className="px-3 py-2 whitespace-nowrap">{platformBadge(props.platform)}</td>
@@ -362,6 +417,7 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
         status={status}
         ttn={ttn}
         cancelReason={cancelReason}
+        operator_comment={note}
         onClose={() => setJournalOpen(false)}
         // The waybill is created inside the modal but the row owns these fields
         onShipmentCreated={({ ttn: created, status: newStatus }) => {
@@ -399,7 +455,7 @@ function OrderDetailModal(
   const canShip = canCreateWaybill(props.status, props.ttn)
   return (
     <tr>
-      <td colSpan={13} className="p-0">
+      <td colSpan={14} className="p-0">
         <div
           className="fixed inset-0 z-50 bg-black/70 flex items-start justify-center p-4 overflow-y-auto"
           onClick={onClose}
@@ -450,6 +506,10 @@ function OrderDetailModal(
                       {props.customer_comment}
                     </div>
                   </div>
+                )}
+
+                {props.operator_comment && (
+                  <Field label="Коментар оператора" value={props.operator_comment} />
                 )}
 
                 {props.cancelReason && <Field label="Причина скасування" value={props.cancelReason} />}

@@ -116,7 +116,8 @@ export default async function OrdersPage({
     // they are worth searching too
     query = query.or(
       `customer_name.ilike.%${search}%,external_id.ilike.%${search}%,` +
-      `customer_phone.ilike.%${search}%,customer_comment.ilike.%${search}%`,
+      `customer_phone.ilike.%${search}%,customer_comment.ilike.%${search}%,` +
+      `operator_comment.ilike.%${search}%`,
     )
   }
 
@@ -201,6 +202,7 @@ export default async function OrdersPage({
               <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
                 <th className="text-left px-3 py-2 whitespace-nowrap">Дата</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Номер</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">Коментар оператора</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Платформа</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">ПІБ</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Телефон</th>
@@ -217,7 +219,7 @@ export default async function OrdersPage({
             <tbody>
               {!tableOrders?.length ? (
                 <tr>
-                  <td colSpan={13} className="text-center py-12 text-zinc-500">
+                  <td colSpan={14} className="text-center py-12 text-zinc-500">
                     Немає замовлень
                   </td>
                 </tr>
@@ -241,6 +243,7 @@ export default async function OrdersPage({
                     ttn={order.ttn}
                     cancel_reason={order.cancel_reason}
                     customer_comment={order.customer_comment}
+                    operator_comment={order.operator_comment}
                     readOnly={readOnly}
                     canSeeJournal={canSeeJournal}
                   />

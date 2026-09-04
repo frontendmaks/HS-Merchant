@@ -13,7 +13,7 @@
 
 export const ORDERS_TOPIC = 'orders-changes'
 
-export type OrderChangeKind = 'ttn' | 'status' | 'items' | 'cancel' | 'sync'
+export type OrderChangeKind = 'ttn' | 'status' | 'items' | 'cancel' | 'sync' | 'operator_comment'
 
 export async function broadcastOrderChange(
   orderId: string,
