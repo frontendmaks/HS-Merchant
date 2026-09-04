@@ -107,6 +107,9 @@ function orderToRow(order: any) {
     status_raw: order.status || null,
     ttn: order.parcels?.[0]?.delivery_tracking_number || null,
     cancel_reason: order.cancel_reason || null,
+    // What the buyer wrote when ordering — often a delivery instruction or a
+    // corrected address, so it belongs in front of the operator
+    customer_comment: (order.customer_comment ?? '').trim() || null,
     raw: order,
     updated_at: new Date().toISOString(),
   }
@@ -178,12 +181,18 @@ export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: num
     const externalIds = rows.map(r => r.external_id)
     const { data: existing } = await supabase
       .from('orders')
-      .select('id, external_id, cancel_reason, status, ttn')
+      .select('id, external_id, cancel_reason, status, ttn, customer_comment')
       .in('external_id', externalIds)
       .eq('platform', 'maudau')
 
     const known = new Set((existing ?? []).map(r => r.external_id as string))
     const freshOrders = rows.filter(r => !known.has(r.external_id))
+
+    const existingComments = new Map(
+      (existing ?? [])
+        .filter(r => r.customer_comment)
+        .map(r => [r.external_id as string, r.customer_comment as string])
+    )
 
     const existingReasons = new Map(
       (existing ?? [])
@@ -194,6 +203,8 @@ export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: num
     const rowsToUpsert = rows.map(r => ({
       ...r,
       cancel_reason: r.cancel_reason ?? existingReasons.get(r.external_id) ?? null,
+      // A pass that brings no comment must not erase one we already have
+      customer_comment: r.customer_comment ?? existingComments.get(r.external_id) ?? null,
     }))
 
     const { error } = await supabase

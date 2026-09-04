@@ -112,7 +112,12 @@ export default async function OrdersPage({
     query = query.eq('status', statusFilter)
   }
   if (search) {
-    query = query.or(`customer_name.ilike.%${search}%,external_id.ilike.%${search}%,customer_phone.ilike.%${search}%`)
+    // Comments carry addresses and phone numbers the other fields do not, so
+    // they are worth searching too
+    query = query.or(
+      `customer_name.ilike.%${search}%,external_id.ilike.%${search}%,` +
+      `customer_phone.ilike.%${search}%,customer_comment.ilike.%${search}%`,
+    )
   }
 
   const { data: tableOrders } = await query
@@ -235,6 +240,7 @@ export default async function OrdersPage({
                     status={order.status}
                     ttn={order.ttn}
                     cancel_reason={order.cancel_reason}
+                    customer_comment={order.customer_comment}
                     readOnly={readOnly}
                     canSeeJournal={canSeeJournal}
                   />

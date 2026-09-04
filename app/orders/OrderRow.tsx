@@ -89,6 +89,8 @@ interface OrderRowProps {
   status: string | null
   ttn: string | null
   cancel_reason: string | null
+  /** What the buyer wrote when ordering — delivery notes, corrected addresses */
+  customer_comment: string | null
   readOnly?: boolean
   canSeeJournal?: boolean
 }
@@ -406,6 +408,11 @@ function OrderDetailModal(
                     {props.order_date}
                     {props.arrival && <span className="text-zinc-500"> о {props.arrival}</span>}
                   </span>
+                  {props.customer_comment && (
+                    <span className="text-amber-400 text-xs" title="Клієнт залишив коментар">
+                      ✎ коментар
+                    </span>
+                  )}
                 </div>
                 <h3 className="text-white font-semibold mt-1.5">{props.customer_name || '—'}</h3>
               </div>
@@ -423,6 +430,19 @@ function OrderDetailModal(
                 <Field label="Телефон" value={props.customer_phone} />
                 <Field label="Відділення" value={props.branch} />
                 <Field label="Адреса" value={props.address} />
+
+                {/* Placed under the address on purpose: a comment often
+                    corrects or qualifies exactly that, and reading one after
+                    the other is how the operator catches it */}
+                {props.customer_comment && (
+                  <div>
+                    <div className="text-amber-400/90 text-xs">Коментар клієнта</div>
+                    <div className="text-zinc-100 text-sm mt-1 whitespace-pre-wrap bg-amber-950/20 border border-amber-900/40 rounded-lg px-3 py-2">
+                      {props.customer_comment}
+                    </div>
+                  </div>
+                )}
+
                 {props.cancelReason && <Field label="Причина скасування" value={props.cancelReason} />}
 
               </div>

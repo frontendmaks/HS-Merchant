@@ -148,6 +148,8 @@ function orderToRow(order: any) {
     status_raw: String(order.status),
     ttn: order.ttn || null,
     cancel_reason: isCanceled ? (ROZETKA_CANCEL_REASON_MAP[statusNum] ?? 'Скасовано') : null,
+    // The buyer's own note. seller_comment is ours about them, not theirs
+    customer_comment: (order.comment ?? '').trim() || null,
     raw: order,
     updated_at: new Date().toISOString(),
   }
@@ -235,12 +237,18 @@ export async function syncRozetka(mode: SyncMode = 'full'): Promise<{ synced: nu
     const externalIds = rows.map(r => r.external_id)
     const { data: existing } = await supabase
       .from('orders')
-      .select('id, external_id, cancel_reason, status')
+      .select('id, external_id, cancel_reason, status, customer_comment')
       .in('external_id', externalIds)
       .eq('platform', 'rozetka')
 
     const known = new Set((existing ?? []).map(r => r.external_id as string))
     const freshOrders = rows.filter(r => !known.has(r.external_id))
+
+    const existingComments = new Map(
+      (existing ?? [])
+        .filter(r => r.customer_comment)
+        .map(r => [r.external_id as string, r.customer_comment as string])
+    )
 
     const existingReasons = new Map(
       (existing ?? [])
@@ -251,6 +259,8 @@ export async function syncRozetka(mode: SyncMode = 'full'): Promise<{ synced: nu
     const rowsToUpsert = rows.map(r => ({
       ...r,
       cancel_reason: r.cancel_reason ?? existingReasons.get(r.external_id) ?? null,
+      // A pass that brings no comment must not erase one we already have
+      customer_comment: r.customer_comment ?? existingComments.get(r.external_id) ?? null,
     }))
 
     const { error } = await supabase
