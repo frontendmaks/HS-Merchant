@@ -28,9 +28,10 @@ function sync() {
 }
 
 function open(userId: string) {
-  client = createClient()
+  const c: SupabaseClient = createClient()
+  client = c
   channelUserId = userId
-  const ch = client.channel(PRESENCE_CHANNEL, {
+  const ch = c.channel(PRESENCE_CHANNEL, {
     config: { presence: { key: userId } },
   })
   channel = ch

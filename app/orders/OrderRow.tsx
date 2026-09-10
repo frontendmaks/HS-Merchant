@@ -6,7 +6,6 @@ import OrderItemsEditor from './OrderItemsEditor'
 import ShipmentDialog from './ShipmentDialog'
 import { useRouter } from 'next/navigation'
 import { canCreateWaybill, canEditItems, isHandedOver } from '@/lib/order-statuses'
-import { useOrderUpdates } from '@/lib/use-order-updates'
 
 const MAUDAU_STATUSES = ['Нове', 'Прийнято', 'Узгоджено', 'На доставці', 'Прибуло', 'Доставлено', 'Скасовано']
 const ROZETKA_STATUSES = ['Нове', 'Опрацьовується', 'Комплектується', 'Передано в доставку', 'Доставляється', 'Чекає в пункті', 'Доставлено', 'Скасовано']
@@ -116,12 +115,11 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
     setNoteDraft(props.operator_comment || '')
   }, [props.status, props.ttn, props.cancel_reason, props.operator_comment])
 
-  // This row holds its own copy of status and TTN so typing feels immediate.
-  // That copy goes stale the moment someone else touches the same order, so
-  // pull the server's view back when it does.
-  useOrderUpdates(change => {
-    if (change.orderId === props.id) router.refresh()
-  })
+  // A row holds its own copy of status and TTN so typing feels immediate, and
+  // that copy goes stale when someone else touches the same order. Refreshing
+  // is the toolbar's job, once for the page: router.refresh() re-renders every
+  // row anyway, so a listener per row bought nothing and cost one subscription
+  // per order on screen.
 
   const [journalOpen, setJournalOpen] = useState(false)
   const [statusLoading, setStatusLoading] = useState(false)
