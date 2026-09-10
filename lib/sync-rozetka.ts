@@ -235,11 +235,20 @@ export async function syncRozetka(mode: SyncMode = 'full'): Promise<{ synced: nu
     // reason from the numeric status; for non-canceled orders we keep whatever
     // was set by hand.
     const externalIds = rows.map(r => r.external_id)
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('orders')
       .select('id, external_id, cancel_reason, status, customer_comment')
       .in('external_id', externalIds)
       .eq('platform', 'rozetka')
+
+    // A failed read must not pass for "we know of none of these". It would
+    // announce every order again as new, and — worse — leave the preserved
+    // fields below empty, so the upsert would wipe the cancel reasons, the
+    // customer comments and our own waybill numbers. During the outage this
+    // morning that is exactly what happened, over and over.
+    if (existingError) {
+      throw new Error(`Не вдалося прочитати наявні замовлення: ${existingError.message}`)
+    }
 
     const known = new Set((existing ?? []).map(r => r.external_id as string))
     const freshOrders = rows.filter(r => !known.has(r.external_id))

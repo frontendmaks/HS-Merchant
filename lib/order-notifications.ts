@@ -7,10 +7,6 @@ export const PLATFORM_LABELS: Record<string, string> = {
   rozetka: 'Rozetka',
 }
 
-/** Above this, one summary replaces the per-order notifications. Protects the
- *  team from a wall of banners after downtime or a first-time backfill. */
-const MAX_INDIVIDUAL = 15
-
 interface NewOrder {
   external_id: string
   customer_name?: string | null
@@ -48,29 +44,21 @@ export async function notifyNewOrders(
     const label = PLATFORM_LABELS[platform] ?? platform
     const rows: Record<string, unknown>[] = []
 
-    if (orders.length > MAX_INDIVIDUAL) {
+    // One notice per order, always. A summary saying "51 new orders" names
+    // none of them, so nobody can tell which are already handled — and the
+    // wall of banners it was meant to prevent came from announcing the same
+    // orders over and over, which is fixed where it was caused.
+    for (const order of orders) {
+      const parts = [order.external_id, order.customer_name?.trim(), money(order.total)]
+        .filter(Boolean)
       for (const user_id of users) {
         rows.push({
           user_id,
           type: 'order_new',
-          title: `${orders.length} нових замовлень · ${label}`,
-          body: orders.slice(0, 5).map(o => o.external_id).join(', ') + '…',
+          title: `Нове замовлення · ${label}`,
+          body: parts.join(' · '),
           link: '/orders',
         })
-      }
-    } else {
-      for (const order of orders) {
-        const parts = [order.external_id, order.customer_name?.trim(), money(order.total)]
-          .filter(Boolean)
-        for (const user_id of users) {
-          rows.push({
-            user_id,
-            type: 'order_new',
-            title: `Нове замовлення · ${label}`,
-            body: parts.join(' · '),
-            link: '/orders',
-          })
-        }
       }
     }
 
