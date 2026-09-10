@@ -8,10 +8,14 @@ export * from '@/lib/roles'
 export async function getCurrentRole(): Promise<UserRole> {
   try {
     const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return null
+    // Read from the signed token rather than asking the Auth service — every
+    // page render went through here, and the round trip bought nothing the
+    // signature does not already prove
+    const { data: claims } = await supabase.auth.getClaims()
+    const userId = claims?.claims?.sub as string | undefined
+    if (!userId) return null
     const service = createServiceClient()
-    const { data } = await service.from('profiles').select('role').eq('id', user.id).single()
+    const { data } = await service.from('profiles').select('role').eq('id', userId).single()
     return (data?.role as UserRole) ?? 'viewer'
   } catch {
     return null

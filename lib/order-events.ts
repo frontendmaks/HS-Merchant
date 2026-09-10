@@ -29,15 +29,19 @@ export async function currentActor(): Promise<{ id: string; name: string } | nul
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
     )
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return null
+    // Same as getCurrentRole: the token is signed, so verifying it here beats
+    // a round trip to Auth on every write
+    const { data: claims } = await supabase.auth.getClaims()
+    const userId = claims?.claims?.sub as string | undefined
+    if (!userId) return null
 
     const service = createServiceClient()
     const { data } = await service
-      .from('profiles').select('full_name, email').eq('id', user.id).single()
+      .from('profiles').select('full_name, email').eq('id', userId).single()
+    const email = claims?.claims?.email as string | undefined
     return {
-      id: user.id,
-      name: data?.full_name?.trim() || data?.email || user.email || 'Користувач',
+      id: userId,
+      name: data?.full_name?.trim() || data?.email || email || 'Користувач',
     }
   } catch {
     return null
