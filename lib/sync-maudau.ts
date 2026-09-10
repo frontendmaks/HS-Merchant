@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt } from '@/lib/maudau'
 import { notifyNewOrders } from '@/lib/order-notifications'
+import { changedRows } from '@/lib/sync-hash'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { hasWaybill } from '@/lib/order-statuses'
 import { patchMaudauStatus } from '@/lib/maudau'
@@ -181,7 +182,7 @@ export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: num
     const externalIds = rows.map(r => r.external_id)
     const { data: existing, error: existingError } = await supabase
       .from('orders')
-      .select('id, external_id, cancel_reason, status, ttn, customer_comment')
+      .select('id, external_id, cancel_reason, status, ttn, customer_comment, sync_hash')
       .in('external_id', externalIds)
       .eq('platform', 'maudau')
 
@@ -225,10 +226,21 @@ export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: num
       ttn: r.ttn ?? existingTtns.get(r.external_id) ?? null,
     }))
 
-    const { error } = await supabase
-      .from('orders')
-      .upsert(rowsToUpsert, { onConflict: 'external_id,platform' })
-    if (error) throw error
+    const storedHashes = new Map(
+      (existing ?? [])
+        .filter(r => r.sync_hash)
+        .map(r => [r.external_id as string, r.sync_hash as string])
+    )
+    // Both marketplaces resend their whole recent window every pass; only the
+    // rows that actually differ are worth a write
+    const toWrite = changedRows(rowsToUpsert, storedHashes)
+
+    if (toWrite.length) {
+      const { error } = await supabase
+        .from('orders')
+        .upsert(toWrite, { onConflict: 'external_id,platform' })
+      if (error) throw error
+    }
 
     // A status that moved on the marketplace side belongs in the journal too,
     // with no actor — nobody here touched it.
