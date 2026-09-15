@@ -357,13 +357,13 @@ function Cancellations({ c }: { c: CancelStats }) {
 
   const known = c.total - c.bySide.unknown.orders
   const max = Math.max(1, ...c.reasons.map(r => r.orders))
-  // Only the reason-less bucket can land on two sides at once, and then the
-  // label alone would appear twice with no way to tell the rows apart
-  const repeated = new Set(
-    c.reasons
-      .map(r => r.reason)
-      .filter((label, i, all) => all.indexOf(label) !== i),
-  )
+  // Reasons live under the side that caused them. The same wording can belong
+  // to two sides — "Причину не вказано" is ours when the journal names an
+  // operator and unknown when nothing does — and a flat list had to repeat it
+  // with a suffix to stay truthful. A heading says it once instead.
+  const groups = sides
+    .map(side => ({ side, rows: c.reasons.filter(r => r.side === side) }))
+    .filter(g => g.rows.length > 0)
 
   return (
     <Panel
@@ -416,29 +416,42 @@ function Cancellations({ c }: { c: CancelStats }) {
         )}
       </div>
 
-      <div className="divide-y divide-zinc-800/60">
-        {c.reasons.map(r => (
-          <div key={`${r.reason}|${r.side}`} className="px-5 py-2.5">
-            <div className="flex items-baseline justify-between gap-3 mb-1">
-              <span className="text-zinc-200 text-xs truncate" title={r.reason}>
-                {r.reason}
-                {repeated.has(r.reason) && (
-                  <span className="text-zinc-500"> · {CANCEL_SIDE_LABEL[r.side]}</span>
-                )}
-              </span>
-              <span className="text-zinc-400 text-xs whitespace-nowrap">
-                {num(r.orders)} · {moneyShort(r.lost)}
-              </span>
-            </div>
-            <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full ${fill[r.side]}`}
-                style={{ width: `${(r.orders / max) * 100}%` }}
-              />
-            </div>
+      {groups.map(g => (
+        <div key={g.side}>
+          <div className="px-5 py-2 bg-zinc-800/30 border-b border-zinc-800/60
+                          flex items-baseline justify-between gap-3">
+            <span className={`text-xs font-medium ${text[g.side]}`}>
+              {CANCEL_SIDE_LABEL[g.side]}
+            </span>
+            <span className="text-zinc-500 text-xs whitespace-nowrap">
+              {num(c.bySide[g.side].orders)} · {moneyShort(c.bySide[g.side].lost)}
+            </span>
           </div>
-        ))}
-      </div>
+          <div className="divide-y divide-zinc-800/60">
+            {g.rows.map(r => (
+              <div key={r.reason} className="px-5 py-2.5">
+                <div className="flex items-baseline justify-between gap-3 mb-1">
+                  {/* MauDau prefixes its reasons by category. Under the
+                      "Гість" heading that prefix just says it twice; the
+                      others — Оплата, Наявність товару — still carry meaning */}
+                  <span className="text-zinc-200 text-xs truncate" title={r.reason}>
+                    {r.side === 'guest' ? r.reason.replace(/^Гість\s*:\s*/i, '') : r.reason}
+                  </span>
+                  <span className="text-zinc-400 text-xs whitespace-nowrap">
+                    {num(r.orders)} · {moneyShort(r.lost)}
+                  </span>
+                </div>
+                <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${fill[r.side]}`}
+                    style={{ width: `${(r.orders / max) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </Panel>
   )
 }
