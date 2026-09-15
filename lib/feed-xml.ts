@@ -67,8 +67,13 @@ export interface OfferStock {
 export function offerStock(
   productStatus: string | null | undefined,
   stock: number | null | undefined,
-  opts: { zeroStockMeansUnlimited?: boolean } = {},
+  opts: { zeroStockMeansUnlimited?: boolean; withdrawn?: boolean } = {},
 ): OfferStock {
+  // Taken out of sale on purpose, by an approved removal request. Same
+  // treatment as a product that vanished from the site, and for the same
+  // reason: the card is worth more alive and empty than deleted.
+  if (opts.withdrawn) return { available: false, quantity: 0 }
+
   // Gone from the site: kept in the feed, plainly out of stock
   if (productStatus !== 'active') return { available: false, quantity: 0 }
 

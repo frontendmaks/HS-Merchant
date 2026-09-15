@@ -63,6 +63,9 @@ export const PAGE_ROLES = {
   schedule:  ['super_admin', 'admin', 'manager', 'operator'],
   /** The change journal exposes who did what — management only */
   orderJournal: ['super_admin', 'admin', 'manager'],
+  /** Anyone who works with the catalogue may ask for a product to be taken
+   *  out of sale; who may decide is a separate question — see canDecideRemoval */
+  productRemovals: ['super_admin', 'admin', 'manager', 'viewer'],
 } as const
 
 export const canAccess = (

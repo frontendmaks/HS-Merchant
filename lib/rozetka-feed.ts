@@ -96,7 +96,7 @@ export function generateRozetkaYML(feed: any, ctx: RozetkaFeedContext): {
     const raw = Math.max(0, Math.floor(Number(fp.custom_stock ?? p.stock ?? 0)))
     // Rozetka counts stock, so zero means zero here — and a product retired
     // from the site stays on the feed as an offer nobody can order
-    const { available, quantity } = offerStock(p.status, raw)
+    const { available, quantity } = offerStock(p.status, raw, { withdrawn: !!p.withdrawn_at })
     const stock = quantity ?? 0
 
     // Rozetka demands at least one picture, so an offer without one would be

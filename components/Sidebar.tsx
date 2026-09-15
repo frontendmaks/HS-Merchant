@@ -29,6 +29,13 @@ const groups = [
       { href: '/operators/schedule', label: 'Графік роботи', roles: PAGE_ROLES.schedule },
     ],
   },
+  {
+    label: 'Каталог',
+    icon: '◈',
+    items: [
+      { href: '/products/removals', label: 'Зняття з продажу', roles: PAGE_ROLES.productRemovals },
+    ],
+  },
 ]
 
 interface Profile {
