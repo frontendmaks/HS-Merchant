@@ -15,7 +15,15 @@ const nav = [
   { href: '/analytics', label: 'Аналітика',     icon: '◑', roles: PAGE_ROLES.analytics },
   { href: '/syncs',    label: 'Синхронізації',  icon: '↻', roles: PAGE_ROLES.syncs },
   { href: '/orders',   label: 'Замовлення',     icon: '◷', roles: PAGE_ROLES.orders },
-  { href: '/requests', label: 'Запити',         icon: '✉', roles: PAGE_ROLES.requests },
+  {
+    href: '/requests', label: 'Запити', icon: '✉', roles: PAGE_ROLES.requests,
+    // Indented under Запити rather than made a collapsible section: the badge
+    // on Запити is the reason anyone looks at this part of the menu, and a
+    // group header cannot carry it.
+    children: [
+      { href: '/products/removals', label: 'Зняття з продажу', roles: PAGE_ROLES.productRemovals },
+    ],
+  },
   { href: '/users',    label: 'Користувачі',    icon: '◉', roles: PAGE_ROLES.users },
 ]
 
@@ -27,13 +35,6 @@ const groups = [
     icon: '☰',
     items: [
       { href: '/operators/schedule', label: 'Графік роботи', roles: PAGE_ROLES.schedule },
-    ],
-  },
-  {
-    label: 'Каталог',
-    icon: '◈',
-    items: [
-      { href: '/products/removals', label: 'Зняття з продажу', roles: PAGE_ROLES.productRemovals },
     ],
   },
 ]
@@ -253,7 +254,7 @@ export default function Sidebar() {
 
       {/* Nav — scrolls on short screens (e.g. phone in landscape) */}
       <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1">
-        {visibleNav.map(({ href, label, icon }) => {
+        {visibleNav.map(({ href, label, icon, children }) => {
           const active = path === href
           const badges = href === '/requests'
             ? [
@@ -266,9 +267,12 @@ export default function Sidebar() {
                 { count: counts?.orders.processing ?? 0, tone: 'red'  as const, title: 'Опрацьовуються' },
               ]
             : []
+          const subPages = (children ?? [])
+            .filter(c => !role || (c.roles as readonly string[]).includes(role))
+
           return (
+            <div key={href}>
             <Link
-              key={href}
               href={href}
               // Closes the drawer on tap, so it does not stay over the page it opened
               onClick={() => setOpen(false)}
@@ -288,6 +292,26 @@ export default function Sidebar() {
                 </span>
               )}
             </Link>
+
+            {subPages.length > 0 && (
+              <div className="mt-1 ml-4 pl-3 border-l border-zinc-800 space-y-1">
+                {subPages.map(sub => (
+                  <Link
+                    key={sub.href}
+                    href={sub.href}
+                    onClick={() => setOpen(false)}
+                    className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
+                      path === sub.href || path.startsWith(sub.href + '/')
+                        ? 'bg-red-600 text-white'
+                        : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                    }`}
+                  >
+                    {sub.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+            </div>
           )
         })}
 
