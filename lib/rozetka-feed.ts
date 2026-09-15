@@ -1,4 +1,6 @@
-import { calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars } from '@/lib/feed-xml'
+import {
+  calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock,
+} from '@/lib/feed-xml'
 
 // --- Rozetka ---------------------------------------------------------------
 //
@@ -91,8 +93,11 @@ export function generateRozetkaYML(feed: any, ctx: RozetkaFeedContext): {
     if (!name) { errors.push(`Немає назви: ${offerId}`); continue }
     if (!price || price <= 0) { errors.push(`Немає ціни: ${name}`); continue }
 
-    const stock = Math.max(0, Math.floor(Number(fp.custom_stock ?? p.stock ?? 0)))
-    const available = p.status === 'active' && stock > 0
+    const raw = Math.max(0, Math.floor(Number(fp.custom_stock ?? p.stock ?? 0)))
+    // Rozetka counts stock, so zero means zero here — and a product retired
+    // from the site stays on the feed as an offer nobody can order
+    const { available, quantity } = offerStock(p.status, raw)
+    const stock = quantity ?? 0
 
     // Rozetka demands at least one picture, so an offer without one would be
     // rejected anyway — better to leave it out and say why.

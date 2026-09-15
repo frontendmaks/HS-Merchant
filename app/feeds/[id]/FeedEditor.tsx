@@ -15,6 +15,8 @@ type Product = {
   stock: number | null
   images: string[]
   attributes: Record<string, string> | null
+  /** 'inactive' — gone from the site, but still an offer on the marketplace */
+  status?: string | null
 }
 
 type FeedProduct = {
@@ -1594,6 +1596,18 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
                           <span className="line-clamp-1">
                             {p.name}{minWeightLabel && <span className="text-zinc-400">, {minWeightLabel}</span>}
                           </span>
+                          {/* Gone from the site but still an offer: the card on
+                              the marketplace is kept alive, marked out of stock,
+                              so it comes back intact if the product does */}
+                          {p.status === 'inactive' && (
+                            <span
+                              className="text-[9px] px-1.5 py-px rounded leading-tight shrink-0
+                                         border border-amber-800/60 bg-amber-950/40 text-amber-400"
+                              title="Товару немає на сайті — у фіді лишається як «немає в наявності»"
+                            >
+                              немає на сайті
+                            </span>
+                          )}
                         </div>
                         <div className="text-[11px] text-zinc-500 mt-0.5 truncate">{p.category_name}</div>
                         {isActive && issues.length > 0 && (

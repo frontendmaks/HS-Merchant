@@ -2,7 +2,9 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { sanitizeSku } from '@/lib/transliterate'
 import { NextRequest, NextResponse } from 'next/server'
-import { calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars } from '@/lib/feed-xml'
+import {
+  calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock,
+} from '@/lib/feed-xml'
 import {
   generateRozetkaYML, type RozetkaFeedContext, type RzCategoryMeta,
 } from '@/lib/rozetka-feed'
@@ -153,7 +155,7 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       const oldPriceLine = oldPriceRaw && oldPriceRaw > price ? `\n      <oldprice>${oldPriceRaw}</oldprice>` : ''
 
       return `
-    <offer id="${p.id}" available="${p.status === 'active'}">
+    <offer id="${p.id}" available="${offerStock(p.status, p.stock, { zeroStockMeansUnlimited: true }).available}">
       <name>${escapeXml(name)}</name>
       <price>${price}</price>${oldPriceLine}
       <currencyId>${p.currency}</currencyId>
@@ -326,10 +328,14 @@ function generateMaudauYML(
 
       const offerId = sanitizeSku(p.sku || String(p.external_id || p.id))
 
-      // MauDau treats fractional quantity as 0 → use integer ceiling
-      // Active products with stock=0 treated as unlimited (no quantity tag) since WC may have tracking disabled
-      const quantityInt = (stock != null && stock > 0) ? Math.ceil(stock) : null
-      const quantityLine = quantityInt != null ? `\n      <quantity>${quantityInt}</quantity>` : ''
+      // MauDau treats fractional quantity as 0 → integer ceiling. A product
+      // still on the site with stock 0 counts as unlimited, since WooCommerce
+      // reports 0 for anything whose stock it does not track; one retired from
+      // the site is a flat zero.
+      const { available, quantity } = offerStock(p.status, stock, {
+        zeroStockMeansUnlimited: true,
+      })
+      const quantityLine = quantity != null ? `\n      <quantity>${quantity}</quantity>` : ''
 
       // Sale price: p.price = current (discounted), p.price_old = original price before discount
       // Only include if price_old > price (genuine sale) and no manual marketplace price override
@@ -338,7 +344,7 @@ function generateMaudauYML(
         : null
       const oldPriceLine = oldPriceM && oldPriceM > unitPrice ? `\n      <price_old>${oldPriceM}</price_old>` : ''
 
-      return `    <offer id="${offerId}" available="true">
+      return `    <offer id="${offerId}" available="${available}">
       <name_ua>${escapeXml(nameUa.slice(0, 255))}</name_ua>
       <name_ru>${escapeXml(nameRu.slice(0, 255))}</name_ru>
       <description_ua>${descToXml(descUa)}</description_ua>
