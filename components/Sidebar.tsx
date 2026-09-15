@@ -5,6 +5,7 @@ import { createBrowserClient } from '@supabase/ssr'
 import { useEffect, useState } from 'react'
 import { PAGE_ROLES, ROLE_LABELS } from '@/lib/roles'
 import { usePresence } from '@/lib/presence'
+import { useTheme } from '@/lib/use-theme'
 import NotificationBell from '@/components/NotificationBell'
 
 // Access per nav item comes from lib/roles.ts, shared with the page guards
@@ -64,6 +65,38 @@ function NavBadge({ count, tone, title }: { count: number; tone: 'grey' | 'red';
     >
       {count > 99 ? '99+' : count}
     </span>
+  )
+}
+
+/** Dark or light, remembered in this browser. Two explicit choices rather
+ *  than one toggle: a switch makes you read its icon to learn what it will
+ *  do, where a pair shows which one you are in. */
+function ThemeSwitch() {
+  const [theme, setTheme] = useTheme()
+  const options: { key: 'dark' | 'light'; label: string; icon: string }[] = [
+    { key: 'dark',  label: 'Темна',  icon: '◐' },
+    { key: 'light', label: 'Світла', icon: '◑' },
+  ]
+  return (
+    <div className="flex gap-1 p-1 rounded-lg bg-zinc-800/50">
+      {options.map(o => (
+        <button
+          key={o.key}
+          type="button"
+          onClick={() => setTheme(o.key)}
+          aria-pressed={theme === o.key}
+          className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md
+                      text-xs transition-colors ${
+            theme === o.key
+              ? 'bg-zinc-700 text-white'
+              : 'text-zinc-400 hover:text-white'
+          }`}
+        >
+          <span>{o.icon}</span>
+          {o.label}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -348,6 +381,8 @@ export default function Sidebar() {
             </div>
           </div>
         )}
+<ThemeSwitch />
+
         <button
           onClick={handleSignOut}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
@@ -355,7 +390,7 @@ export default function Sidebar() {
           <span>⎋</span>
           Вийти
         </button>
-        <div className="px-3 text-zinc-700 text-xs">Галицька Свіжина © 2026</div>
+        <div className="px-3 text-zinc-600 text-xs">Галицька Свіжина © 2026</div>
       </div>
       </aside>
     </>

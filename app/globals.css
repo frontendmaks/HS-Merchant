@@ -9,6 +9,81 @@
   color-scheme: dark;
 }
 
+/*
+ * Light theme.
+ *
+ * The whole panel is written in the zinc scale — dark surfaces low in the
+ * scale, pale text high in it. Rather than rewrite a thousand class names,
+ * the scale itself is redefined here: what was near-black becomes near-white
+ * and what was near-white becomes near-black, so every existing class keeps
+ * meaning "the darkest surface" or "the strongest text" and simply resolves
+ * the other way round.
+ *
+ * Accents need their own pass. A colour that reads on black does not read on
+ * white: text at the 300–400 steps is too pale, and the 900–950 steps used as
+ * tinted badge backgrounds are far too dark. Both are moved to the step that
+ * carries the same weight against a light ground, which is what keeps the
+ * theme legible rather than merely inverted.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* Surfaces, palest first — page, panel, border, control */
+  --color-zinc-950: #f4f4f5;
+  --color-zinc-900: #ffffff;
+  --color-zinc-800: #e4e4e7;
+  /* Pulls double duty — input borders and the faintest placeholder text
+     ("—", "без артикулу"). A pure surface tone would make that text vanish
+     on white, so it sits where it is still readable and still reads as a
+     border. */
+  --color-zinc-700: #a1a1aa;
+
+  /* Text, faintest first */
+  --color-zinc-600: #71717a;
+  --color-zinc-500: #52525b;
+  --color-zinc-400: #3f3f46;
+  --color-zinc-300: #27272a;
+  --color-zinc-200: #18181b;
+  --color-zinc-100: #09090b;
+  --color-zinc-50:  #000000;
+
+  /* text-white is how the panel says "the strongest text there is" */
+  --color-white: #09090b;
+
+  /* Accent text: the pale steps move down to where they bite on white */
+  --color-red-300:     #b91c1c;
+  --color-red-400:     #dc2626;
+  --color-amber-300:   #b45309;
+  --color-amber-400:   #d97706;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #059669;
+  --color-purple-300:  #6b21a8;
+  --color-purple-400:  #7e22ce;
+  --color-blue-400:    #2563eb;
+  --color-cyan-400:    #0891b2;
+  --color-orange-400:  #ea580c;
+  --color-pink-300:    #be185d;
+
+  /* Tinted badge grounds: the darkest steps become tints.
+     The 50 step is too faint to survive the opacity these are used at —
+     most are written bg-amber-950/60 — so each lands on its 100 step and
+     stays a visible colour rather than a suggestion of one. */
+  --color-red-950:     #fee2e2;
+  --color-red-900:     #fecaca;
+  --color-red-800:     #fca5a5;
+  --color-amber-950:   #fef3c7;
+  --color-amber-900:   #fde68a;
+  --color-amber-800:   #fcd34d;
+  --color-emerald-950: #d1fae5;
+  --color-emerald-900: #a7f3d0;
+  --color-emerald-800: #6ee7b7;
+  --color-purple-950:  #f3e8ff;
+  --color-purple-900:  #e9d5ff;
+  --color-blue-950:    #dbeafe;
+  --color-orange-950:  #ffedd5;
+  --color-pink-900:    #fbcfe8;
+}
+
 html {
   /* Keeps long words and URLs from forcing the page sideways on a phone. */
   overflow-wrap: break-word;
@@ -17,10 +92,17 @@ html {
 body {
   background: #09090b; /* zinc-950 */
   color: #ededed;
+  /* Painted by the theme below; these two stay as the dark default so a
+     document with no theme attribute still renders the way it always did. */
   /* The Geist variable is set on <body> by next/font in app/layout.tsx. */
   font-family: var(--font-geist), ui-sans-serif, system-ui, -apple-system, sans-serif;
   /* A stray wide child should scroll inside its own box, never pan the page. */
   overflow-x: hidden;
+}
+
+:root[data-theme='light'] body {
+  background: #f4f4f5;
+  color: #09090b;
 }
 
 /* Slim scrollbars: the dashboard nests scroll areas, and the default chrome
@@ -69,3 +151,19 @@ body {
   background-clip: content-box;
 }
 .wide-scroll::-webkit-scrollbar-thumb:hover { background-color: #71717a; }
+
+
+/* Scrollbars are painted with literal greys, so they need their own flip —
+   a dark thumb on a dark track is the point, and on white it is invisible. */
+:root[data-theme='light'] * {
+  scrollbar-color: #a1a1aa transparent;
+}
+:root[data-theme='light'] *::-webkit-scrollbar-thumb {
+  background-color: #a1a1aa;
+}
+:root[data-theme='light'] *::-webkit-scrollbar-thumb:hover {
+  background-color: #71717a;
+}
+:root[data-theme='light'] .wide-scroll {
+  scrollbar-color: #a1a1aa transparent;
+}
