@@ -16,8 +16,10 @@ export interface RequestCategory {
 export const REQUEST_CATEGORIES: RequestCategory[] = [
   {
     key: 'products', label: 'Товари', icon: '◈',
+    // Taking a product out of sale has its own flow — Запити → Зняття з
+    // продажу — because approving it changes what the feeds serve. A subject
+    // here would look like the same thing and do nothing.
     subjects: [
-      'Видалити товар (виведено з асортименту)',
       'Додати новий товар',
       'Оновити ціну товару',
       'Оновити залишки',
