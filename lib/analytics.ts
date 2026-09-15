@@ -811,8 +811,13 @@ export function cancelStats(
     bySide[side].orders++
     bySide[side].lost += lost
 
-    const key = reason || 'Причину не вказано'
-    const row = byReason.get(key) ?? { reason: key, side, orders: 0, lost: 0 }
+    // Keyed by side as well as text: orders with no reason at all split
+    // between the ones the journal pins on us and the ones nothing explains,
+    // and a single row for both would show a count that contradicts the
+    // summary above it — and paint it whichever colour came first
+    const label = reason || 'Причину не вказано'
+    const key = `${label}|${side}`
+    const row = byReason.get(key) ?? { reason: label, side, orders: 0, lost: 0 }
     row.orders++
     row.lost += lost
     byReason.set(key, row)

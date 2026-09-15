@@ -334,7 +334,7 @@ function CustomersTable({ rows }: { rows: CustomerStat[] }) {
 /** Who ended the order, and what it cost. */
 function Cancellations({ c }: { c: CancelStats }) {
   const sides: CancelSide[] = ['guest', 'us', 'unknown']
-  const tone: Record<CancelSide, string> = {
+  const fill: Record<CancelSide, string> = {
     guest: 'bg-amber-500/70',
     us: 'bg-red-600/70',
     unknown: 'bg-zinc-600/70',
@@ -348,77 +348,93 @@ function Cancellations({ c }: { c: CancelStats }) {
   if (!c.total) {
     return (
       <Panel title="Скасування" subtitle="Хто скасував і чому">
-        <div className="text-zinc-500 text-sm">За цей період скасувань немає</div>
+        <div className="px-5 py-10 text-center text-zinc-600 text-sm">
+          За цей період скасувань немає
+        </div>
       </Panel>
     )
   }
 
   const known = c.total - c.bySide.unknown.orders
-  const maxReason = Math.max(1, ...c.reasons.map(r => r.orders))
+  const max = Math.max(1, ...c.reasons.map(r => r.orders))
+  // Only the reason-less bucket can land on two sides at once, and then the
+  // label alone would appear twice with no way to tell the rows apart
+  const repeated = new Set(
+    c.reasons
+      .map(r => r.reason)
+      .filter((label, i, all) => all.indexOf(label) !== i),
+  )
 
   return (
     <Panel
       title="Скасування"
       subtitle={`${num(c.total)} ${orderWord(c.total)} · ${moneyShort(c.lost)} не отримано`}
     >
-      {/* One bar: the split reads faster than three numbers side by side */}
-      <div className="flex h-7 rounded overflow-hidden mb-3">
-        {sides.map(side => {
-          const share = c.bySide[side].orders / c.total
-          if (!share) return null
-          return (
-            <div
-              key={side}
-              className={`${tone[side]} flex items-center justify-center`}
-              style={{ width: `${share * 100}%` }}
-              title={`${CANCEL_SIDE_LABEL[side]} — ${c.bySide[side].orders}`}
-            >
-              {share > 0.08 && (
-                <span className="text-white text-xs font-medium">
-                  {Math.round(share * 100)}%
-                </span>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      <div className="grid grid-cols-3 gap-3 mb-5">
-        {sides.map(side => (
-          <div key={side}>
-            <div className={`text-xs ${text[side]}`}>{CANCEL_SIDE_LABEL[side]}</div>
-            <div className="text-white text-lg font-semibold">{num(c.bySide[side].orders)}</div>
-            <div className="text-zinc-500 text-xs">{moneyShort(c.bySide[side].lost)}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* The unknown share is stated, not quietly folded into the other two —
-          a split that hides how much of it is guesswork is worse than no split */}
-      {c.bySide.unknown.orders > 0 && (
-        <div className="text-zinc-500 text-xs mb-4 leading-relaxed">
-          Сторону не встановлено для {num(c.bySide.unknown.orders)} із {num(c.total)}
-          {known > 0 && ` — решта ${num(known)} визначена`}.
-          {c.beforeJournal > 0 && ` ${num(c.beforeJournal)} скасовано до появи журналу змін, тож читати там нічого.`}
-          {c.unexplained > 0 && ` ${num(c.unexplained)} скасовано поза панеллю і без причини — MauDau своєї не повертає.`}
-        </div>
-      )}
-
-      <div className="text-zinc-400 text-xs mb-2.5">Причини</div>
-      <div className="space-y-2">
-        {c.reasons.map(r => (
-          <div key={r.reason} className="flex items-center gap-3">
-            <div className="w-56 shrink-0 text-zinc-300 text-xs truncate" title={r.reason}>
-              {r.reason}
-            </div>
-            <div className="flex-1 h-5 bg-zinc-800/60 rounded overflow-hidden">
+      <div className="px-5 py-4 border-b border-zinc-800/60">
+        {/* One bar: the split reads faster than three numbers side by side */}
+        <div className="flex h-2 rounded-full overflow-hidden mb-4">
+          {sides.map(side => {
+            const share = c.bySide[side].orders / c.total
+            if (!share) return null
+            return (
               <div
-                className={`h-full rounded ${tone[r.side]}`}
-                style={{ width: `${Math.max(2, (r.orders / maxReason) * 100)}%` }}
+                key={side}
+                className={fill[side]}
+                style={{ width: `${share * 100}%` }}
+                title={`${CANCEL_SIDE_LABEL[side]} — ${c.bySide[side].orders}`}
               />
+            )
+          })}
+        </div>
+
+        <div className="grid grid-cols-3 gap-4">
+          {sides.map(side => (
+            <div key={side}>
+              <div className={`text-xs ${text[side]}`}>{CANCEL_SIDE_LABEL[side]}</div>
+              <div className="text-white text-lg font-semibold leading-tight mt-0.5">
+                {num(c.bySide[side].orders)}
+                <span className="text-zinc-500 text-xs font-normal ml-1.5">
+                  {pct(c.bySide[side].orders, c.total)}
+                </span>
+              </div>
+              <div className="text-zinc-500 text-xs mt-0.5">
+                {moneyShort(c.bySide[side].lost)}
+              </div>
             </div>
-            <div className="w-28 shrink-0 text-right text-zinc-400 text-xs whitespace-nowrap">
-              {num(r.orders)} · {moneyShort(r.lost)}
+          ))}
+        </div>
+
+        {/* The unknown share is stated, not quietly folded into the other two —
+            a split that hides how much of it is guesswork is worse than none */}
+        {c.bySide.unknown.orders > 0 && (
+          <p className="text-zinc-500 text-xs mt-4 leading-relaxed">
+            Сторону не встановлено для {num(c.bySide.unknown.orders)} із {num(c.total)}
+            {known > 0 && `, решта ${num(known)} визначена`}.
+            {c.beforeJournal > 0 && ` ${num(c.beforeJournal)} скасовано до появи журналу змін — читати там нічого.`}
+            {c.unexplained > 0 && ` ${num(c.unexplained)} скасовано поза панеллю і без причини: MauDau своєї не повертає.`}
+          </p>
+        )}
+      </div>
+
+      <div className="divide-y divide-zinc-800/60">
+        {c.reasons.map(r => (
+          <div key={`${r.reason}|${r.side}`} className="px-5 py-2.5">
+            <div className="flex items-baseline justify-between gap-3 mb-1">
+              <span className="text-zinc-200 text-xs truncate" title={r.reason}>
+                {r.reason}
+                {repeated.has(r.reason) && (
+                  <span className="text-zinc-500"> · {CANCEL_SIDE_LABEL[r.side]}</span>
+                )}
+              </span>
+              <span className="text-zinc-400 text-xs whitespace-nowrap">
+                {num(r.orders)} · {moneyShort(r.lost)}
+              </span>
+            </div>
+            <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full ${fill[r.side]}`}
+                style={{ width: `${(r.orders / max) * 100}%` }}
+              />
             </div>
           </div>
         ))}
