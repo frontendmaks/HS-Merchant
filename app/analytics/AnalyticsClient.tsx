@@ -7,7 +7,8 @@ import type {
   Totals, DayBucket, ProductStat, CategoryStat, CustomerStat, RegionStat,
 } from '@/lib/analytics'
 
-import type { OperatorStat } from '@/lib/analytics'
+import type { OperatorStat, CancelStats, CancelSide } from '@/lib/analytics'
+import { CANCEL_SIDE_LABEL } from '@/lib/analytics'
 import { money, moneyShort, pct, num, dayMonth, orderWord } from '@/lib/format'
 
 function Card({ label, value, sub, tone = 'white' }: {
@@ -330,6 +331,102 @@ function CustomersTable({ rows }: { rows: CustomerStat[] }) {
   )
 }
 
+/** Who ended the order, and what it cost. */
+function Cancellations({ c }: { c: CancelStats }) {
+  const sides: CancelSide[] = ['guest', 'us', 'unknown']
+  const tone: Record<CancelSide, string> = {
+    guest: 'bg-amber-500/70',
+    us: 'bg-red-600/70',
+    unknown: 'bg-zinc-600/70',
+  }
+  const text: Record<CancelSide, string> = {
+    guest: 'text-amber-400',
+    us: 'text-red-400',
+    unknown: 'text-zinc-400',
+  }
+
+  if (!c.total) {
+    return (
+      <Panel title="Скасування" subtitle="Хто скасував і чому">
+        <div className="text-zinc-500 text-sm">За цей період скасувань немає</div>
+      </Panel>
+    )
+  }
+
+  const known = c.total - c.bySide.unknown.orders
+  const maxReason = Math.max(1, ...c.reasons.map(r => r.orders))
+
+  return (
+    <Panel
+      title="Скасування"
+      subtitle={`${num(c.total)} ${orderWord(c.total)} · ${moneyShort(c.lost)} не отримано`}
+    >
+      {/* One bar: the split reads faster than three numbers side by side */}
+      <div className="flex h-7 rounded overflow-hidden mb-3">
+        {sides.map(side => {
+          const share = c.bySide[side].orders / c.total
+          if (!share) return null
+          return (
+            <div
+              key={side}
+              className={`${tone[side]} flex items-center justify-center`}
+              style={{ width: `${share * 100}%` }}
+              title={`${CANCEL_SIDE_LABEL[side]} — ${c.bySide[side].orders}`}
+            >
+              {share > 0.08 && (
+                <span className="text-white text-xs font-medium">
+                  {Math.round(share * 100)}%
+                </span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 mb-5">
+        {sides.map(side => (
+          <div key={side}>
+            <div className={`text-xs ${text[side]}`}>{CANCEL_SIDE_LABEL[side]}</div>
+            <div className="text-white text-lg font-semibold">{num(c.bySide[side].orders)}</div>
+            <div className="text-zinc-500 text-xs">{moneyShort(c.bySide[side].lost)}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* The unknown share is stated, not quietly folded into the other two —
+          a split that hides how much of it is guesswork is worse than no split */}
+      {c.bySide.unknown.orders > 0 && (
+        <div className="text-zinc-500 text-xs mb-4 leading-relaxed">
+          Сторону не встановлено для {num(c.bySide.unknown.orders)} із {num(c.total)}
+          {known > 0 && ` — решта ${num(known)} визначена`}.
+          {c.beforeJournal > 0 && ` ${num(c.beforeJournal)} скасовано до появи журналу змін, тож читати там нічого.`}
+          {c.unexplained > 0 && ` ${num(c.unexplained)} скасовано поза панеллю і без причини — MauDau своєї не повертає.`}
+        </div>
+      )}
+
+      <div className="text-zinc-400 text-xs mb-2.5">Причини</div>
+      <div className="space-y-2">
+        {c.reasons.map(r => (
+          <div key={r.reason} className="flex items-center gap-3">
+            <div className="w-56 shrink-0 text-zinc-300 text-xs truncate" title={r.reason}>
+              {r.reason}
+            </div>
+            <div className="flex-1 h-5 bg-zinc-800/60 rounded overflow-hidden">
+              <div
+                className={`h-full rounded ${tone[r.side]}`}
+                style={{ width: `${Math.max(2, (r.orders / maxReason) * 100)}%` }}
+              />
+            </div>
+            <div className="w-28 shrink-0 text-right text-zinc-400 text-xs whitespace-nowrap">
+              {num(r.orders)} · {moneyShort(r.lost)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  )
+}
+
 /** Side-by-side comparison of operators on one measure. */
 function OperatorBars({ title, rows, format, lowerIsBetter }: {
   title: string
@@ -428,6 +525,7 @@ export interface Bundle {
   }
   regions: RegionStat[]
   operators: OperatorStat[]
+  cancels: CancelStats
 }
 
 export default function AnalyticsClient({
@@ -469,6 +567,7 @@ export default function AnalyticsClient({
 
   const {
     totals: t, perDay, products, categories, customers, customerSummary, regions, operators,
+    cancels,
   } = bundles[platform] ?? bundles.all
 
   const maxProductQty = Math.max(1, ...products.map(p => p.qty))
@@ -543,6 +642,8 @@ export default function AnalyticsClient({
       >
         <DailyChart data={perDay} metric={chartMetric} />
       </Panel>
+
+      <Cancellations c={cancels} />
 
       <UkraineMap regions={regions} />
 

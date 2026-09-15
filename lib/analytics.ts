@@ -14,6 +14,7 @@ export interface OrderRow {
   total: number | null
   commission: number | null
   status: string | null
+  cancel_reason?: string | null
   created_at: string
   /** Geography, pulled straight out of the raw marketplace payload by the
    *  query rather than shipped whole — see the select list in the page. */
@@ -707,4 +708,122 @@ export interface OperatorEventRow {
   /** For a status change, the status it moved to */
   new_value?: string | null
   created_at: string
+}
+
+// ── Cancellations ────────────────────────────────────────────────────────────
+
+/** Who walked away. */
+export type CancelSide = 'us' | 'guest' | 'unknown'
+
+export const CANCEL_SIDE_LABEL: Record<CancelSide, string> = {
+  us: 'Ми',
+  guest: 'Гість',
+  unknown: 'Невідомо',
+}
+
+/**
+ * Reasons that name the buyer as the one who pulled out.
+ *
+ * MauDau prefixes its own reasons by category, so "Гість:" settles it there.
+ * Rozetka has no such convention and each of its reasons has to be read.
+ */
+const GUEST_REASON = [
+  /^гість\s*:/i,
+  /скасовано покупцем/i,
+  /клієнт передумав/i,
+  /клієнт не оплатив/i,
+  /^не прийшов/i,
+  /відмова при отриманні/i,
+]
+
+export interface CancelReasonStat {
+  reason: string
+  side: CancelSide
+  orders: number
+  lost: number
+}
+
+export interface CancelStats {
+  total: number
+  lost: number
+  bySide: Record<CancelSide, { orders: number; lost: number }>
+  reasons: CancelReasonStat[]
+  /** Cancelled before the journal existed, so the side cannot be established */
+  beforeJournal: number
+  /** Cancelled with the journal running, yet carrying neither reason nor entry */
+  unexplained: number
+}
+
+interface CancelInput {
+  id: string
+  order_date: string | null
+  status: string | null
+  total: number | null
+  cancel_reason?: string | null
+}
+
+/**
+ * Who cancelled, and why.
+ *
+ * The side is decided by the reason first and the journal second. A reason is
+ * the stronger claim of the two: an operator who cancels because the buyer
+ * asked them to still picks "Гість: Відмовився", and the buyer is who ended
+ * the order — the operator only recorded it.
+ *
+ * Where neither says anything the answer is "unknown", and unknown is reported
+ * rather than folded into one of the other two. Most of it is not mystery but
+ * missing measurement: MauDau returns no reason of its own, and the journal
+ * only starts the day it was built, so every cancellation before that has
+ * nothing to read.
+ */
+export function cancelStats(
+  orders: CancelInput[],
+  /** Orders an operator cancelled from the panel */
+  cancelledByUs: Set<string>,
+  /** The day the journal begins; before it, silence proves nothing */
+  journalFrom: string | null,
+): CancelStats {
+  const cancelled = orders.filter(o => o.status === CANCELED)
+
+  const empty = (): { orders: number; lost: number } => ({ orders: 0, lost: 0 })
+  const bySide: Record<CancelSide, { orders: number; lost: number }> = {
+    us: empty(), guest: empty(), unknown: empty(),
+  }
+  const byReason = new Map<string, CancelReasonStat>()
+  let beforeJournal = 0
+  let unexplained = 0
+
+  for (const o of cancelled) {
+    const reason = (o.cancel_reason ?? '').trim()
+    const lost = Number(o.total ?? 0)
+
+    let side: CancelSide
+    if (reason && GUEST_REASON.some(re => re.test(reason))) side = 'guest'
+    else if (reason) side = 'us'
+    else if (cancelledByUs.has(o.id)) side = 'us'
+    else side = 'unknown'
+
+    if (side === 'unknown') {
+      if (journalFrom && o.order_date && o.order_date < journalFrom) beforeJournal++
+      else unexplained++
+    }
+
+    bySide[side].orders++
+    bySide[side].lost += lost
+
+    const key = reason || 'Причину не вказано'
+    const row = byReason.get(key) ?? { reason: key, side, orders: 0, lost: 0 }
+    row.orders++
+    row.lost += lost
+    byReason.set(key, row)
+  }
+
+  return {
+    total: cancelled.length,
+    lost: cancelled.reduce((s, o) => s + Number(o.total ?? 0), 0),
+    bySide,
+    reasons: [...byReason.values()].sort((a, b) => b.orders - a.orders),
+    beforeJournal,
+    unexplained,
+  }
 }

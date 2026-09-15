@@ -3,7 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
 import {
   learnCityOblasts, totals, ordersPerDay, popularProducts, popularCategories,
-  customers, byRegion, normalizeTitle, operatorStats,
+  customers, byRegion, normalizeTitle, operatorStats, cancelStats,
   type OrderRow, type Gazetteer, type OperatorEventRow,
 } from '@/lib/analytics'
 import gazetteerJson from '@/lib/ua-settlements.json'
@@ -56,7 +56,7 @@ export default async function AnalyticsPage({
       supabase.from('orders')
         // The raw marketplace payload is large and mostly irrelevant here, so
         // Postgres digs out the three geography fields instead of sending it all
-        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, items, total, commission, status, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code, md_placed:raw->>created_at, rz_placed:raw->>created')
+        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, items, total, commission, status, cancel_reason, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code, md_placed:raw->>created_at, rz_placed:raw->>created')
         .gte('order_date', from).lte('order_date', to)
         .order('order_date', { ascending: false })
         .limit(20000),
@@ -116,6 +116,12 @@ export default async function AnalyticsPage({
 
   // The heartbeat is newer than the orders, so shifts worked before it exist
   // with no presence data at all — unmeasured, not absent
+  // The journal begins the day it was built; a cancellation older than that
+  // has no entry to be missing, so absence there is not evidence
+  const { data: firstEvent } = await supabase
+    .from('order_events').select('created_at').order('created_at').limit(1).maybeSingle()
+  const journalFrom = (firstEvent?.created_at as string | undefined)?.slice(0, 10) ?? null
+
   const { data: firstTick } = await supabase
     .from('presence_ticks').select('minute').order('minute').limit(1).maybeSingle()
   const presenceSince = firstTick?.minute ? new Date(firstTick.minute as string) : null
@@ -145,6 +151,17 @@ export default async function AnalyticsPage({
         })(),
       },
       regions: byRegion(rows, learned, gazetteer),
+      cancels: cancelStats(
+        rows,
+        // An entry with an actor means a person here did it; sync writes none
+        new Set(
+          events
+            .filter(e => ids.has(e.order_id) && e.actor_id
+              && (e.type === 'cancel' || e.type === 'cancel_reason'))
+            .map(e => e.order_id),
+        ),
+        journalFrom,
+      ),
       operators: operatorStats(
         events.filter(e => ids.has(e.order_id)),
         rows.map(o => ({
