@@ -748,6 +748,11 @@ export interface CancelStats {
   lost: number
   bySide: Record<CancelSide, { orders: number; lost: number }>
   reasons: CancelReasonStat[]
+  /** Cancellations carrying no reason at all, whichever side they fell on.
+   *  Kept apart from `reasons` because "no reason" is the absence of one, not
+   *  a kind of one — splitting it across the sides printed the same words
+   *  twice and said nothing the side totals did not already say. */
+  noReason: { orders: number; lost: number; bySide: Record<CancelSide, number> }
   /** Cancelled before the journal existed, so the side cannot be established */
   beforeJournal: number
   /** Cancelled with the journal running, yet carrying neither reason nor entry */
@@ -790,6 +795,10 @@ export function cancelStats(
     us: empty(), guest: empty(), unknown: empty(),
   }
   const byReason = new Map<string, CancelReasonStat>()
+  const noReason = {
+    orders: 0, lost: 0,
+    bySide: { us: 0, guest: 0, unknown: 0 } as Record<CancelSide, number>,
+  }
   let beforeJournal = 0
   let unexplained = 0
 
@@ -811,16 +820,17 @@ export function cancelStats(
     bySide[side].orders++
     bySide[side].lost += lost
 
-    // Keyed by side as well as text: orders with no reason at all split
-    // between the ones the journal pins on us and the ones nothing explains,
-    // and a single row for both would show a count that contradicts the
-    // summary above it — and paint it whichever colour came first
-    const label = reason || 'Причину не вказано'
-    const key = `${label}|${side}`
-    const row = byReason.get(key) ?? { reason: label, side, orders: 0, lost: 0 }
-    row.orders++
-    row.lost += lost
-    byReason.set(key, row)
+    if (!reason) {
+      noReason.orders++
+      noReason.lost += lost
+      noReason.bySide[side]++
+    } else {
+      const key = `${reason}|${side}`
+      const row = byReason.get(key) ?? { reason, side, orders: 0, lost: 0 }
+      row.orders++
+      row.lost += lost
+      byReason.set(key, row)
+    }
   }
 
   return {
@@ -828,6 +838,7 @@ export function cancelStats(
     lost: cancelled.reduce((s, o) => s + Number(o.total ?? 0), 0),
     bySide,
     reasons: [...byReason.values()].sort((a, b) => b.orders - a.orders),
+    noReason,
     beforeJournal,
     unexplained,
   }

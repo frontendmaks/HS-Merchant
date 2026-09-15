@@ -416,6 +416,28 @@ function Cancellations({ c }: { c: CancelStats }) {
         )}
       </div>
 
+      {c.noReason.orders > 0 && (
+        <div className="px-5 py-3 border-b border-zinc-800/60 flex items-baseline
+                        justify-between gap-3">
+          <span className="text-zinc-300 text-xs">
+            Причину не вказано
+            {/* Which side it fell on is still known for some of these, but it
+                is an aside here — the same words on two rows read as two
+                different things, and they are not */}
+            <span className="text-zinc-600">
+              {' · '}
+              {(['us', 'guest', 'unknown'] as CancelSide[])
+                .filter(side => c.noReason.bySide[side] > 0)
+                .map(side => `${CANCEL_SIDE_LABEL[side].toLowerCase()} ${c.noReason.bySide[side]}`)
+                .join(', ')}
+            </span>
+          </span>
+          <span className="text-zinc-400 text-xs whitespace-nowrap">
+            {num(c.noReason.orders)} · {moneyShort(c.noReason.lost)}
+          </span>
+        </div>
+      )}
+
       {groups.map(g => (
         <div key={g.side}>
           <div className="px-5 py-2 bg-zinc-800/30 border-b border-zinc-800/60
@@ -424,7 +446,9 @@ function Cancellations({ c }: { c: CancelStats }) {
               {CANCEL_SIDE_LABEL[g.side]}
             </span>
             <span className="text-zinc-500 text-xs whitespace-nowrap">
-              {num(c.bySide[g.side].orders)} · {moneyShort(c.bySide[g.side].lost)}
+              {num(g.rows.reduce((n, r) => n + r.orders, 0))}
+              {' · '}
+              {moneyShort(g.rows.reduce((n, r) => n + r.lost, 0))}
             </span>
           </div>
           <div className="divide-y divide-zinc-800/60">
