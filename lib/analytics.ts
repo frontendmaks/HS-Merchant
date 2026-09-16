@@ -722,19 +722,63 @@ export const CANCEL_SIDE_LABEL: Record<CancelSide, string> = {
 }
 
 /**
- * Reasons that name the buyer as the one who pulled out.
+ * Who each reason means walked away.
  *
- * MauDau prefixes its own reasons by category, so "Гість:" settles it there.
- * Rozetka has no such convention and each of its reasons has to be read.
+ * Read from a table rather than worked out from the wording, because the
+ * wording does not carry it. MauDau prefixes "Гість:" to reasons that are
+ * really ours — "Немає відповіді від Гостя" is us cancelling after the buyer
+ * went quiet, not the buyer cancelling — and files "Не підходить спосіб
+ * оплати" under payment when it is the buyer declining. Every rule derived
+ * from the prefix got both of those backwards.
+ *
+ * The nine reasons in the current data are as the shop assigned them. The rest
+ * follow the same logic — the buyer ends it, or we do — and are marked below
+ * where that was a reading rather than a given.
  */
-const GUEST_REASON = [
-  /^гість\s*:/i,
-  /скасовано покупцем/i,
-  /клієнт передумав/i,
-  /клієнт не оплатив/i,
-  /^не прийшов/i,
-  /відмова при отриманні/i,
-]
+const CANCEL_SIDE_BY_REASON: Record<string, CancelSide> = {
+  // — as assigned by the shop —
+  'гість: відмовився (не актуально)': 'guest',
+  'гість: немає відповіді від гостя': 'us',
+  'гість: дубль замовлення': 'guest',
+  'скасовано покупцем': 'guest',
+  'наявність товару: немає у наявності': 'us',
+  'оплата: не підходить спосіб оплати': 'guest',
+  'термін: не готовий очікувати товар під замовлення': 'us',
+  'інше - додати коментар': 'us',
+  'оплата: немає оплати': 'us',
+
+  // — read by analogy with the above —
+  'гість: замовив не той товар': 'guest',
+  'гість: не влаштовує час доставки': 'guest',
+  'гість: замовив в іншому магазині': 'guest',
+  'гість: думав, що замовив у maudau': 'guest',
+  'гість: не підійшли характеристики товару': 'guest',
+  'доставка: відміна при доставці': 'guest',
+  'ціна: не влаштовує вартість доставки': 'guest',
+  'наявність товару: товару немає у потрібній кількості': 'us',
+  'термін: протермінована поставка товару': 'us',
+  'товар: брак': 'us',
+  'ціна: не актуальна ціна': 'us',
+  'система: тестове замовлення': 'us',
+
+  // — Rozetka —
+  'клієнт передумав': 'guest',
+  'не прийшов': 'guest',
+  'відмова при отриманні': 'guest',
+  'не влаштовує оплата': 'guest',
+  'повернено': 'guest',
+  'немає в наявності': 'us',
+  "не вдалося зв'язатися": 'us',
+  'фейкове замовлення': 'us',
+  'клієнт не оплатив': 'us',
+}
+
+/** Apostrophes and spacing differ between the two marketplaces. */
+const foldReason = (s: string) =>
+  s.trim().toLowerCase().replace(/[\u2019\u02bc\u2018`\u00b4]/g, "'").replace(/\s+/g, ' ')
+
+export const sideOfReason = (reason: string): CancelSide | undefined =>
+  CANCEL_SIDE_BY_REASON[foldReason(reason)]
 
 export interface CancelReasonStat {
   reason: string
@@ -806,11 +850,10 @@ export function cancelStats(
     const reason = (o.cancel_reason ?? '').trim()
     const lost = Number(o.total ?? 0)
 
-    let side: CancelSide
-    if (reason && GUEST_REASON.some(re => re.test(reason))) side = 'guest'
-    else if (reason) side = 'us'
-    else if (cancelledByUs.has(o.id)) side = 'us'
-    else side = 'unknown'
+    // The table first. A reason it does not list says nothing about the side,
+    // so the journal answers instead — and where that is silent too, so is this.
+    let side = reason ? sideOfReason(reason) : undefined
+    if (!side) side = cancelledByUs.has(o.id) ? 'us' : 'unknown'
 
     if (side === 'unknown') {
       if (journalFrom && o.order_date && o.order_date < journalFrom) beforeJournal++
