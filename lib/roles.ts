@@ -58,6 +58,9 @@ export const PAGE_ROLES = {
   analytics: ['super_admin', 'admin', 'manager'],
   orders:    ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
   requests:  ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
+  /** Everyone has a newsfeed; which pieces land in it is decided per piece
+   *  by its audience — see lib/news.ts */
+  news:      ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
   users:     ['super_admin', 'admin', 'manager'],
   /** Operators plan their own week here; management approves it */
   schedule:  ['super_admin', 'admin', 'manager', 'operator'],

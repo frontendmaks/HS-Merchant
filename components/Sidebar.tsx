@@ -16,6 +16,7 @@ const nav = [
   { href: '/analytics', label: 'Аналітика',     icon: '◑', roles: PAGE_ROLES.analytics },
   { href: '/syncs',    label: 'Синхронізації',  icon: '↻', roles: PAGE_ROLES.syncs },
   { href: '/orders',   label: 'Замовлення',     icon: '◷', roles: PAGE_ROLES.orders },
+  { href: '/news',     label: 'Новини',         icon: '◫', roles: PAGE_ROLES.news },
   {
     href: '/requests', label: 'Запити', icon: '✉', roles: PAGE_ROLES.requests,
     // Indented under Запити rather than made a collapsible section: the badge
