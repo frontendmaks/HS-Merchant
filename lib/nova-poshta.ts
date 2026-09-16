@@ -40,6 +40,9 @@ export interface WaybillInput {
   dimensions?: { length?: number; width?: number; height?: number } | null
   /** A parcel locker cannot take a waybill without dimensions */
   toPostomat?: boolean
+  /** Nova Poshta's own id for the street, as the marketplace supplied it.
+   *  Beats searching by name whenever it is there — see courierAddressRef. */
+  settlementStreetRef?: string | null
 }
 
 export interface SenderWarehouse {
@@ -195,9 +198,11 @@ export async function cityRefByName(name: string): Promise<CityLookup> {
  * you looking in the wrong place. So that case resolves the delivery city
  * first and asks again.
  *
- * searchSettlementStreets does find such streets, but the ref it returns is a
- * settlement-street ref, and Address.save refuses it with "Street doesn't
- * exists" — so it is no use here.
+ * searchSettlementStreets finds streets this directory does not have, but the
+ * ref it returns is a settlement-street ref, which Address.save refuses as a
+ * StreetRef. It is not useless, though — passed as SettlementStreetRef
+ * alongside SettlementRef it works, which is the path courierAddressRef takes
+ * first whenever the marketplace hands us those two ids.
  */
 async function findStreetRef(ref: string, street: string): Promise<string | null> {
   const direct = await streetRefIn(ref, street)
@@ -243,7 +248,27 @@ async function courierAddressRef(
   street: string,
   building: string,
   flat?: string | null,
+  settlementStreetRef?: string | null,
 ): Promise<{ ok: true; ref: string } | { ok: false; error: string }> {
+  // The marketplace already knows which street this is — MauDau sends Nova
+  // Poshta's own settlement and street ids with the order. Using them beats
+  // matching by name twice over: it survives a name Nova Poshta spells
+  // differently ("Грабовського Павла" against its "Грабовського"), and it
+  // reaches villages whose streets are absent from the city directory
+  // altogether, which is where waybills were failing outright.
+  if (settlementStreetRef) {
+    const saved = await call<{ Ref: string }>('Address', 'save', {
+      CounterpartyRef: counterpartyRef,
+      SettlementRef: cityRef,
+      SettlementStreetRef: settlementStreetRef,
+      BuildingNumber: building,
+      Flat: flat || '',
+    })
+    const ref = saved.data?.[0]?.Ref
+    if (ref) return { ok: true, ref }
+    // Refused — fall through and look the street up by name instead
+  }
+
   const streetRef = await findStreetRef(cityRef, street)
   if (!streetRef) {
     return {
@@ -371,7 +396,8 @@ export async function createWaybill(
   let recipientAddress = input.warehouseRecipientRef ?? ''
   if (!toBranch) {
     const addr = await courierAddressRef(
-      recipient.ref, input.cityRecipientRef, input.street!, input.building!, input.flat)
+      recipient.ref, input.cityRecipientRef, input.street!, input.building!, input.flat,
+      input.settlementStreetRef)
     if (!addr.ok) return { ok: false, error: addr.error }
     recipientAddress = addr.ref
   }

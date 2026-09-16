@@ -161,6 +161,14 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
       : maudauReasons
 
   async function handleStatusChange(newStatus: string) {
+    // Cancelling happens through the reason, never through this dropdown: a
+    // cancellation with no reason tells nobody anything afterwards, and the
+    // marketplace asks for one anyway. Say where to go rather than failing.
+    if (newStatus === 'Скасовано' && !cancelReason.trim()) {
+      setStatusError('Оберіть причину скасування — вона й скасує замовлення')
+      return
+    }
+
     setStatusError('')
     setStatusLoading(true)
     try {
@@ -344,7 +352,16 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
               className={selectCls}
             >
               {statuses.map(s => (
-                <option key={s} value={s}>{s}</option>
+                <option
+                  key={s}
+                  value={s}
+                  // Greyed out until a reason is picked, so the rule is visible
+                  // before the click rather than explained after it
+                  disabled={s === 'Скасовано' && !cancelReason.trim()}
+                >
+                  {s}
+                  {s === 'Скасовано' && !cancelReason.trim() ? ' — оберіть причину' : ''}
+                </option>
               ))}
             </select>
             {statusLoading && <div className="text-zinc-500 text-xs mt-0.5">Оновлення...</div>}

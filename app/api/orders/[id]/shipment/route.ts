@@ -211,6 +211,7 @@ export async function POST(
     street: dest.street ?? undefined,
     building: dest.building ?? undefined,
     flat: dest.flat,
+    settlementStreetRef: dest.streetRef,
     weightKg: Number(weight) || 1,
     seats: Number(seats) || 1,
     cost: declaredValue,

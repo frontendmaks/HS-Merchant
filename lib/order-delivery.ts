@@ -11,6 +11,8 @@ export interface Destination {
   cityName: string | null
   warehouseRef: string | null
   street: string | null
+  /** Nova Poshta's id for that street, when the marketplace sends one */
+  streetRef: string | null
   building: string | null
   flat: string | null
   toBranch: boolean
@@ -56,6 +58,7 @@ export function readDestination(
     cityName: (city.name as string | undefined)?.trim() || null,
     warehouseRef,
     street: (street.name as string | undefined)?.trim() || null,
+    streetRef: npExternalId(street.external_ids),
     building: (delivery.building as string | undefined) ?? null,
     flat: (delivery.apartment as string | undefined) ?? null,
     toBranch: !!warehouseRef,

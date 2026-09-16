@@ -31,7 +31,21 @@ export async function PATCH(
 
   // A parcel already with the courier is driven by the marketplace from here
   const { data: current } = await supabase
-    .from('orders').select('status, ttn').eq('id', id).single()
+    .from('orders').select('status, ttn, cancel_reason').eq('id', id).single()
+
+  // Cancelling is the one move that ends an order, and a cancellation with no
+  // reason answers nothing later — not for the marketplace, which asks for one,
+  // and not for us, where a sixth of last month's lost revenue sits under
+  // "причину не вказано". The reason comes first; this route only records it.
+  if (status === 'Скасовано' && !(current?.cancel_reason as string | null)?.trim()) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Спочатку оберіть причину скасування — вона й скасує замовлення',
+      },
+      { status: 400 },
+    )
+  }
   if (isHandedOver(current?.status as string, current?.ttn as string)) {
     return NextResponse.json(
       { success: false, error: 'Замовлення вже в доставці — статус не змінюється' },
