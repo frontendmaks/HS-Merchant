@@ -249,7 +249,7 @@ async function courierAddressRef(
   building: string,
   flat?: string | null,
   settlementStreetRef?: string | null,
-): Promise<{ ok: true; ref: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; ref: string; cityRef: string | null } | { ok: false; error: string }> {
   // The marketplace already knows which street this is — MauDau sends Nova
   // Poshta's own settlement and street ids with the order. Using them beats
   // matching by name twice over: it survives a name Nova Poshta spells
@@ -265,7 +265,7 @@ async function courierAddressRef(
       Flat: flat || '',
     })
     const ref = saved.data?.[0]?.Ref
-    if (ref) return { ok: true, ref }
+    if (ref) return { ok: true, ref, cityRef: await addressCityRef(counterpartyRef, ref) }
     // Refused — fall through and look the street up by name instead
   }
 
@@ -287,7 +287,29 @@ async function courierAddressRef(
   if (!ref) {
     return { ok: false, error: (saved.errors ?? []).join('; ') || 'Не вдалося зберегти адресу' }
   }
-  return { ok: true, ref }
+  return { ok: true, ref, cityRef: await addressCityRef(counterpartyRef, ref) }
+}
+
+/**
+ * Which city Nova Poshta filed the address under.
+ *
+ * Not the one the marketplace named, and not one that can be worked out from
+ * it: a village address is filed under the town its post goes through, and
+ * which town that is only the saved address knows. Село Йосипівка sits under
+ * Благовіщенське, while the settlement directory offers a different ref
+ * entirely — sending that one back gets "RecipientAddressCity does not belong
+ * to AddressCity" and no waybill.
+ *
+ * Null when the lookup fails, so the caller falls back to what it had rather
+ * than losing the waybill over a detail the marketplace usually gets right.
+ */
+async function addressCityRef(
+  counterpartyRef: string, addressRef: string,
+): Promise<string | null> {
+  const r = await call<{ Ref: string; CityRef: string }>(
+    'Counterparty', 'getCounterpartyAddresses',
+    { Ref: counterpartyRef, CounterpartyProperty: 'Recipient' })
+  return r.data?.find(a => a.Ref === addressRef)?.CityRef ?? null
 }
 
 export interface WaybillResult {
@@ -394,12 +416,16 @@ export async function createWaybill(
   if (!recipient.ok) return { ok: false, error: recipient.error }
 
   let recipientAddress = input.warehouseRecipientRef ?? ''
+  let cityRecipient = input.cityRecipientRef
   if (!toBranch) {
     const addr = await courierAddressRef(
       recipient.ref, input.cityRecipientRef, input.street!, input.building!, input.flat,
       input.settlementStreetRef)
     if (!addr.ok) return { ok: false, error: addr.error }
     recipientAddress = addr.ref
+    // Nova Poshta checks these two against each other and refuses the pair
+    // when they disagree, so the address decides which city it is in
+    if (addr.cityRef) cityRecipient = addr.cityRef
   }
 
   // Nova Poshta prices by volume as well as weight, so send it when we have it
@@ -452,7 +478,7 @@ export async function createWaybill(
     ContactSender: settings.contact_sender_ref,
     SendersPhone: settings.senders_phone,
 
-    CityRecipient: input.cityRecipientRef,
+    CityRecipient: cityRecipient,
     Recipient: recipient.ref,
     RecipientAddress: recipientAddress,
     ContactRecipient: recipient.contactRef,
