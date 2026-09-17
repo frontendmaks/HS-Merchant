@@ -119,11 +119,14 @@ export default function RemovalsClient({ requests, products, canDecide, meId }: 
           difference between this and deleting the offer is the whole design */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3">
         <p className="text-zinc-400 text-xs leading-relaxed">
-          Підтверджений запит зупиняє продаж: товар іде в усі фіди як
-          <span className="text-white"> «немає в наявності», залишок 0</span> — і не зникає з них.
-          Зникла пропозиція читається маркетплейсом як «товару більше не існує», і він гасить
-          картку разом з відгуками, рейтингом і позицією в пошуку. Повернути товар у продаж можна
-          будь-коли, картка при цьому лишається тією ж.
+          Підтверджений запит <span className="text-white">знімає товар з усіх фідів</span> —
+          він перестає туди потрапляти, і залишок стає нульовим. Повернути в продаж можна
+          будь-коли: товар стане у ті самі фіди, з яких його зняли.
+        </p>
+        <p className="text-zinc-600 text-xs leading-relaxed mt-2">
+          Врахуйте: маркетплейс читає зниклу пропозицію як «товару більше не існує» і з часом
+          гасить картку разом з відгуками й позицією в пошуку. Для товару, який планують
+          повернути за тиждень-два, це відчутна втрата.
         </p>
       </div>
 
@@ -234,7 +237,7 @@ export default function RemovalsClient({ requests, products, canDecide, meId }: 
             <div>
               <h2 className="text-white font-semibold text-sm">Зняті з продажу</h2>
               <p className="text-zinc-500 text-xs mt-0.5">
-                {withdrawn.length} — у фідах як «немає в наявності»
+                {withdrawn.length} — знято з фідів
               </p>
             </div>
           </div>

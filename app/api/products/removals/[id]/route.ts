@@ -57,16 +57,44 @@ export async function PATCH(
   const productIds = (items ?? []).map(i => i.product_id as string)
 
   if (decision === 'approve' && productIds.length) {
-    const { error } = await supabase
-      .from('products')
-      .update({
-        withdrawn_at: new Date().toISOString(),
-        withdrawn_by: actor.id,
-        withdrawn_reason: request.reason,
-        updated_at: new Date().toISOString(),
-      })
-      .in('id', productIds)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    // Which feeds each product is in right now, so putting it back later
+    // restores exactly those and nothing else
+    const { data: memberships } = await supabase
+      .from('feed_products')
+      .select('feed_id, product_id')
+      .in('product_id', productIds)
+      .eq('is_active', true)
+
+    const feedsOf = new Map<string, string[]>()
+    for (const m of memberships ?? []) {
+      const pid = m.product_id as string
+      feedsOf.set(pid, [...(feedsOf.get(pid) ?? []), m.feed_id as string])
+    }
+
+    const withdrawnAt = new Date().toISOString()
+    for (const productId of productIds) {
+      const { error } = await supabase
+        .from('products')
+        .update({
+          withdrawn_at: withdrawnAt,
+          withdrawn_by: actor.id,
+          withdrawn_reason: request.reason,
+          withdrawn_feed_ids: feedsOf.get(productId) ?? [],
+          updated_at: withdrawnAt,
+        })
+        .eq('id', productId)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    // Out of the feeds themselves: the offer stops being generated, which is
+    // what "зняти з продажу" was asked to mean
+    if (memberships?.length) {
+      const { error } = await supabase
+        .from('feed_products')
+        .update({ is_active: false, updated_at: withdrawnAt })
+        .in('product_id', productIds)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    }
   }
 
   const { error: saveError } = await supabase
