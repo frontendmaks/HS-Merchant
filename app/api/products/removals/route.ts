@@ -32,9 +32,11 @@ export async function POST(req: NextRequest) {
   const actor = await currentActor()
   if (!actor) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { productIds, reason } = await req.json() as {
+  const { productIds, reason, feedIds } = await req.json() as {
     productIds?: string[]
     reason?: string
+    /** Empty or absent means every feed the product is in */
+    feedIds?: string[]
   }
 
   const ids = [...new Set((productIds ?? []).filter(Boolean))]
@@ -68,7 +70,11 @@ export async function POST(req: NextRequest) {
 
   const { data: request, error } = await supabase
     .from('product_removal_requests')
-    .insert({ created_by: actor.id, reason: text })
+    .insert({
+      created_by: actor.id,
+      reason: text,
+      feed_ids: [...new Set((feedIds ?? []).filter(Boolean))],
+    })
     .select('id').single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

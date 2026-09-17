@@ -155,7 +155,7 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       const oldPriceLine = oldPriceRaw && oldPriceRaw > price ? `\n      <oldprice>${oldPriceRaw}</oldprice>` : ''
 
       return `
-    <offer id="${p.id}" available="${offerStock(p.status, p.stock, { zeroStockMeansUnlimited: true, withdrawn: !!p.withdrawn_at }).available}">
+    <offer id="${p.id}" available="${offerStock(p.status, p.stock, { zeroStockMeansUnlimited: true }).available}">
       <name>${escapeXml(name)}</name>
       <price>${price}</price>${oldPriceLine}
       <currencyId>${p.currency}</currencyId>
@@ -334,7 +334,6 @@ function generateMaudauYML(
       // the site is a flat zero.
       const { available, quantity } = offerStock(p.status, stock, {
         zeroStockMeansUnlimited: true,
-        withdrawn: !!p.withdrawn_at,
       })
       const quantityLine = quantity != null ? `\n      <quantity>${quantity}</quantity>` : ''
 

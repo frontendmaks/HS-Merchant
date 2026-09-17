@@ -8,6 +8,7 @@ import {
 
 interface Person { full_name: string | null; email: string | null }
 interface Item { product_id: string; product_name: string | null }
+interface Feed { id: string; name: string }
 
 interface RemovalRequest {
   id: string
@@ -17,6 +18,8 @@ interface RemovalRequest {
   decision_note: string | null
   decided_at: string | null
   created_at: string
+  /** Empty means every feed the product is in */
+  feed_ids: string[] | null
   author: Person | Person[] | null
   decider: Person | Person[] | null
   items: Item[]
@@ -43,12 +46,14 @@ const when = (iso: string) =>
     day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
   })
 
-export default function RemovalsClient({ requests, products, canDecide, meId }: {
+export default function RemovalsClient({ requests, products, feeds, canDecide, meId }: {
   requests: RemovalRequest[]
   products: Product[]
+  feeds: Feed[]
   canDecide: boolean
   meId: string | null
 }) {
+  const feedName = (id: string) => feeds.find(f => f.id === id)?.name ?? id
   const router = useRouter()
   const [composing, setComposing] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -174,6 +179,11 @@ export default function RemovalsClient({ requests, products, canDecide, meId }: 
                     <span className="text-zinc-600 text-xs">
                       {who(r.author)} · {when(r.created_at)}
                     </span>
+                    <span className="px-2 py-0.5 rounded text-xs bg-zinc-800 text-zinc-400">
+                      {r.feed_ids?.length
+                        ? r.feed_ids.map(feedName).join(', ')
+                        : 'усі маркетплейси'}
+                    </span>
                   </div>
                   <p className="text-white text-sm mt-1.5 whitespace-pre-wrap">{r.reason}</p>
                   {r.decided_at && (
@@ -267,6 +277,7 @@ export default function RemovalsClient({ requests, products, canDecide, meId }: 
       {composing && (
         <Compose
           products={products.filter(p => !p.withdrawn_at)}
+          feeds={feeds}
           onClose={() => setComposing(false)}
           onDone={() => { setComposing(false); router.refresh() }}
         />
@@ -276,12 +287,15 @@ export default function RemovalsClient({ requests, products, canDecide, meId }: 
 }
 
 /** Picking the products and saying why. */
-function Compose({ products, onClose, onDone }: {
+function Compose({ products, feeds, onClose, onDone }: {
   products: Product[]
+  feeds: Feed[]
   onClose: () => void
   onDone: () => void
 }) {
   const [picked, setPicked] = useState<Set<string>>(new Set())
+  // Empty set means every marketplace — the usual case, and the default
+  const [pickedFeeds, setPickedFeeds] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
@@ -315,7 +329,11 @@ function Compose({ products, onClose, onDone }: {
       const res = await fetch('/api/products/removals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productIds: [...picked], reason }),
+        body: JSON.stringify({
+          productIds: [...picked],
+          reason,
+          feedIds: pickedFeeds.size === feeds.length ? [] : [...pickedFeeds],
+        }),
       })
       const data = await res.json() as { ok?: boolean; error?: string }
       if (!data.ok) throw new Error(data.error || 'Не вдалося подати запит')
@@ -350,6 +368,49 @@ function Compose({ products, onClose, onDone }: {
                          text-white text-sm placeholder:text-zinc-600 focus:outline-none focus:border-red-500"
             />
           </div>
+          <div>
+            <label className="text-zinc-400 text-xs">Звідки прибрати</label>
+            <div className="flex flex-wrap gap-2 mt-1.5">
+              <button
+                type="button"
+                onClick={() => setPickedFeeds(new Set())}
+                className={`px-3 py-1.5 rounded-lg text-xs transition-colors border ${
+                  pickedFeeds.size === 0
+                    ? 'bg-red-600 border-red-600 text-white'
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white'
+                }`}
+              >
+                Усі маркетплейси
+              </button>
+              {feeds.map(f => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setPickedFeeds(prev => {
+                    const next = new Set(prev)
+                    if (next.has(f.id)) next.delete(f.id)
+                    else next.add(f.id)
+                    return next
+                  })}
+                  className={`px-3 py-1.5 rounded-lg text-xs transition-colors border ${
+                    pickedFeeds.has(f.id)
+                      ? 'bg-red-600 border-red-600 text-white'
+                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {f.name}
+                </button>
+              ))}
+            </div>
+            {/* Said once: a product off one marketplace keeps selling on the
+                rest, and that is the only reason to pick rather than take all */}
+            <p className="text-zinc-600 text-xs mt-1.5">
+              {pickedFeeds.size === 0
+                ? 'Товар прибереться з усіх фідів, у яких він є.'
+                : 'На решті маркетплейсів товар продаватиметься далі.'}
+            </p>
+          </div>
+
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}

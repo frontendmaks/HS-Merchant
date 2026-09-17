@@ -15,7 +15,7 @@ export default async function RemovalsPage() {
   const actor = await currentActor()
   const supabase = createServiceClient()
 
-  const [{ data: requests }, products] = await Promise.all([
+  const [{ data: requests }, products, { data: feeds }] = await Promise.all([
     supabase
       .from('product_removal_requests')
       .select(`*,
@@ -32,12 +32,14 @@ export default async function RemovalsPage() {
         .select('id, name, sku, category_name, stock, status, withdrawn_at')
         .order('name')
     ),
+    supabase.from('feeds').select('id, name').order('name'),
   ])
 
   return (
     <RemovalsClient
       requests={requests ?? []}
       products={products ?? []}
+      feeds={feeds ?? []}
       canDecide={canDecideRemoval(role)}
       meId={actor?.id ?? null}
     />

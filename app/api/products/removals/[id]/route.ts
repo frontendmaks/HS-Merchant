@@ -30,7 +30,7 @@ export async function PATCH(
   const supabase = createServiceClient()
   const { data: request } = await supabase
     .from('product_removal_requests')
-    .select('id, status, created_by, reason')
+    .select('id, status, created_by, reason, feed_ids')
     .eq('id', id).maybeSingle()
 
   if (!request) return NextResponse.json({ error: 'Запит не знайдено' }, { status: 404 })
@@ -59,11 +59,16 @@ export async function PATCH(
   if (decision === 'approve' && productIds.length) {
     // Which feeds each product is in right now, so putting it back later
     // restores exactly those and nothing else
-    const { data: memberships } = await supabase
+    // The feeds the request named, or every one the product is in
+    const scope = (request.feed_ids as string[] | null) ?? []
+    let membershipQuery = supabase
       .from('feed_products')
       .select('feed_id, product_id')
       .in('product_id', productIds)
       .eq('is_active', true)
+    if (scope.length) membershipQuery = membershipQuery.in('feed_id', scope)
+
+    const { data: memberships } = await membershipQuery
 
     const feedsOf = new Map<string, string[]>()
     for (const m of memberships ?? []) {
@@ -89,10 +94,13 @@ export async function PATCH(
     // Out of the feeds themselves: the offer stops being generated, which is
     // what "зняти з продажу" was asked to mean
     if (memberships?.length) {
-      const { error } = await supabase
+      let off = supabase
         .from('feed_products')
         .update({ is_active: false, updated_at: withdrawnAt })
         .in('product_id', productIds)
+      if (scope.length) off = off.in('feed_id', scope)
+
+      const { error } = await off
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     }
   }
