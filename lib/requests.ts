@@ -225,13 +225,14 @@ export const NOTIFICATION_TYPES = {
 
 export type RequestEventType =
   | 'created' | 'status' | 'priority' | 'deadline'
-  | 'description' | 'note' | 'assignees' | 'confirmed' | 'returned'
+  | 'subject' | 'description' | 'note' | 'assignees' | 'confirmed' | 'returned'
 
 export const EVENT_META: Record<RequestEventType, { label: string; icon: string }> = {
   created:     { label: 'створив запит',            icon: '✚' },
   status:      { label: 'змінив статус',            icon: '↻' },
   priority:    { label: 'змінив пріоритет',         icon: '⚑' },
   deadline:    { label: 'змінив дедлайн',           icon: '◷' },
+  subject:     { label: 'змінив назву',             icon: '✎' },
   description: { label: 'змінив опис',              icon: '✎' },
   note:        { label: 'додав нотатку',            icon: '✎' },
   assignees:   { label: 'змінив виконавців',        icon: '◉' },

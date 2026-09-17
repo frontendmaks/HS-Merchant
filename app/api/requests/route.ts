@@ -157,11 +157,12 @@ export async function PATCH(request: NextRequest) {
   if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const {
-    id, status, deadline, priority, description, assignees,
+    id, status, deadline, priority, subject, description, assignees,
     resolution, resolution_url, resolution_files,
   } = await request.json() as {
     id: string
     status?: RequestStatus
+    subject?: string
     deadline?: string | null
     priority?: RequestPriority
     description?: string
@@ -201,6 +202,13 @@ export async function PATCH(request: NextRequest) {
   if (assignees !== undefined && !isAuthor) {
     return NextResponse.json(
       { error: 'Виконавців може змінювати лише той, хто поставив запит' }, { status: 403 })
+  }
+  // The wording of the ask belongs to whoever is asking. An assignee who could
+  // rewrite it could quietly change the job they were given into one they had
+  // already done.
+  if ((subject !== undefined || description !== undefined) && !isAuthor) {
+    return NextResponse.json(
+      { error: 'Назву й опис може змінювати лише той, хто поставив запит' }, { status: 403 })
   }
   // Who may move the request where — mirrors the dropdowns the UI offers
   if (status !== undefined && status !== before.status) {
@@ -306,11 +314,23 @@ export async function PATCH(request: NextRequest) {
       before.subject)
   }
 
+  if (subject !== undefined && subject.trim() && subject.trim() !== before.subject) {
+    const next = subject.trim()
+    await service.from('requests').update({ subject: next }).eq('id', id)
+    await Promise.all([
+      logEvent(service, id, caller.id, 'subject', before.subject, next),
+      // Named with the new title: a notice carrying the old one sends people
+      // looking for a request that no longer reads that way
+      notify(service, currentAssignees, caller.id, id, NOTIFICATION_TYPES.updated,
+        `${displayName(caller)} змінив назву запиту`, next),
+    ])
+  }
+
   if (description !== undefined && (description.trim() || null) !== before.description) {
     await Promise.all([
       logEvent(service, id, caller.id, 'description', before.description, description.trim() || null),
-      notify(service, audience, caller.id, id, NOTIFICATION_TYPES.updated,
-        `${displayName(caller)} змінив опис запиту`, before.subject),
+      notify(service, currentAssignees, caller.id, id, NOTIFICATION_TYPES.updated,
+        `${displayName(caller)} змінив опис запиту`, subject?.trim() || before.subject),
     ])
   }
 

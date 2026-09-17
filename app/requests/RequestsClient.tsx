@@ -998,6 +998,11 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
   const [savingNote, setSavingNote] = useState(false)
   const [noteError, setNoteError] = useState('')
   const [editingPeople, setEditingPeople] = useState(false)
+  // The ask itself — only its author may reword it
+  const [editingAsk, setEditingAsk] = useState(false)
+  const [draftSubject, setDraftSubject] = useState(r.subject)
+  const [draftDescription, setDraftDescription] = useState(r.description ?? '')
+  const [askError, setAskError] = useState('')
   const [draftAssignees, setDraftAssignees] = useState<string[]>(r.assignees.map(a => a.id))
 
   const isAuthor = r.created_by === me.id
@@ -1035,6 +1040,18 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
     }
   }
 
+  async function saveAsk() {
+    const subject = draftSubject.trim()
+    if (!subject) { setAskError('Назва не може бути порожньою'); return }
+    setAskError('')
+    try {
+      await onPatch(r.id, { subject, description: draftDescription })
+      setEditingAsk(false)
+    } catch (e) {
+      setAskError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   const control = 'bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-red-500 disabled:opacity-50'
 
   return (
@@ -1055,7 +1072,32 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
                 {categoryByKey(r.category)?.icon} {categoryLabel(r.category)}
               </span>
             </div>
-            <h3 className="text-white font-semibold">{r.subject}</h3>
+            {editingAsk ? (
+              <input
+                value={draftSubject}
+                onChange={e => setDraftSubject(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2
+                           text-white text-sm focus:outline-none focus:border-red-500"
+                placeholder="Назва запиту"
+              />
+            ) : (
+              <div className="flex items-start gap-2">
+                <h3 className="text-white font-semibold min-w-0">{r.subject}</h3>
+                {isAuthor && !isClosed(r.status) && (
+                  <button
+                    onClick={() => {
+                      setDraftSubject(r.subject)
+                      setDraftDescription(r.description ?? '')
+                      setEditingAsk(true)
+                    }}
+                    className="text-zinc-500 hover:text-white text-xs shrink-0 mt-0.5 transition-colors"
+                    title="Редагувати назву та опис"
+                  >
+                    ✎
+                  </button>
+                )}
+              </div>
+            )}
             <div className="flex items-center gap-3 mt-2 flex-wrap">
               <PersonChip person={r.author} label="Поставив:" />
               <span className="text-zinc-600 text-xs">{fmtDateTime(r.created_at)}</span>
@@ -1074,14 +1116,46 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
             </div>
           )}
 
-          {r.description && (
+          {editingAsk ? (
+            <div>
+              <div className="text-zinc-400 text-xs mb-1.5">Опис</div>
+              <textarea
+                value={draftDescription}
+                onChange={e => setDraftDescription(e.target.value)}
+                rows={4}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5
+                           text-white text-sm focus:outline-none focus:border-red-500"
+              />
+              {askError && <div className="text-red-400 text-xs mt-1.5">{askError}</div>}
+              {/* Said here because it changes what the other person sees next */}
+              <p className="text-zinc-600 text-xs mt-1.5">
+                Виконавці отримають сповіщення про зміну, а сама зміна лишиться в журналі.
+              </p>
+              <div className="flex items-center gap-2 mt-2">
+                <button
+                  disabled={busy}
+                  onClick={saveAsk}
+                  className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white
+                             text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  Зберегти
+                </button>
+                <button
+                  onClick={() => { setEditingAsk(false); setAskError('') }}
+                  className="text-zinc-500 hover:text-white text-xs px-2 py-1.5 transition-colors"
+                >
+                  Скасувати
+                </button>
+              </div>
+            </div>
+          ) : r.description ? (
             <div>
               <div className="text-zinc-400 text-xs mb-1.5">Опис</div>
               <div className="text-zinc-200 text-sm whitespace-pre-wrap bg-zinc-800/40 rounded-lg px-3 py-2.5">
                 {r.description}
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* The author decides from this, so it sits above the status control
               rather than at the bottom of the modal */}
