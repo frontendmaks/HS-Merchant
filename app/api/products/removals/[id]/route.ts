@@ -12,7 +12,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor } from '@/lib/order-events'
 import { getCurrentRole } from '@/lib/getRole'
-import { canDecideRemoval } from '@/lib/product-removal'
+import {
+  canDecideRemoval, canEditRemoval, MIN_REMOVAL_REASON,
+} from '@/lib/product-removal'
 
 export async function PATCH(
   req: NextRequest,
@@ -22,10 +24,15 @@ export async function PATCH(
   if (!actor) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await params
-  const { decision, note } = await req.json() as {
-    decision: 'approve' | 'reject' | 'cancel'
+  const body = await req.json() as {
+    decision?: 'approve' | 'reject' | 'cancel'
     note?: string
+    /** Editing a request that has not been decided yet */
+    reason?: string
+    productIds?: string[]
+    feedIds?: string[]
   }
+  const { decision, note } = body
 
   const supabase = createServiceClient()
   const { data: request } = await supabase
@@ -39,6 +46,19 @@ export async function PATCH(
   }
 
   const role = await getCurrentRole()
+
+  // An edit, not a decision. The author corrects their own ask; whoever may
+  // decide can also correct it, since they are the one acting on it.
+  if (!decision) {
+    if (!canEditRemoval(request.status as string)) {
+      return NextResponse.json(
+        { error: 'Опрацьований запит уже не редагується' }, { status: 409 })
+    }
+    if (request.created_by !== actor.id && !canDecideRemoval(role)) {
+      return NextResponse.json({ error: 'Редагувати може автор або адміністратор' }, { status: 403 })
+    }
+    return await edit(supabase, id, request, body, actor)
+  }
 
   // Withdrawing a request is the author's own business; deciding one is not
   if (decision === 'cancel') {
@@ -127,7 +147,92 @@ export async function PATCH(
     })
   }
 
+  await supabase.from('product_removal_events').insert({
+    request_id: id, actor_id: actor.id, actor_name: actor.name,
+    type: status === 'approved' ? 'approved' : status === 'rejected' ? 'rejected' : 'canceled',
+    new_value: note?.trim() || null,
+  })
+
   return NextResponse.json({ ok: true, status, products: productIds.length })
+}
+
+type Service = ReturnType<typeof createServiceClient>
+
+/**
+ * Applies a correction and writes down what changed.
+ *
+ * Every field is compared before it is written: a save that touched nothing
+ * must not leave a line in the history saying it did, or the history stops
+ * being worth reading.
+ */
+async function edit(
+  supabase: Service,
+  id: string,
+  before: { reason: string; feed_ids: string[] | null },
+  patch: { reason?: string; productIds?: string[]; feedIds?: string[] },
+  actor: { id: string; name: string },
+) {
+  const events: Record<string, unknown>[] = []
+  const line = (type: string, oldValue: string | null, newValue: string | null) =>
+    events.push({
+      request_id: id, actor_id: actor.id, actor_name: actor.name,
+      type, old_value: oldValue, new_value: newValue,
+    })
+
+  if (patch.reason !== undefined) {
+    const next = patch.reason.trim()
+    if (next.length < MIN_REMOVAL_REASON) {
+      return NextResponse.json(
+        { error: `Опишіть причину — щонайменше ${MIN_REMOVAL_REASON} символів` },
+        { status: 400 },
+      )
+    }
+    if (next !== before.reason) {
+      await supabase.from('product_removal_requests').update({ reason: next }).eq('id', id)
+      line('reason', before.reason, next)
+    }
+  }
+
+  if (patch.feedIds !== undefined) {
+    const next = [...new Set(patch.feedIds.filter(Boolean))].sort()
+    const was = [...(before.feed_ids ?? [])].sort()
+    if (next.join() !== was.join()) {
+      await supabase.from('product_removal_requests').update({ feed_ids: next }).eq('id', id)
+      const name = async (ids: string[]) => {
+        if (!ids.length) return 'усі маркетплейси'
+        const { data } = await supabase.from('feeds').select('name').in('id', ids)
+        return (data ?? []).map(f => f.name as string).join(', ')
+      }
+      line('feeds', await name(was), await name(next))
+    }
+  }
+
+  if (patch.productIds !== undefined) {
+    const next = [...new Set(patch.productIds.filter(Boolean))]
+    const { data: current } = await supabase
+      .from('product_removal_items').select('product_id').eq('request_id', id)
+    const was = (current ?? []).map(i => i.product_id as string)
+
+    if ([...next].sort().join() !== [...was].sort().join()) {
+      if (!next.length) {
+        return NextResponse.json({ error: 'Оберіть хоча б один товар' }, { status: 400 })
+      }
+      const { data: products } = await supabase
+        .from('products').select('id, name').in('id', next)
+
+      await supabase.from('product_removal_items').delete().eq('request_id', id)
+      await supabase.from('product_removal_items').insert(
+        (products ?? []).map(p => ({
+          request_id: id, product_id: p.id, product_name: p.name,
+        })),
+      )
+      line('items', `${was.length} тов.`, `${next.length} тов.`)
+    }
+  }
+
+  if (events.length) await supabase.from('product_removal_events').insert(events)
+
+  return NextResponse.json({ ok: true, changes: events.length })
 }
 
 export const dynamic = 'force-dynamic'

@@ -27,3 +27,20 @@ export const canDecideRemoval = (role: string | null | undefined) =>
 export const MIN_REMOVAL_REASON = 10
 
 export const isOpen = (status: string) => status === 'pending'
+
+/** What a line in a request's history means. */
+export const REMOVAL_EVENT_LABEL: Record<string, string> = {
+  created:  'подав запит',
+  reason:   'змінив причину',
+  items:    'змінив перелік товарів',
+  feeds:    'змінив маркетплейси',
+  approved: 'підтвердив',
+  rejected: 'відхилив',
+  canceled: 'скасував запит',
+  restored: 'повернув у продаж',
+}
+
+/** Editing is for a request still waiting on a decision. Once it is approved
+ *  the products are already out of the feeds, and rewriting the ask afterwards
+ *  would describe something that never happened. */
+export const canEditRemoval = (status: string) => status === 'pending'

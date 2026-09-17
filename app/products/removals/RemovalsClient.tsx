@@ -55,7 +55,7 @@ export default function RemovalsClient({ requests, products, feeds, canDecide, m
 }) {
   const feedName = (id: string) => feeds.find(f => f.id === id)?.name ?? id
   const router = useRouter()
-  const [composing, setComposing] = useState(false)
+  const [editing, setEditing] = useState<RemovalRequest | 'new' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [tab, setTab] = useState<'open' | 'all'>('open')
@@ -112,7 +112,7 @@ export default function RemovalsClient({ requests, products, feeds, canDecide, m
           </p>
         </div>
         <button
-          onClick={() => setComposing(true)}
+          onClick={() => setEditing('new')}
           className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium
                      px-4 py-2 rounded-lg transition-colors"
         >
@@ -216,6 +216,14 @@ export default function RemovalsClient({ requests, products, feeds, canDecide, m
                         </button>
                       </>
                     )}
+                    {(mine || canDecide) && (
+                      <button
+                        onClick={() => setEditing(r)}
+                        className="text-zinc-400 hover:text-white text-xs px-2 py-1.5 transition-colors"
+                      >
+                        Редагувати
+                      </button>
+                    )}
                     {mine && (
                       <button
                         disabled={busy === r.id}
@@ -274,12 +282,13 @@ export default function RemovalsClient({ requests, products, feeds, canDecide, m
         </div>
       )}
 
-      {composing && (
+      {editing && (
         <Compose
-          products={products.filter(p => !p.withdrawn_at)}
+          request={editing === 'new' ? null : editing}
+          products={products.filter(p => !p.withdrawn_at || editing !== 'new')}
           feeds={feeds}
-          onClose={() => setComposing(false)}
-          onDone={() => { setComposing(false); router.refresh() }}
+          onClose={() => setEditing(null)}
+          onDone={() => { setEditing(null); router.refresh() }}
         />
       )}
     </div>
@@ -287,17 +296,23 @@ export default function RemovalsClient({ requests, products, feeds, canDecide, m
 }
 
 /** Picking the products and saying why. */
-function Compose({ products, feeds, onClose, onDone }: {
+function Compose({ request, products, feeds, onClose, onDone }: {
+  /** Null when raising a new one */
+  request: RemovalRequest | null
   products: Product[]
   feeds: Feed[]
   onClose: () => void
   onDone: () => void
 }) {
-  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [picked, setPicked] = useState<Set<string>>(
+    new Set((request?.items ?? []).map(i => i.product_id)),
+  )
   // Empty set means every marketplace — the usual case, and the default
-  const [pickedFeeds, setPickedFeeds] = useState<Set<string>>(new Set())
+  const [pickedFeeds, setPickedFeeds] = useState<Set<string>>(
+    new Set(request?.feed_ids ?? []),
+  )
   const [query, setQuery] = useState('')
-  const [reason, setReason] = useState('')
+  const [reason, setReason] = useState(request?.reason ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -326,15 +341,19 @@ function Compose({ products, feeds, onClose, onDone }: {
     setError('')
     setSaving(true)
     try {
-      const res = await fetch('/api/products/removals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productIds: [...picked],
-          reason,
-          feedIds: pickedFeeds.size === feeds.length ? [] : [...pickedFeeds],
-        }),
-      })
+      const body = {
+        productIds: [...picked],
+        reason,
+        feedIds: pickedFeeds.size === feeds.length ? [] : [...pickedFeeds],
+      }
+      const res = await fetch(
+        request ? `/api/products/removals/${request.id}` : '/api/products/removals',
+        {
+          method: request ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+      )
       const data = await res.json() as { ok?: boolean; error?: string }
       if (!data.ok) throw new Error(data.error || 'Не вдалося подати запит')
       onDone()
@@ -352,7 +371,9 @@ function Compose({ products, feeds, onClose, onDone }: {
            style={{ maxHeight: 'calc(100vh - 4rem)' }}
            onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between shrink-0">
-          <h2 className="text-white font-semibold">Запит на зняття з продажу</h2>
+          <h2 className="text-white font-semibold">
+            {request ? 'Редагувати запит' : 'Запит на зняття з продажу'}
+          </h2>
           <button onClick={onClose} className="text-zinc-500 hover:text-white text-xl leading-none">×</button>
         </div>
 
@@ -462,7 +483,7 @@ function Compose({ products, feeds, onClose, onDone }: {
             className="bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed
                        text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
           >
-            {saving ? 'Надсилання…' : 'Подати на підтвердження'}
+            {saving ? 'Збереження…' : request ? 'Зберегти зміни' : 'Подати на підтвердження'}
           </button>
         </div>
       </div>

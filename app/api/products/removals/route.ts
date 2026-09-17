@@ -89,6 +89,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: itemsError.message }, { status: 500 })
   }
 
+  await supabase.from('product_removal_events').insert({
+    request_id: request.id, actor_id: actor.id, actor_name: actor.name,
+    type: 'created', new_value: `${found.length} тов.`,
+  })
+
   await notifyDeciders(supabase, actor.name, found.length, request.id)
 
   return NextResponse.json({ ok: true, id: request.id, skipped: already.length })
