@@ -42,14 +42,20 @@ const CATALOG_TTL_MS = 3 * 864e5
  * address looks like the product, so it costs a handful of requests rather
  * than a crawl.
  */
+type Rival = {
+  id: string; search_url: string | null; site_url: string; city_path: string
+  catalog_urls: unknown; catalog_synced_at: string | null
+}
+
 async function candidates(
   service: Service,
-  rival: { id: string; search_url: string | null; site_url: string; city_path: string
-           catalog_urls: unknown; catalog_synced_at: string | null },
+  rival: Rival,
   productName: string,
   chrome?: Set<string>,
+  /** Пропустити пошук і одразу читати каталог */
+  catalogOnly = false,
 ): Promise<{ items: Found[]; error?: string }> {
-  if (rival.search_url) {
+  if (rival.search_url && !catalogOnly) {
     let lastError: string | undefined
     for (const query of queryVariants(productName)) {
       const attempt = await searchCompetitor(
@@ -257,7 +263,30 @@ export async function runPriceCheck(
 
       const best = scored[0]
 
-      if (!best || best.score < MATCH_MODES[mode].floor) {
+      /**
+       * Пошук магазину — не те саме, що його асортимент.
+       *
+       * «Гомілка куряча» лежить у Родинної за адресою /product/homilka-kuriacha,
+       * але їхній пошук на «гомілка» віддає лише мариновані й копчені варіанти.
+       * Товар є, знайти його через пошук неможливо — тож коли пошук нічого не
+       * дав, дивимось у каталог сайту, який ми й так маємо з їхньої карти.
+       */
+      if ((!best || best.score < MATCH_MODES[mode].floor) && rival.search_url) {
+        const viaCatalog = await candidates(service, rival, product.name as string, chrome, true)
+        const rescored = viaCatalog.items
+          .filter(i => !rejected.has(`${product.id}|${rival.id}|${i.title}`))
+          .filter(i => sameKind(product.name as string, i.title))
+          .map(i => ({ ...i, score: similarity(product.name as string, i.title, mode) }))
+          .sort((a, b) => b.score - a.score)
+
+        if (rescored.length && rescored[0].score >= MATCH_MODES[mode].floor) {
+          scored.length = 0
+          scored.push(...rescored)
+        }
+      }
+
+      const chosen = scored[0]
+      if (!chosen || chosen.score < MATCH_MODES[mode].floor) {
         // Nothing acceptable today means yesterday's guesses are not acceptable
         // either. Without this a match the vocabulary now rejects — a turkey
         // thigh under a chicken one — sits in the details for ever, because the
@@ -275,7 +304,7 @@ export async function runPriceCheck(
           product_id: product.id, competitor_id: rival.id,
           competitor_url: '', competitor_title: null,
           checked_at: now, error: 'Схожої позиції не знайдено',
-          price: null, similarity: best ? best.score : null,
+          price: null, similarity: chosen ? chosen.score : null,
         }, { onConflict: 'product_id,competitor_id,competitor_url' })
         result.missed++
         continue
@@ -333,12 +362,12 @@ export async function runPriceCheck(
           .not('competitor_url', 'in', `(${keptUrls.map(u => `"${u}"`).join(',')})`)
       }
 
-      const theirAmount = extractAmount(best.title)
+      const theirAmount = extractAmount(chosen.title)
       // Only where the mode permits it: under «Точна позиція» a different pack
       // is a different offer, and scaling it would invent a comparison the
       // setting exists to refuse
       const normalized = MATCH_MODES[mode].allowScaling
-        ? scaleToOurPack(best.price, theirAmount, ourAmount)
+        ? scaleToOurPack(chosen.price, theirAmount, ourAmount)
         : null
 
       await service.from('price_snapshots').insert({

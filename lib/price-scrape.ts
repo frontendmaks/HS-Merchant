@@ -199,9 +199,16 @@ export function fromCards(
     // All of them, not the first: a card window also contains «Додати у кошик»
     // and other labels, and taking the first one found no price and fell back
     // to guessing from the markup
-    const aria = [...window.matchAll(/aria-label=["']([^"']{8,200})["']/gi)]
-      .map(m => m[1])
-      .find(t => /грн|₴/i.test(t))
+    // Атрибут читається до своєї власної лапки, а не до будь-якої.
+    //
+    // Клас [^"'] обривав назву на апострофі, і «Куряча гомілка м'якоть
+    // заморожена» перетворювалась на «Куряча гомілка м» — а разом із назвою
+    // губилась і ціна. В українських назвах апостроф усюди: м'ясо, в'ялене,
+    // п'ятачок.
+    const aria = [
+      ...window.matchAll(/aria-label="([^"]{8,300})"/gi),
+      ...window.matchAll(/aria-label='([^']{8,300})'/gi),
+    ].map(m => m[1]).find(t => /грн|₴/i.test(t))
 
     if (aria) {
       const parts = decode(aria).split(';').map(x => x.trim()).filter(Boolean)
@@ -267,8 +274,8 @@ export function fromCards(
 
     const title =
       named(/>([^<>]{4,140})</g)
-      || named(/alt=["']([^"']{4,140})["']/g)
-      || named(/title=["']([^"']{4,140})["']/g)
+      || named(/alt="([^"]{4,160})"/g)
+      || named(/title="([^"]{4,160})"/g)
 
     if (title.length > 3) out.push({ title, price, url: link, unitLabel })
   }
