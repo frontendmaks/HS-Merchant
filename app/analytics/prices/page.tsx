@@ -16,7 +16,7 @@ export default async function PriceMonitorPage() {
     await Promise.all([
     service.from('price_competitors')
       .select(`id, name, site_url, search_url, is_active, last_checked_at,
-               last_error, catalog_synced_at, city_path`)
+               last_error, catalog_synced_at, city_path, readable`)
       .order('created_at'),
     service.from('price_watches')
       .select('product_id, added_at, match_mode, product:products(id, name, price, category_name, stock, status)')
@@ -25,7 +25,7 @@ export default async function PriceMonitorPage() {
       .select(`id, product_id, competitor_id, competitor_title, competitor_url,
                price, similarity, status, checked_at, error, is_chosen,
                price_per_kg, our_price_per_kg, unit_label,
-               context_label, context_note,
+               context_label, context_note, is_manual,
                our_amount, competitor_amount, normalized_price`),
     service.from('price_settings').select('*').eq('id', true).single(),
   ])

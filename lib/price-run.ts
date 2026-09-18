@@ -104,7 +104,7 @@ export async function runPriceCheck(
     service.from('price_competitors')
       .select(`id, name, site_url, search_url, city_path,
                catalog_urls, catalog_synced_at`)
-      .eq('is_active', true),
+      .eq('is_active', true).eq('readable', true),
   ])
 
   const productIds = (watches ?? [])
@@ -202,6 +202,7 @@ export async function runPriceCheck(
           .eq('competitor_id', rival.id)
           .eq('status', 'auto')
           .eq('is_chosen', false)
+          .eq('is_manual', false)
           .neq('competitor_url', '')
 
         await service.from('price_matches').upsert({
@@ -262,6 +263,7 @@ export async function runPriceCheck(
           .eq('competitor_id', rival.id)
           .eq('status', 'auto')
           .eq('is_chosen', false)
+          .eq('is_manual', false)
           .not('competitor_url', 'in', `(${keptUrls.map(u => `"${u}"`).join(',')})`)
       }
 

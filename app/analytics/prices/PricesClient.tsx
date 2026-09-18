@@ -15,6 +15,7 @@ interface Competitor {
   search_url: string | null
   city_path: string
   is_active: boolean
+  readable: boolean
   last_checked_at: string | null
   last_error: string | null
 }
@@ -36,6 +37,7 @@ interface Match {
   unit_label: string | null
   context_label: string | null
   context_note: string | null
+  is_manual: boolean
   our_amount: number | null; competitor_amount: number | null
   /** Their price at our pack size; null when either size is unknown */
   normalized_price: number | null
@@ -444,6 +446,11 @@ export default function PricesClient({
                     busy={busy}
                     checking={run?.status === 'running' && checkingId === row.product.id}
                     onCheck={() => startRun(row.product.id)}
+                    onManual={body => call('/api/prices/manual', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ ...body, productId: row.product.id }),
+                    }, row.product.id)}
                     onChoose={id => call('/api/prices/match', {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
@@ -585,7 +592,7 @@ interface Row {
 }
 
 function ProductCard({
-  row, competitors, previous, busy, checking, onCheck, onMatch, onChoose, onRemove,
+  row, competitors, previous, busy, checking, onCheck, onMatch, onChoose, onManual, onRemove,
 }: {
   row: Row
   competitors: Competitor[]
@@ -595,6 +602,7 @@ function ProductCard({
   onCheck: () => void
   onMatch: (id: string, status: string) => void
   onChoose: (id: string) => void
+  onManual: (body: Record<string, unknown>) => void
   onRemove: () => void
 }) {
   // Opened by default when the only thing standing between this product and a
@@ -702,7 +710,10 @@ function ProductCard({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-zinc-300 text-xs font-medium">{nameOf(m.competitor_id)}</span>
-                        {m.status === 'confirmed' && (
+                        {m.is_manual && (
+                          <span className="text-cyan-400 text-xs">✎ внесено вручну</span>
+                        )}
+                        {m.status === 'confirmed' && !m.is_manual && (
                           <span className="text-emerald-400 text-xs">✓ підтверджено</span>
                         )}
                         {m.status === 'rejected' && (
@@ -815,6 +826,17 @@ function ProductCard({
             </div>
           )}
 
+          {/* Shops that refuse to be read still belong in the comparison —
+              with a price someone looked up and typed */}
+          {competitors.some(c => !c.readable && c.is_active) && (
+            <ManualRow
+              productId={row.product.id}
+              competitors={competitors.filter(c => !c.readable && c.is_active)}
+              busy={busy}
+              onSave={onManual}
+            />
+          )}
+
           <div className="px-4 py-2 border-t border-zinc-800 flex justify-between items-center">
             <span className="text-zinc-600 text-xs">
               Перевірено: {when(row.all[0]?.checked_at ?? null)}
@@ -917,6 +939,12 @@ function CompetitorsTab({ competitors, busy, onAdd, onToggle, onCity, onDelete }
                   Перевірено: {when(c.last_checked_at)}
                 </div>
 
+                {!c.readable && (
+                  <div className="text-cyan-400/80 text-xs mt-1">
+                    Сайт не віддає сторінки нашому серверу — ціни вносяться вручну
+                    в деталях товару
+                  </div>
+                )}
                 <div className="text-zinc-600 text-xs mt-0.5">
                   Ціни читаємо для міста:{' '}
                   <span className="text-zinc-400">
@@ -1364,6 +1392,88 @@ function ThresholdsBox({ thresholds, busy, onSave }: {
         «Підрізати на» — наскільки нижче за найдешевшого конкурента ставити
         рекомендовану ціну. Нуль означає рівно в його ціну.
       </p>
+    </div>
+  )
+}
+
+/**
+ * Typing in a price for a shop that will not be read.
+ *
+ * Kept inside the product's own details rather than on a page of its own: the
+ * question «what does Сільпо charge for this» only ever comes up while looking
+ * at this product, and a separate screen would be a separate thing to remember.
+ */
+function ManualRow({ productId, competitors, busy, onSave }: {
+  productId: string
+  competitors: Competitor[]
+  busy: string
+  onSave: (body: Record<string, unknown>) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [competitorId, setCompetitorId] = useState(competitors[0]?.id ?? '')
+  const [title, setTitle] = useState('')
+  const [price, setPrice] = useState('')
+  const [unit, setUnit] = useState('/кг')
+  const [url, setUrl] = useState('')
+
+  const field = 'bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-white text-xs placeholder-zinc-600 focus:outline-none focus:border-red-500'
+
+  if (!open) {
+    return (
+      <div className="px-4 py-2 border-t border-zinc-800">
+        <button
+          onClick={() => setOpen(true)}
+          className="text-cyan-400 hover:text-cyan-300 text-xs transition-colors"
+        >
+          + Внести ціну вручну ({competitors.map(c => c.name).join(', ')})
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="px-4 py-3 border-t border-zinc-800 bg-zinc-800/30 space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <select value={competitorId} onChange={e => setCompetitorId(e.target.value)}
+          className={field}>
+          {competitors.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <input value={title} onChange={e => setTitle(e.target.value)}
+          placeholder="Назва позиції у конкурента" className={`${field} flex-1 min-w-[200px]`} />
+        <input value={price} onChange={e => setPrice(e.target.value)}
+          placeholder="Ціна" inputMode="decimal" className={`${field} w-24`} />
+        <select value={unit} onChange={e => setUnit(e.target.value)} className={field}>
+          <option value="/кг">за кг</option>
+          <option value="/100г">за 100 г</option>
+          <option value="/200г">за 200 г</option>
+          <option value="/500г">за 500 г</option>
+          <option value="">за упаковку</option>
+        </select>
+      </div>
+
+      <input value={url} onChange={e => setUrl(e.target.value)}
+        placeholder="Посилання на позицію (необовʼязково)" className={`${field} w-full`} />
+
+      <div className="flex items-center gap-2">
+        <button
+          disabled={!!busy || !title.trim() || !price}
+          onClick={() => {
+            onSave({ competitorId, title, price: Number(price.replace(',', '.')), unit, url })
+            setTitle(''); setPrice(''); setUrl(''); setOpen(false)
+          }}
+          className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white text-xs
+                     font-medium px-3 py-1.5 rounded-lg transition-colors"
+        >
+          Зберегти
+        </button>
+        <button onClick={() => setOpen(false)}
+          className="text-zinc-500 hover:text-white text-xs px-2 py-1.5 transition-colors">
+          Скасувати
+        </button>
+        <span className="text-zinc-600 text-xs">
+          Ціна перерахується за кілограм і більше не перезаписуватиметься автоматично
+        </span>
+      </div>
     </div>
   )
 }
