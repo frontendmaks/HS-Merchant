@@ -190,11 +190,21 @@ export function fromCards(
     // «Куряче крило кисть охолоджене; 100г; 4.78 грн». That is name, weight and
     // price already separated — better than anything guessed from the markup,
     // and it is what the shop itself considers the description of the card.
-    const aria = window.match(/aria-label=["']([^"']{8,200})["']/i)
-    if (aria && /грн|₴/i.test(aria[1])) {
-      const parts = decode(aria[1]).split(';').map(x => x.trim()).filter(Boolean)
+    // All of them, not the first: a card window also contains «Додати у кошик»
+    // and other labels, and taking the first one found no price and fell back
+    // to guessing from the markup
+    const aria = [...window.matchAll(/aria-label=["']([^"']{8,200})["']/gi)]
+      .map(m => m[1])
+      .find(t => /грн|₴/i.test(t))
+
+    if (aria) {
+      const parts = decode(aria).split(';').map(x => x.trim()).filter(Boolean)
       const priced = parts.find(x => /грн|₴/i.test(x))
-      const weighed = parts.find(x => /\d\s*(кг|г|мл|л)\b/i.test(x) && !/грн|₴/i.test(x))
+      // A lookahead, not \b. The boundary is ASCII-only and never fires after
+      // a Cyrillic «г», so «100г» read as carrying no weight — and the price
+      // was then taken to be per kilogram, ten times too low.
+      const weighed = parts.find(
+        x => /\d\s*(?:кг|гр|г|мл|л)(?![\p{L}\d])/u.test(x) && !/грн|₴/i.test(x))
       const value = priced
         ? Number(priced.replace(/[^\d.,]/g, '').replace(',', '.'))
         : NaN
