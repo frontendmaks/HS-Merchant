@@ -208,3 +208,16 @@ body {
   padding: 0.35em 0.7em;
   text-align: left;
 }
+
+/* Saving the overview as PDF is the browser's own print, so what lands on the
+   page is the comparison rather than the navigation around it. */
+@media print {
+  aside, .no-print { display: none !important; }
+  body { background: #fff !important; }
+  .print-plain, .print-plain * {
+    background: transparent !important;
+    color: #111 !important;
+    border-color: #ccc !important;
+  }
+  .print-plain { max-width: none !important; padding: 0 !important; }
+}
