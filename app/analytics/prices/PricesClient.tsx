@@ -160,7 +160,7 @@ export default function PricesClient({
     // confirmed. Counting these as «немає даних» is what made a working match
     // look like a failure.
     const needsReview = rows.filter(
-      r => r.advice.verdict === 'no_data' && r.unsure.length).length
+      r => r.advice.verdict === 'no_data' && (r.unsure.length || r.advice.suspect)).length
     const lift = rows
       .filter(r => r.advice.verdict === 'cheap' && r.advice.suggested)
       .reduce((s, r) => s + (r.advice.suggested! - Number(r.product.price ?? 0)), 0)
@@ -608,7 +608,7 @@ function ProductCard({
   // Opened by default when the only thing standing between this product and a
   // comparison is someone looking at it
   const awaiting = row.advice.verdict === 'no_data' && row.unsure.length > 0
-  const [open, setOpen] = useState(awaiting)
+  const [open, setOpen] = useState(awaiting || row.advice.suspect)
   const meta = VERDICT_META[row.advice.verdict]
   const our = row.ourShown
   const ourContext = contextLabel(row.product.name)
@@ -620,9 +620,11 @@ function ProductCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-              awaiting ? 'bg-cyan-900/60 text-cyan-300' : meta.badge
+              row.advice.suspect ? 'bg-amber-900/60 text-amber-300'
+                : awaiting ? 'bg-cyan-900/60 text-cyan-300' : meta.badge
             }`}>
-              {awaiting ? 'Потребує підтвердження' : meta.label}
+              {row.advice.suspect ? 'Перевірте одиниці'
+                : awaiting ? 'Потребує підтвердження' : meta.label}
             </span>
             {row.unsure.length > 0 && !awaiting && (
               <span className="px-2 py-0.5 rounded text-xs bg-zinc-800 text-zinc-400">
@@ -635,7 +637,7 @@ function ProductCard({
             <div className="text-zinc-600 text-xs mt-0.5">{ourContext}</div>
           )}
           <div className="text-zinc-500 text-xs mt-0.5">
-            {awaiting
+            {awaiting && !row.advice.suspect
               ? `Знайдено ${row.unsure.length} схожу позицію — підтвердьте нижче`
               : row.advice.reason}
             <span className="text-zinc-600"> · {MATCH_MODES[row.mode].label}</span>

@@ -272,6 +272,11 @@ export interface Advice {
   average: number | null
   /** What to change the price to, when changing it is worth suggesting */
   suggested: number | null
+  /**
+   * The gap is too large to be a market fact — almost certainly a unit
+   * mismatch. No price is recommended in this state.
+   */
+  suspect: boolean
   reason: string
 }
 
@@ -304,7 +309,7 @@ export function advise(
   if (!valid.length || !ourPrice) {
     return {
       verdict: 'no_data', gapPct: null, gapUah: null, cheapest: null, average: null,
-      suggested: null, reason: 'Немає цін конкурентів',
+      suggested: null, suspect: false, reason: 'Немає цін конкурентів',
     }
   }
 
@@ -313,6 +318,20 @@ export function advise(
   const gapUah = ourPrice - cheapest
   const gapPct = (gapUah / cheapest) * 100
 
+  // A threefold gap is not a price war, it is a different unit of measure.
+  // Silpo prints sausage per 100 г; read as a kilogram price it made our
+  // 449 ₴/кг look 689% too dear and produced «знизьте до 56 ₴» — advice that
+  // would be ruinous if anyone followed it. Better to say nothing and ask.
+  const ratio = cheapest > 0 ? ourPrice / cheapest : 1
+  if (ratio >= 3 || ratio <= 1 / 3) {
+    return {
+      verdict: 'no_data', gapPct, gapUah, cheapest, average,
+      suggested: null, suspect: true,
+      reason: `Розрив у ${ratio >= 3 ? ratio.toFixed(1) : (1 / ratio).toFixed(1)} раза`
+        + ' — схоже на різні одиниці виміру, перевірте деталі',
+    }
+  }
+
   const matters = Math.abs(gapUah) >= t.minAbs && Math.abs(gapPct) >= t.minPct
   // Just under the cheapest, not far under: undercutting by more than it takes
   // gives away margin the price did not need to lose
@@ -320,21 +339,21 @@ export function advise(
 
   if (matters && gapUah > 0) {
     return {
-      verdict: 'expensive', gapPct, gapUah, cheapest, average, suggested: target,
+      verdict: 'expensive', gapPct, gapUah, cheapest, average, suggested: target, suspect: false,
       reason: `Дорожче за найдешевшого на ${Math.round(gapUah)} ₴ (${gapPct.toFixed(0)}%)`,
     }
   }
 
   if (matters && gapUah < 0) {
     return {
-      verdict: 'cheap', gapPct, gapUah, cheapest, average,
+      verdict: 'cheap', gapPct, gapUah, cheapest, average, suspect: false,
       suggested: target > ourPrice ? target : null,
       reason: `Дешевше за найдешевшого на ${Math.round(-gapUah)} ₴ (${Math.abs(gapPct).toFixed(0)}%) — є запас`,
     }
   }
 
   return {
-    verdict: 'aligned', gapPct, gapUah, cheapest, average, suggested: null,
+    verdict: 'aligned', gapPct, gapUah, cheapest, average, suggested: null, suspect: false,
     reason: Math.abs(gapUah) < 1
       ? 'Ціна збігається з ринком'
       : `Різниця ${Math.round(Math.abs(gapUah))} ₴ — несуттєво`,
