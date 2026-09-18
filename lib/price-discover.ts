@@ -9,8 +9,16 @@
  */
 import { searchCompetitor } from '@/lib/price-scrape'
 
-/** Ordered by how common the platform is here, cheapest guess first. */
+/**
+ * Ordered by how common the shape is here, cheapest guess first.
+ *
+ * Both shapes matter. Query strings are the obvious ones, but plenty of
+ * Ukrainian shops put the term straight in the path — `/search/філе` — and a
+ * probe that only ever appends `?q=` decides those sites have no search at all.
+ */
 const PATTERNS = [
+  { name: 'Пошук у шляху',           path: '/search/{q}' },
+  { name: 'Пошук у шляху',           path: '/search/{q}/' },
   { name: 'WooCommerce / WordPress', path: '/?s={q}&post_type=product' },
   { name: 'WordPress',               path: '/?s={q}' },
   { name: 'Стандартний пошук',       path: '/search?q={q}' },
@@ -19,9 +27,14 @@ const PATTERNS = [
   { name: 'OpenCart',                path: '/index.php?route=product/search&search={q}' },
   { name: 'Magento',                 path: '/catalogsearch/result/?q={q}' },
   { name: 'Shopify',                 path: '/search?q={q}&type=product' },
+  { name: 'Пошук у шляху',           path: '/poshuk/{q}' },
+  { name: 'Пошук у шляху',           path: '/catalog/search/{q}' },
   { name: 'Загальний',               path: '/?search={q}' },
   { name: 'Загальний',               path: '/search?query={q}' },
 ]
+
+/** A word no shop stocks, used to prove a page is actually filtering. */
+const NONSENSE = 'zqxwvkj'
 
 export interface Discovery {
   searchUrl: string | null
@@ -31,8 +44,10 @@ export interface Discovery {
 }
 
 /**
- * @param probe a word the shop is likely to have — one of our own product
- *   names, so a hit means the search works on the things we will ask about
+ * @param probe a single common word the shop is likely to stock — «філе»,
+ *   «ковбаса». A whole product name is the wrong probe: a competitor that does
+ *   not carry that exact item returns nothing, and a working search gets
+ *   written off as missing.
  */
 export async function discoverSearchUrl(siteUrl: string, probe: string): Promise<Discovery> {
   let base: URL
@@ -51,9 +66,11 @@ export async function discoverSearchUrl(siteUrl: string, probe: string): Promise
     const { items, error } = await searchCompetitor(template, probe, 12_000)
     if (error || !items.length) continue
 
-    // A search page that answers with the whole catalogue has not searched —
-    // it has ignored the query, and every product would "match" everything
-    if (items.length >= 38) continue
+    // Asked for something nobody sells. A page that answers the same way to
+    // both is not searching — it is a catalogue that ignores the query, and
+    // taking it would match every product against everything.
+    const control = await searchCompetitor(template, NONSENSE, 12_000)
+    if (control.items.length >= items.length) continue
 
     return { searchUrl: template, platform: pattern.name, tried }
   }

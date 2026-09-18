@@ -1,3 +1,4 @@
+import { readProduct } from '@/lib/price-catalog'
 /**
  * Reading prices off a competitor's search results.
  *
@@ -12,6 +13,36 @@ export interface Found {
   title: string
   price: number
   url: string | null
+}
+
+/** Paths that look like a product page rather than a section or an article. */
+const PRODUCT_PATH = /\/(product|products|tovar|tovary|goods|item|catalog\/[^/]+\/[^/]+)\//i
+
+/**
+ * Same-site product links on a listing page, in the order they appear.
+ *
+ * Deliberately conservative: a shop's header links to every category, and
+ * treating those as results would compare our sausage against a menu.
+ */
+export function productLinks(html: string, pageUrl: string): string[] {
+  let origin: string
+  try { origin = new URL(pageUrl).origin } catch { return [] }
+
+  const out: string[] = []
+  const seen = new Set<string>()
+
+  for (const m of html.matchAll(/href=["']([^"'#]+)["']/gi)) {
+    let abs: URL
+    try { abs = new URL(m[1], pageUrl) } catch { continue }
+    if (abs.origin !== origin) continue
+    if (!PRODUCT_PATH.test(abs.pathname)) continue
+
+    const clean = abs.origin + abs.pathname
+    if (seen.has(clean)) continue
+    seen.add(clean)
+    out.push(clean)
+  }
+  return out
 }
 
 const UA =
@@ -131,7 +162,23 @@ export async function searchCompetitor(
     if (!res.ok) return { items: [], error: `HTTP ${res.status}` }
 
     const html = await res.text()
-    const items = [...fromJsonLd(html), ...fromMicrodata(html)]
+    const structured = [...fromJsonLd(html), ...fromMicrodata(html)]
+
+    // Most search pages carry no product markup at all — they are a grid of
+    // cards with a link each. The links are the reliable part: follow them and
+    // read the product pages, which do mark themselves up properly.
+    if (!structured.length) {
+      const links = productLinks(html, url)
+      if (links.length) {
+        const read = await Promise.all(links.slice(0, 6).map(readProduct))
+        const found: Found[] = read
+          .map((p, i) => p ? { title: p.title, price: p.price, url: links[i] } : null)
+          .filter((p): p is { title: string; price: number; url: string } => p !== null)
+        if (found.length) return { items: found }
+      }
+    }
+
+    const items = structured
       .map(i => ({ ...i, title: decode(i.title), url: absolutize(i.url, url) }))
       .filter(i => i.title.length > 2)
 

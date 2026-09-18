@@ -8,8 +8,8 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { searchCompetitor, type Found } from '@/lib/price-scrape'
 import { fetchCatalog, shortlist, readProduct } from '@/lib/price-catalog'
 import {
-  similarity, extractAmount, scaleToOurPack, MATCH_MODES, isMatchMode,
-  type MatchMode,
+  similarity, extractAmount, scaleToOurPack, queryVariants,
+  MATCH_MODES, isMatchMode, type MatchMode,
 } from '@/lib/price-monitor'
 
 type Service = ReturnType<typeof createServiceClient>
@@ -45,7 +45,16 @@ async function candidates(
            catalog_urls: unknown; catalog_synced_at: string | null },
   productName: string,
 ): Promise<{ items: Found[]; error?: string }> {
-  if (rival.search_url) return searchCompetitor(rival.search_url, productName)
+  if (rival.search_url) {
+    let lastError: string | undefined
+    for (const query of queryVariants(productName)) {
+      const attempt = await searchCompetitor(rival.search_url, query)
+      if (attempt.items.length) return attempt
+      lastError = attempt.error
+      await sleep(500)
+    }
+    return { items: [], error: lastError ?? 'Пошук нічого не повернув' }
+  }
 
   let urls = Array.isArray(rival.catalog_urls) ? rival.catalog_urls as string[] : []
   const stale = !rival.catalog_synced_at

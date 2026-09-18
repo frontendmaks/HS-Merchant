@@ -241,3 +241,30 @@ export const VERDICT_META: Record<Verdict, { label: string; badge: string; dot: 
   aligned:   { label: 'В ринку',    badge: 'bg-emerald-900/60 text-emerald-300', dot: 'bg-emerald-500' },
   no_data:   { label: 'Немає даних', badge: 'bg-zinc-800 text-zinc-400',         dot: 'bg-zinc-600' },
 }
+
+/**
+ * The same product asked for in progressively fewer words.
+ *
+ * Shop search is usually strict: «Філе куряче» returns nothing on a site that
+ * happily returns seven results for «філе», because it has no item containing
+ * both words. Sending only the full name therefore finds nothing almost
+ * everywhere, which reads as "this competitor has no such product" when in
+ * fact nobody asked properly.
+ *
+ * So we ask the way a person does — the whole name, then the essence of it,
+ * then the single word that says what the thing is — and stop at the first
+ * answer. Ranking the results is the matcher's job, not the search's.
+ */
+export function queryVariants(productName: string): string[] {
+  const words = normalizeTitle(productName)
+    .split(' ')
+    .map(w => w.replace(/[.,]+$/, ''))
+    .filter(w => w.length > 2 && !NOISE.has(w) && !/\d/.test(w))
+
+  const out = [
+    normalizeTitle(productName).replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim(),
+    words.slice(0, 2).join(' '),
+    words[0] ?? '',
+  ]
+  return [...new Set(out.filter(q => q.length > 2))]
+}

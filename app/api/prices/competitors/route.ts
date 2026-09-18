@@ -59,7 +59,15 @@ export async function POST(req: NextRequest) {
       .from('products').select('name')
       .eq('status', 'active').not('name', 'is', null).limit(1).single()
 
-    const found = await discoverSearchUrl(site_url, sample?.name as string ?? 'молоко')
+    // The first meaningful word of a real product — short enough that any
+    // grocer has something under it, ours enough that a hit means the search
+    // works on the kind of thing we will be asking about
+    const word = String(sample?.name ?? '')
+      .replace(/[«»"'’]/g, ' ')
+      .split(/\s+/)
+      .find(w => w.length > 3 && /^\p{L}+$/u.test(w)) ?? 'ковбаса'
+
+    const found = await discoverSearchUrl(site_url, word)
     searchUrl = found.searchUrl ?? ''
     platform = found.platform
     // No search is not a failure any more — the sitemap route handles it, and
