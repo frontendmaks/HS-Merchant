@@ -1,12 +1,14 @@
 // Pure role logic — no server imports, safe for client components.
 
-export type UserRole = 'super_admin' | 'admin' | 'manager' | 'operator' | 'viewer' | null
+export type UserRole =
+  | 'super_admin' | 'admin' | 'manager' | 'operator' | 'analyst' | 'viewer' | null
 
 export const ROLE_LABELS: Record<string, string> = {
   super_admin: 'Супер адміністратор',
   admin:       'Адміністратор',
   manager:     'Керівник',
   operator:    'Оператор',
+  analyst:     'Аналітик',
   viewer:      'Глядач',
 }
 
@@ -16,6 +18,9 @@ const RANK: Record<string, number> = {
   admin: 3,
   manager: 2,
   operator: 1,
+  // Reads one screen and changes nothing, so it ranks with the other
+  // read-only role rather than above anyone
+  analyst: 1,
   viewer: 0,
 }
 
@@ -25,8 +30,8 @@ export const roleRank = (role: string | null | undefined): number =>
 /** Roles each role is allowed to hand out, highest first.
  *  Керівник may not grant anything above Оператор. */
 const ASSIGNABLE: Record<string, UserRole[]> = {
-  super_admin: ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
-  admin:       ['manager', 'operator', 'viewer'],
+  super_admin: ['super_admin', 'admin', 'manager', 'operator', 'analyst', 'viewer'],
+  admin:       ['manager', 'operator', 'analyst', 'viewer'],
   manager:     ['operator', 'viewer'],
 }
 
@@ -37,6 +42,14 @@ export const canAssignRole = (callerRole: string | null | undefined, target: str
   assignableRoles(callerRole).includes(target as UserRole)
 
 /** Roles allowed into the users screen at all. */
+/**
+ * Sees the trade — what sold, where and to whom — and nothing about how the
+ * team works. The operator table and the cancellation reasons are about people
+ * here, not about the market, so they stay out of this role's view; the page
+ * does not render them and the server does not send them.
+ */
+export const isAnalyst = (role: string | null | undefined) => role === 'analyst'
+
 export const canManageUsers = (role: string | null | undefined): boolean =>
   assignableRoles(role).length > 0
 
@@ -55,7 +68,7 @@ export const PAGE_ROLES = {
   products:  ['super_admin', 'admin', 'viewer'],
   feeds:     ['super_admin', 'admin', 'viewer'],
   syncs:     ['super_admin', 'admin', 'manager'],
-  analytics: ['super_admin', 'admin', 'manager'],
+  analytics: ['super_admin', 'admin', 'manager', 'analyst'],
   orders:    ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
   requests:  ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
   /** Everyone has a newsfeed; which pieces land in it is decided per piece

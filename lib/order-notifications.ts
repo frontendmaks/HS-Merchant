@@ -16,13 +16,22 @@ interface NewOrder {
 const money = (n: number | null | undefined) =>
   n == null ? null : `₴${Number(n).toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-/** Everyone who works orders. Viewers only observe, so they are left out. */
+/**
+ * Everyone who works orders.
+ *
+ * Named rather than excluded by role, so a role added later has to be thought
+ * about before it starts receiving a notice for every order. Viewers only
+ * observe; an analyst reads the analytics screen and cannot open an order at
+ * all — a banner per order would be noise neither of them can act on.
+ */
+const ORDER_ROLES = ['super_admin', 'admin', 'manager', 'operator']
+
 async function recipients(supabase: Service): Promise<string[]> {
   const { data } = await supabase
     .from('profiles')
     .select('id')
     .eq('is_active', true)
-    .neq('role', 'viewer')
+    .in('role', ORDER_ROLES)
   return (data ?? []).map(r => r.id)
 }
 

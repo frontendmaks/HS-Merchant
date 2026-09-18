@@ -10,7 +10,7 @@ interface Profile {
   id: string
   email: string
   full_name: string | null
-  role: 'super_admin' | 'admin' | 'manager' | 'operator' | 'viewer'
+  role: 'super_admin' | 'admin' | 'manager' | 'operator' | 'analyst' | 'viewer'
   is_active: boolean
   created_at: string
   last_seen_at?: string | null

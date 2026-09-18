@@ -59,9 +59,12 @@ export default async function RequestsPage() {
 
   const [{ data: requests }, { data: people }] = await Promise.all([
     ids && ids.length === 0 ? Promise.resolve({ data: [] }) : query,
+    // Analysts are left out of the picker: they cannot open this screen, so a
+    // request assigned to one would sit there with nobody able to see it
     service.from('profiles')
       .select('id, full_name, email, role')
       .eq('is_active', true)
+      .neq('role', 'analyst')
       .order('full_name'),
   ])
 

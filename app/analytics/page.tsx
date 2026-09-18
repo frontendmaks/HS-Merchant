@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
+import { isAnalyst } from '@/lib/roles'
 import {
   learnCityOblasts, totals, ordersPerDay, popularProducts, popularCategories,
   customers, byRegion, normalizeTitle, operatorStats, cancelStats,
@@ -31,6 +32,19 @@ function defaultRange() {
 
 type OrderWithId = OrderRow & { id: string }
 
+/** Shape the client still expects, carrying nothing. */
+const EMPTY_CANCELS = {
+  total: 0, lost: 0,
+  bySide: {
+    us: { orders: 0, lost: 0 },
+    guest: { orders: 0, lost: 0 },
+    unknown: { orders: 0, lost: 0 },
+  },
+  reasons: [],
+  noReason: { orders: 0, lost: 0, bySide: { us: 0, guest: 0, unknown: 0 } },
+  beforeJournal: 0, unexplained: 0,
+}
+
 export default async function AnalyticsPage({
   searchParams,
 }: {
@@ -38,6 +52,10 @@ export default async function AnalyticsPage({
 }) {
   const role = await getCurrentRole()
   if (!canAccess('analytics', role)) redirect('/orders')
+
+  // An analyst reads the market, not the team. What they must not see is not
+  // hidden in the browser — it is never computed and never sent.
+  const limited = isAnalyst(role)
 
   const sp = await searchParams
   const fallback = defaultRange()
@@ -151,7 +169,7 @@ export default async function AnalyticsPage({
         })(),
       },
       regions: byRegion(rows, learned, gazetteer),
-      cancels: cancelStats(
+      cancels: limited ? EMPTY_CANCELS : cancelStats(
         rows,
         // An entry with an actor means a person here did it; sync writes none
         new Set(
@@ -162,7 +180,7 @@ export default async function AnalyticsPage({
         ),
         journalFrom,
       ),
-      operators: operatorStats(
+      operators: limited ? [] : operatorStats(
         events.filter(e => ids.has(e.order_id)),
         rows.map(o => ({
           id: o.id, total: o.total, status: o.status,
@@ -182,6 +200,7 @@ export default async function AnalyticsPage({
       from={from}
       to={to}
       platform={platform}
+      limited={limited}
       bundles={{
         all: bundle(orders),
         maudau: bundle(orders.filter(o => o.platform === 'maudau')),

@@ -582,12 +582,14 @@ export interface Bundle {
 }
 
 export default function AnalyticsClient({
-  from, to, platform: initialPlatform, bundles,
+  from, to, platform: initialPlatform, bundles, limited = false,
 }: {
   from: string
   to: string
   platform: string
   bundles: Record<string, Bundle>
+  /** An analyst: the trade, without the blocks that are about the team */
+  limited?: boolean
 }) {
   const [chartMetric, setChartMetric] = useState<ChartMetric>('count')
   const router = useRouter()
@@ -696,7 +698,7 @@ export default function AnalyticsClient({
         <DailyChart data={perDay} metric={chartMetric} />
       </Panel>
 
-      <Cancellations c={cancels} />
+      {!limited && <Cancellations c={cancels} />}
 
       <UkraineMap regions={regions} />
 
@@ -749,6 +751,7 @@ export default function AnalyticsClient({
       <CustomersTable rows={customers} />
 
       {/* Operators — no data source yet, stated plainly rather than faked */}
+      {!limited && (
       <Panel
         title="Ефективність операторів"
         subtitle="Рахується лише в межах змін за графіком, 09:00–17:00"
@@ -883,6 +886,7 @@ export default function AnalyticsClient({
           </>
         )}
       </Panel>
+      )}
       </div>
     </div>
   )
