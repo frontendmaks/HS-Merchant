@@ -69,6 +69,8 @@ export default function PricesClient({
   // A view filter only. The 09:30 pass always covers every active competitor —
   // narrowing what is collected would quietly make the history incomparable.
   const [only, setOnly] = useState<Set<string>>(new Set())
+  const [adviceOpen, setAdviceOpen] = useState(true)
+  const [printing, setPrinting] = useState(false)
   const [adding, setAdding] = useState(false)
   const [run, setRun] = useState<RunState | null>(null)
   const polling = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -108,19 +110,20 @@ export default function PricesClient({
       // «Дрогобицька» and «Дрогобицька ТЕР в/с» — and averaging or taking both
       // would compare us against a shop competing with itself. The offer a
       // person marked wins; otherwise the best-scoring one stands in.
+      // Міра ринку — тільки обрана позиція. Якщо в цього конкурента ніхто
+      // нічого не обирав, беремо найсхожішу автоматичну. Підтверджені, але не
+      // обрані, лишаються в переліку й оновлюються — але ціну не задають.
       const perCompetitor = new Map<string, Match>()
       for (const m of byProduct.get(product.id) ?? []) {
-        if (m.status === 'rejected' || m.price == null) continue
-        const usable = m.is_chosen || m.status === 'confirmed'
-          || Number(m.similarity ?? 0) >= trusted
-        if (!usable) continue
+        if (m.price == null) continue
 
         const held = perCompetitor.get(m.competitor_id)
-        const better = !held
-          || (m.is_chosen && !held.is_chosen)
-          || (m.is_chosen === held.is_chosen
-              && Number(m.similarity ?? 0) > Number(held.similarity ?? 0))
-        if (better) perCompetitor.set(m.competitor_id, m)
+        if (m.is_chosen) { perCompetitor.set(m.competitor_id, m); continue }
+        if (held?.is_chosen) continue
+        if (Number(m.similarity ?? 0) < trusted) continue
+        if (!held || Number(m.similarity ?? 0) > Number(held.similarity ?? 0)) {
+          perCompetitor.set(m.competitor_id, m)
+        }
       }
       const found = [...perCompetitor.values()]
       // Per kilogram wherever both sides have it. A tray at 60 ₴/200 г against
@@ -269,7 +272,11 @@ export default function PricesClient({
                   produces exactly what is on screen, and a second rendering
                   engine would be one more thing to keep in step with it */}
               <button
-                onClick={() => window.print()}
+                onClick={() => {
+                  setPrinting(true)
+                  // Даємо React домалювати розгорнуті деталі до діалогу друку
+                  setTimeout(() => { window.print(); setPrinting(false) }, 120)
+                }}
                 className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm
                            px-3 py-2 rounded-lg transition-colors"
               >
@@ -350,14 +357,26 @@ export default function PricesClient({
 
               {actions.length > 0 && (
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-                  <div className="px-4 py-3 border-b border-zinc-800">
-                    <div className="text-white text-sm font-medium">Що робити з цінами</div>
-                    <div className="text-zinc-500 text-xs mt-0.5">
+                  <button
+                    onClick={() => setAdviceOpen(!adviceOpen)}
+                    className="w-full text-left px-4 py-3 border-b border-zinc-800
+                               hover:bg-zinc-800/30 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`text-zinc-500 text-xs transition-transform ${
+                        adviceOpen ? 'rotate-90' : ''
+                      }`}>›</span>
+                      <span className="text-white text-sm font-medium">
+                        Рекомендації для цін
+                      </span>
+                      <span className="text-zinc-500 text-xs">({actions.length})</span>
+                    </div>
+                    <div className="text-zinc-500 text-xs mt-0.5 ml-5">
                       Показані лише позиції, де різниця більша за {thresholds.minAbs} ₴
                       і за {thresholds.minPct}% одночасно
                     </div>
-                  </div>
-                  <div className="divide-y divide-zinc-800/60">
+                  </button>
+                  <div className={`divide-y divide-zinc-800/60 ${adviceOpen ? '' : 'hidden'}`}>
                     {actions.map(r => {
                       const our = Number(r.product.price ?? 0)
                       const delta = (r.advice.suggested ?? our) - our
@@ -382,19 +401,6 @@ export default function PricesClient({
                         </div>
                       )
                     })}
-                  </div>
-                </div>
-              )}
-
-              {summary.lift > 0 && (
-                <div className="bg-amber-950/30 border border-amber-900/60 rounded-xl px-4 py-3">
-                  <div className="text-amber-300 text-sm font-medium">
-                    Можна підняти ціни на {money(summary.lift)} сумарно
-                  </div>
-                  <div className="text-zinc-400 text-xs mt-1">
-                    По {summary.cheap} позиціях ми дешевші за найдешевшого конкурента більше
-                    ніж на 12%. Це віддана маржа, а не перевага — покупець порівнює з ринком,
-                    а не з нашою вчорашньою ціною.
                   </div>
                 </div>
               )}
@@ -448,6 +454,7 @@ export default function PricesClient({
                     previous={previous}
                     busy={busy}
                     checking={run?.status === 'running' && checkingId === row.product.id}
+                    printing={printing}
                     onCheck={() => startRun(row.product.id)}
                     onManual={body => call('/api/prices/manual', {
                       method: 'POST',
@@ -595,13 +602,15 @@ interface Row {
 }
 
 function ProductCard({
-  row, competitors, previous, busy, checking, onCheck, onMatch, onChoose, onManual, onRemove,
+  row, competitors, previous, busy, checking, printing,
+  onCheck, onMatch, onChoose, onManual, onRemove,
 }: {
   row: Row
   competitors: Competitor[]
   previous: Map<string, number>
   busy: string
   checking: boolean
+  printing: boolean
   onCheck: () => void
   onMatch: (id: string, status: string) => void
   onChoose: (id: string) => void
@@ -612,6 +621,9 @@ function ProductCard({
   // comparison is someone looking at it
   const awaiting = row.advice.verdict === 'no_data' && row.unsure.length > 0
   const [open, setOpen] = useState(awaiting || row.advice.suspect)
+  // Друк розгортає все: у PDF має піти те саме, що видно на розкритій
+  // сторінці, а не перелік згорнутих заголовків
+  const shown = open || printing
   const meta = VERDICT_META[row.advice.verdict]
   const our = row.ourShown
   const ourContext = contextLabel(row.product.name)
@@ -697,7 +709,7 @@ function ProductCard({
         </div>
       </div>
 
-      {open && (
+      {shown && (
         <div className="border-t border-zinc-800 bg-zinc-800/20">
           {row.all.length === 0 ? (
             <div className="px-4 py-4 text-zinc-500 text-xs">
@@ -756,8 +768,8 @@ function ProductCard({
                         {m.is_manual && (
                           <span className="text-cyan-400 text-xs">✎ внесено вручну</span>
                         )}
-                        {m.status === 'confirmed' && !m.is_manual && (
-                          <span className="text-emerald-400 text-xs">✓ підтверджено</span>
+                        {m.status === 'confirmed' && !m.is_manual && !m.is_chosen && (
+                          <span className="text-emerald-400 text-xs">✓ стежимо за ціною</span>
                         )}
                         {m.similarity != null && m.status === 'auto' && (
                           <span className={`text-xs ${weak ? 'text-amber-400' : 'text-zinc-600'}`}>
@@ -816,17 +828,22 @@ function ProductCard({
                           зведено з {money(m.price)} за {amountLabel(Number(m.competitor_amount))}
                         </div>
                       )}
+                      {/* Раніше тут було просто «↓ з 578 ₴» — число без пояснення.
+                          Це попередня ціна цієї самої позиції. */}
                       {was != null && m.price != null && Math.round(was) !== Math.round(Number(m.price)) && (
                         <div className={`text-xs tabular-nums ${
                           Number(m.price) > was ? 'text-red-400' : 'text-emerald-400'
                         }`}>
-                          {Number(m.price) > was ? '↑' : '↓'} з {money(was)}
+                          було {money(was)}
+                          <span className="text-zinc-600">
+                            {' '}{Number(m.price) > was ? '· подорожчало' : '· подешевшало'}
+                          </span>
                         </div>
                       )}
                     </div>
 
                     {m.price != null && (
-                      <div className="flex items-center gap-1 shrink-0">
+                      <div className="flex items-center gap-1 shrink-0 no-print">
                         {m.is_chosen && (
                           <span className="text-emerald-400 text-xs px-2">
                             ● порівнюємо з цією{m.pinned_url ? ' · беремо звідси щоранку' : ''}
@@ -842,12 +859,12 @@ function ProductCard({
                             Порівнювати з цією
                           </button>
                         )}
-                        {m.status !== 'confirmed' && (
+                        {m.status !== 'confirmed' && !m.is_chosen && (
                           <button
                             disabled={busy === m.id}
                             onClick={() => onMatch(m.id, 'confirmed')}
                             className="text-emerald-400 hover:text-emerald-300 text-xs px-2 py-1 transition-colors"
-                            title="Це той самий товар"
+                            title="Той самий товар — стежити за його ціною, але не порівнювати"
                           >
                             Це він
                           </button>

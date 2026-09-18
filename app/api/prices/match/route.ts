@@ -30,7 +30,26 @@ export async function PATCH(req: NextRequest) {
 
   if (!row) return NextResponse.json({ error: 'Не знайдено' }, { status: 404 })
 
-  if (choose || status === 'confirmed') {
+  /**
+   * «Це він» — підтвердження, що це той самий товар.
+   *
+   * Позиція лишається в переліку назавжди і щоранку перечитується зі своєї
+   * сторінки, але її ціна не стає нашою мірою ринку. Підтвердити тотожність і
+   * обрати, з чим порівнюватись, — різні рішення: у магазині може бути три
+   * однакові товари, і лише один із них рівня нашого.
+   */
+  if (status === 'confirmed' && !choose) {
+    const url = String(row.competitor_url ?? '')
+    const { error } = await service.from('price_matches').update({
+      status: 'confirmed',
+      pinned_url: url.startsWith('http') ? url : null,
+    }).eq('id', id)
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true, tracked: true })
+  }
+
+  if (choose) {
     // Одна на конкурента: дві обрані позиції означали б дві ціни з одного
     // магазину, і незрозуміло, з якою ми порівнюємось
     await service.from('price_matches')
