@@ -44,3 +44,4 @@ HS-Merchant
 # Local dev server config (machine-specific ports)
 .claude/launch.json
 collector/node_modules
+collector/.env

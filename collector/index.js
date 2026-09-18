@@ -14,6 +14,19 @@
  *   APP_URL=https://hs-merchant.vercel.app COLLECTOR_KEY=... npm start
  */
 import { chromium } from 'playwright'
+import fs from 'node:fs'
+import path from 'node:path'
+
+// Налаштування беруться з .env поруч із програмою, якщо змінних немає в
+// оточенні. Так запуск не залежить від того, як саме її стартують — руками,
+// службою чи планувальником.
+const envFile = path.join(import.meta.dirname, '.env')
+if (fs.existsSync(envFile)) {
+  for (const line of fs.readFileSync(envFile, 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/)
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2]
+  }
+}
 
 const APP_URL = (process.env.APP_URL ?? '').replace(/\/+$/, '')
 const KEY = process.env.COLLECTOR_KEY ?? ''
