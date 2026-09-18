@@ -47,7 +47,16 @@ const api = (path, init = {}) => fetch(`${APP_URL}/api/prices/collector${path}`,
 })
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
-const log = (...a) => console.log(new Date().toLocaleTimeString('uk-UA'), ...a)
+/**
+ * Пишемо в stderr, а не в stdout.
+ *
+ * Коли програму запускають через `npm start`, її stdout — це канал, а не
+ * термінал, і Node тримає написане в буфері, поки той не заповниться. Рядки
+ * з'являються з затримкою в хвилини або не з'являються зовсім, хоча робота йде.
+ * stderr у Node не буферизується, тож видно одразу.
+ */
+const log = (...a) => process.stderr.write(
+  [new Date().toLocaleTimeString('uk-UA'), ...a].join(' ') + '\n')
 
 /**
  * Одна сторінка.

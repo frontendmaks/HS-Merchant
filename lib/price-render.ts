@@ -24,8 +24,24 @@ export async function enqueueRender(
   urls: { url: string; query: string }[],
 ) {
   if (!urls.length) return
+
+  // Не ставимо в чергу те, що там уже є або що збирач щойно опрацював. Без
+  // цього кожен прогін додавав ті самі дванадцять сторінок, і за три запуски
+  // черга виростала до тридцяти трьох завдань, з яких тридцять — повтори.
+  const since = new Date(Date.now() - 12 * 3600_000).toISOString()
+  const { data: recent } = await service
+    .from('price_render_tasks')
+    .select('url')
+    .eq('competitor_id', competitorId)
+    .eq('product_id', productId)
+    .gte('created_at', since)
+
+  const known = new Set((recent ?? []).map(r => r.url as string))
+  const fresh = urls.filter(u => !known.has(u.url))
+  if (!fresh.length) return
+
   await service.from('price_render_tasks').insert(
-    urls.map(u => ({
+    fresh.map(u => ({
       competitor_id: competitorId, product_id: productId,
       url: u.url, query: u.query,
     })),
