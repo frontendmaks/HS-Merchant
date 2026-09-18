@@ -79,13 +79,41 @@ function bigramDice(a: string, b: string): number {
  * size that disagrees cuts the score hard rather than zeroing it, so a wrong
  * match still surfaces for a person to reject instead of vanishing silently.
  */
+/**
+ * Two words meaning the same thing.
+ *
+ * Ukrainian inflects heavily, so testing words for equality is testing the
+ * wrong thing: «куряче» and «курятини» are the same bird, «ковбаса» and
+ * «ковбаски» the same sausage, and an exact-match test scores both pairs zero.
+ * A shared stem is what actually carries the meaning.
+ */
+function sameWord(a: string, b: string): boolean {
+  if (a === b) return true
+  const n = Math.min(a.length, b.length)
+  if (n < 4) return false
+  // Four letters is enough to tell «свин-» from «ялов-» while still joining
+  // «куряч-» to «курят-»; less than that and «сир» would match «сирок» and
+  // half the catalogue besides
+  const stem = Math.min(n, a.length > 6 && b.length > 6 ? 5 : 4)
+  return a.slice(0, stem) === b.slice(0, stem)
+}
+
 export function similarity(ours: string, theirs: string, mode: MatchMode = 'similar'): number {
   const a = tokens(ours), b = tokens(theirs)
   if (!a.length || !b.length) return 0
 
   const setB = new Set(b)
-  const overlap = a.filter(t => setB.has(t)).length
-  const jaccard = overlap / new Set([...a, ...b]).size
+  const matched = new Set<string>()
+  let overlap = 0
+  for (const t of a) {
+    const hit = b.find(o => !matched.has(o) && sameWord(t, o))
+    if (hit) { matched.add(hit); overlap++ }
+  }
+  // Against the longer name, not the shorter one. Scoring against the shorter
+  // rewards being a subset, which is how «Філе із курячого стегна» scored a
+  // perfect overlap with «Філе куряче» — every word of ours is in theirs, and
+  // the one word that makes it a different cut was free.
+  const jaccard = overlap / Math.max(a.length, b.length)
 
   const dice = bigramDice(normalizeTitle(ours), normalizeTitle(theirs))
   let score = (jaccard + dice) / 2
@@ -93,10 +121,12 @@ export function similarity(ours: string, theirs: string, mode: MatchMode = 'simi
   // What the product *is* — «Свинина», «Олія». Without this check «Свинина
   // тушкована» and «Яловичина тушкована» score as a confident match, because
   // everything except the one word that matters is identical.
-  const head = a[0]
-  if (head && !setB.has(head) && !b.some(t => t.startsWith(head.slice(0, 5)))) {
-    score *= 0.55
-  }
+  // Both ways. Checking only ours lets «Шашлик з курячого філе» through: our
+  // «філе» appears in their name, so nothing objects — while what they are
+  // selling is a kebab.
+  const ourHead = a[0], theirHead = b[0]
+  if (ourHead && !b.some(t => sameWord(ourHead, t))) score *= 0.55
+  if (theirHead && !a.some(t => sameWord(theirHead, t))) score *= 0.55
 
   const amountA = extractAmount(ours), amountB = extractAmount(theirs)
   if (amountA && amountB) {

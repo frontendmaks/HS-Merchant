@@ -110,6 +110,11 @@ export default function PricesClient({ competitors, watches, matches, history }:
 
   const summary = useMemo(() => {
     const count = (v: Verdict) => rows.filter(r => r.advice.verdict === v).length
+    // Priced against nothing, but a candidate is sitting there waiting to be
+    // confirmed. Counting these as «немає даних» is what made a working match
+    // look like a failure.
+    const needsReview = rows.filter(
+      r => r.advice.verdict === 'no_data' && r.unsure.length).length
     const lift = rows
       .filter(r => r.advice.verdict === 'cheap' && r.advice.suggested)
       .reduce((s, r) => s + (r.advice.suggested! - Number(r.product.price ?? 0)), 0)
@@ -117,6 +122,8 @@ export default function PricesClient({ competitors, watches, matches, history }:
       expensive: count('expensive'), cheap: count('cheap'),
       aligned: count('aligned'), noData: count('no_data'),
       unsure: rows.filter(r => r.unsure.length).length,
+      needsReview,
+      noneAtAll: count('no_data') - needsReview,
       lift,
     }
   }, [rows])
@@ -247,6 +254,19 @@ export default function PricesClient({ competitors, watches, matches, history }:
             <>
               <Verdicts summary={summary} filter={filter} onFilter={setFilter} />
 
+              {summary.needsReview > 0 && (
+                <div className="bg-cyan-950/30 border border-cyan-900/60 rounded-xl px-4 py-3">
+                  <div className="text-cyan-300 text-sm font-medium">
+                    {summary.needsReview} {summary.needsReview === 1 ? 'позиція чекає' : 'позицій чекають'} на підтвердження
+                  </div>
+                  <div className="text-zinc-400 text-xs mt-1 leading-relaxed">
+                    Схожі товари в конкурентів знайдено, але назви збігаються не настільки,
+                    щоб рахувати їх автоматично. Розгорніть «Деталі» й натисніть «Це він» —
+                    після цього ціна братиметься з тієї сторінки щоранку.
+                  </div>
+                </div>
+              )}
+
               {summary.lift > 0 && (
                 <div className="bg-amber-950/30 border border-amber-900/60 rounded-xl px-4 py-3">
                   <div className="text-amber-300 text-sm font-medium">
@@ -357,7 +377,10 @@ function Empty({ title, body, action }: { title: string; body: string; action: R
 }
 
 function Verdicts({ summary, filter, onFilter }: {
-  summary: { expensive: number; cheap: number; aligned: number; noData: number; unsure: number }
+  summary: {
+    expensive: number; cheap: number; aligned: number
+    noData: number; unsure: number; needsReview: number; noneAtAll: number
+  }
   filter: Verdict | 'all'
   onFilter: (v: Verdict | 'all') => void
 }) {
@@ -365,7 +388,7 @@ function Verdicts({ summary, filter, onFilter }: {
     { key: 'expensive', value: summary.expensive, hint: 'дорожче ринку на 10%+' },
     { key: 'cheap',     value: summary.cheap,     hint: 'дешевше на 12%+' },
     { key: 'aligned',   value: summary.aligned,   hint: 'різниця в межах норми' },
-    { key: 'no_data',   value: summary.noData,    hint: 'конкурента не знайдено' },
+    { key: 'no_data',   value: summary.noData,    hint: 'ще не порівняно' },
   ]
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -410,7 +433,10 @@ function ProductCard({ row, competitors, previous, busy, onMatch, onRemove }: {
   onMatch: (id: string, status: string) => void
   onRemove: () => void
 }) {
-  const [open, setOpen] = useState(false)
+  // Opened by default when the only thing standing between this product and a
+  // comparison is someone looking at it
+  const awaiting = row.advice.verdict === 'no_data' && row.unsure.length > 0
+  const [open, setOpen] = useState(awaiting)
   const meta = VERDICT_META[row.advice.verdict]
   const our = Number(row.product.price ?? 0)
   const nameOf = (id: string) => competitors.find(c => c.id === id)?.name ?? '—'
@@ -420,18 +446,22 @@ function ProductCard({ row, competitors, previous, busy, onMatch, onRemove }: {
       <div className="px-4 py-3 flex items-start gap-3 flex-wrap">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`px-2 py-0.5 rounded text-xs font-medium ${meta.badge}`}>
-              {meta.label}
+            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+              awaiting ? 'bg-cyan-900/60 text-cyan-300' : meta.badge
+            }`}>
+              {awaiting ? 'Потребує підтвердження' : meta.label}
             </span>
-            {row.unsure.length > 0 && (
+            {row.unsure.length > 0 && !awaiting && (
               <span className="px-2 py-0.5 rounded text-xs bg-zinc-800 text-zinc-400">
-                {row.unsure.length} під питанням
+                ще {row.unsure.length} під питанням
               </span>
             )}
           </div>
           <div className="text-white text-sm mt-1.5">{row.product.name}</div>
           <div className="text-zinc-500 text-xs mt-0.5">
-            {row.advice.reason}
+            {awaiting
+              ? `Знайдено ${row.unsure.length} схожу позицію — підтвердьте нижче`
+              : row.advice.reason}
             <span className="text-zinc-600"> · {MATCH_MODES[row.mode].label}</span>
           </div>
         </div>
