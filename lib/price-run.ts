@@ -5,7 +5,7 @@
  * never drift into checking different things.
  */
 import { createServiceClient } from '@/lib/supabase/service'
-import { searchCompetitor, type Found } from '@/lib/price-scrape'
+import { searchCompetitor, siteChrome, type Found } from '@/lib/price-scrape'
 import { fetchCatalog, shortlist, readProduct, withCity } from '@/lib/price-catalog'
 import {
   similarity, extractAmount, scaleToOurPack, queryVariants,
@@ -44,12 +44,13 @@ async function candidates(
   rival: { id: string; search_url: string | null; site_url: string; city_path: string
            catalog_urls: unknown; catalog_synced_at: string | null },
   productName: string,
+  chrome?: Set<string>,
 ): Promise<{ items: Found[]; error?: string }> {
   if (rival.search_url) {
     let lastError: string | undefined
     for (const query of queryVariants(productName)) {
       const attempt = await searchCompetitor(
-        withCity(rival.search_url, rival.city_path), query, 15_000, rival.city_path)
+        withCity(rival.search_url, rival.city_path), query, 15_000, rival.city_path, chrome)
       if (attempt.items.length) return attempt
       lastError = attempt.error
       await sleep(500)
@@ -143,6 +144,8 @@ export async function runPriceCheck(
 
   for (const rival of rivals) {
     let siteError: string | null = null
+    // Read once per competitor, not per product: it is the same menu every time
+    const chrome = await siteChrome(rival.site_url as string)
 
     for (const product of products ?? []) {
       const key = `${product.id}|${rival.id}`
@@ -159,15 +162,16 @@ export async function runPriceCheck(
         }).eq('id', runId)
       }
 
-      const { items, error } = await candidates(service, rival, product.name as string)
+      const { items, error } = await candidates(service, rival, product.name as string, chrome)
       await sleep(GAP_MS)
 
       if (error) {
         siteError = error
         await service.from('price_matches').upsert({
           product_id: product.id, competitor_id: rival.id,
+          competitor_url: '', competitor_title: null,
           checked_at: now, error,
-        }, { onConflict: 'product_id,competitor_id' })
+        }, { onConflict: 'product_id,competitor_id,competitor_url' })
         result.missed++
         continue
       }
@@ -180,18 +184,54 @@ export async function runPriceCheck(
         .map(i => ({ ...i, score: similarity(product.name as string, i.title, mode) }))
         .sort((a, b) => b.score - a.score)
 
-      const best = decision?.status === 'confirmed' && decision.competitor_title
-        ? scored.find(i => i.title === decision.competitor_title) ?? scored[0]
-        : scored[0]
+      const best = scored[0]
 
       if (!best || best.score < MATCH_MODES[mode].floor) {
         await service.from('price_matches').upsert({
           product_id: product.id, competitor_id: rival.id,
+          competitor_url: '', competitor_title: null,
           checked_at: now, error: 'Схожої позиції не знайдено',
           price: null, similarity: best ? best.score : null,
-        }, { onConflict: 'product_id,competitor_id' })
+        }, { onConflict: 'product_id,competitor_id,competitor_url' })
         result.missed++
         continue
+      }
+
+      // Every offer worth showing, not only the winner. One shop can carry the
+      // same sausage twice — «Дрогобицька» and «Дрогобицька ТЕР в/с» — and
+      // storing one of them hides a price the buyer can plainly see.
+      const keep = scored.filter(i => i.score >= MATCH_MODES[mode].floor).slice(0, 5)
+
+      for (const offer of keep) {
+        const theirs = extractAmount(offer.title)
+        const norm = MATCH_MODES[mode].allowScaling
+          ? scaleToOurPack(offer.price, theirs, ourAmount)
+          : null
+
+        await service.from('price_matches').upsert({
+          product_id: product.id, competitor_id: rival.id,
+          competitor_title: offer.title,
+          // A shop that answers in JSON may give no link, and every offer then
+          // shares one key and overwrites the last. The title is what
+          // distinguishes them, so it becomes the key.
+          competitor_url: offer.url ?? `#${offer.title}`,
+          price: offer.price, similarity: offer.score,
+          our_amount: ourAmount, competitor_amount: theirs,
+          normalized_price: norm,
+          checked_at: now, error: null,
+        }, { onConflict: 'product_id,competitor_id,competitor_url' })
+      }
+
+      // Anything this competitor no longer returns, unless a person pinned it
+      const keptUrls = keep.map(k => k.url ?? `#${k.title}`)
+      if (keptUrls.length) {
+        await service.from('price_matches')
+          .delete()
+          .eq('product_id', product.id)
+          .eq('competitor_id', rival.id)
+          .eq('status', 'auto')
+          .eq('is_chosen', false)
+          .not('competitor_url', 'in', `(${keptUrls.map(u => `"${u}"`).join(',')})`)
       }
 
       const theirAmount = extractAmount(best.title)
@@ -201,16 +241,6 @@ export async function runPriceCheck(
       const normalized = MATCH_MODES[mode].allowScaling
         ? scaleToOurPack(best.price, theirAmount, ourAmount)
         : null
-
-      await service.from('price_matches').upsert({
-        product_id: product.id, competitor_id: rival.id,
-        competitor_title: best.title, competitor_url: best.url,
-        price: best.price, similarity: best.score,
-        our_amount: ourAmount, competitor_amount: theirAmount,
-        normalized_price: normalized,
-        status: decision?.status === 'confirmed' ? 'confirmed' : 'auto',
-        checked_at: now, error: null,
-      }, { onConflict: 'product_id,competitor_id' })
 
       await service.from('price_snapshots').insert({
         product_id: product.id, competitor_id: rival.id,

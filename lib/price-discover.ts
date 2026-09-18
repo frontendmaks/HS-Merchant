@@ -7,7 +7,7 @@
  * shorter question is "what is the site", and this tries the known shapes
  * against it with a word it should be able to find.
  */
-import { searchCompetitor } from '@/lib/price-scrape'
+import { searchCompetitor, siteChrome } from '@/lib/price-scrape'
 
 /**
  * Ordered by how common the shape is here, cheapest guess first.
@@ -56,20 +56,27 @@ export async function discoverSearchUrl(siteUrl: string, probe: string): Promise
   } catch {
     return { searchUrl: null, platform: null, tried: 0, error: 'Некоректна адреса сайту' }
   }
-  const origin = base.origin
+
+  // Both the bare origin and the language prefix the address carries.
+  // myastoriya.com.ua/ua/ answers on /ua/search/?q= and returns an empty page
+  // on /search/?q= — dropping the prefix decided the site had no search.
+  const prefix = base.pathname.replace(/\/+$/, '')
+  const bases = [...new Set([base.origin + prefix, base.origin])]
+
+  const chrome = await siteChrome(base.origin + prefix + '/')
 
   let tried = 0
-  for (const pattern of PATTERNS) {
-    const template = origin + pattern.path
+  for (const { pattern, template } of bases.flatMap(
+    b => PATTERNS.map(pattern => ({ pattern, template: b + pattern.path })))) {
     tried++
 
-    const { items, error } = await searchCompetitor(template, probe, 12_000)
+    const { items, error } = await searchCompetitor(template, probe, 12_000, '', chrome)
     if (error || !items.length) continue
 
     // Asked for something nobody sells. A page that answers the same way to
     // both is not searching — it is a catalogue that ignores the query, and
     // taking it would match every product against everything.
-    const control = await searchCompetitor(template, NONSENSE, 12_000)
+    const control = await searchCompetitor(template, NONSENSE, 12_000, '', chrome)
     if (control.items.length >= items.length) continue
 
     return { searchUrl: template, platform: pattern.name, tried }

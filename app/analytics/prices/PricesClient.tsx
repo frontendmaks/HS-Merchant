@@ -29,6 +29,7 @@ interface Match {
   competitor_title: string | null; competitor_url: string | null
   price: number | null; similarity: number | null
   status: string; checked_at: string | null; error: string | null
+  is_chosen: boolean
   our_amount: number | null; competitor_amount: number | null
   /** Their price at our pack size; null when either size is unknown */
   normalized_price: number | null
@@ -56,6 +57,9 @@ export default function PricesClient({
   const [error, setError] = useState('')
   const [tab, setTab] = useState<'overview' | 'settings' | 'competitors'>('overview')
   const [filter, setFilter] = useState<Verdict | 'all'>('all')
+  // A view filter only. The 09:30 pass always covers every active competitor —
+  // narrowing what is collected would quietly make the history incomparable.
+  const [only, setOnly] = useState<Set<string>>(new Set())
   const [adding, setAdding] = useState(false)
   const [run, setRun] = useState<RunState | null>(null)
   const polling = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -64,10 +68,11 @@ export default function PricesClient({
   const byProduct = useMemo(() => {
     const map = new Map<string, Match[]>()
     for (const m of matches) {
+      if (only.size && !only.has(m.competitor_id)) continue
       map.set(m.product_id, [...(map.get(m.product_id) ?? []), m])
     }
     return map
-  }, [matches])
+  }, [matches, only])
 
   /** The previous distinct price we saw, per pair — what "changed" means here. */
   const previous = useMemo(() => {
@@ -90,10 +95,25 @@ export default function PricesClient({
       const product = w.product!
       const mode = w.match_mode ?? 'similar'
       const trusted = MATCH_MODES[mode].trusted
-      const found = (byProduct.get(product.id) ?? []).filter(
-        m => m.status !== 'rejected' && m.price != null
-          && (m.status === 'confirmed' || Number(m.similarity ?? 0) >= trusted),
-      )
+      // One price per competitor. A shop can list the same sausage twice —
+      // «Дрогобицька» and «Дрогобицька ТЕР в/с» — and averaging or taking both
+      // would compare us against a shop competing with itself. The offer a
+      // person marked wins; otherwise the best-scoring one stands in.
+      const perCompetitor = new Map<string, Match>()
+      for (const m of byProduct.get(product.id) ?? []) {
+        if (m.status === 'rejected' || m.price == null) continue
+        const usable = m.is_chosen || m.status === 'confirmed'
+          || Number(m.similarity ?? 0) >= trusted
+        if (!usable) continue
+
+        const held = perCompetitor.get(m.competitor_id)
+        const better = !held
+          || (m.is_chosen && !held.is_chosen)
+          || (m.is_chosen === held.is_chosen
+              && Number(m.similarity ?? 0) > Number(held.similarity ?? 0))
+        if (better) perCompetitor.set(m.competitor_id, m)
+      }
+      const found = [...perCompetitor.values()]
       // The scaled figure where sizes are known, the printed one otherwise —
       // comparing 1 кг against our 500 г by its tag would invert the answer
       const advice = advise(
@@ -364,12 +384,36 @@ export default function PricesClient({
                       className="text-zinc-500 hover:text-white text-xs ml-2">× скинути фільтр</button>
                   )}
                 </div>
-                <button
-                  onClick={() => setAdding(true)}
-                  className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs px-3 py-1.5 rounded-lg transition-colors"
-                >
-                  + Додати товари
-                </button>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-zinc-500 text-xs">Порівнювати з:</span>
+                  <button
+                    onClick={() => setOnly(new Set())}
+                    className={`px-2.5 py-1 rounded-lg text-xs transition-colors border ${
+                      only.size === 0
+                        ? 'bg-red-600 border-red-600 text-white'
+                        : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    Усіма
+                  </button>
+                  {competitors.filter(c => c.is_active).map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => setOnly(prev => {
+                        const next = new Set(prev)
+                        if (next.has(c.id)) next.delete(c.id); else next.add(c.id)
+                        return next
+                      })}
+                      className={`px-2.5 py-1 rounded-lg text-xs transition-colors border ${
+                        only.has(c.id)
+                          ? 'bg-red-600 border-red-600 text-white'
+                          : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -382,6 +426,11 @@ export default function PricesClient({
                     busy={busy}
                     checking={run?.status === 'running' && checkingId === row.product.id}
                     onCheck={() => startRun(row.product.id)}
+                    onChoose={id => call('/api/prices/match', {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ id, choose: true }),
+                    }, id)}
                     onMatch={(id, status) => call('/api/prices/match', {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
@@ -514,7 +563,9 @@ interface Row {
   advice: ReturnType<typeof advise>
 }
 
-function ProductCard({ row, competitors, previous, busy, checking, onCheck, onMatch, onRemove }: {
+function ProductCard({
+  row, competitors, previous, busy, checking, onCheck, onMatch, onChoose, onRemove,
+}: {
   row: Row
   competitors: Competitor[]
   previous: Map<string, number>
@@ -522,6 +573,7 @@ function ProductCard({ row, competitors, previous, busy, checking, onCheck, onMa
   checking: boolean
   onCheck: () => void
   onMatch: (id: string, status: string) => void
+  onChoose: (id: string) => void
   onRemove: () => void
 }) {
   // Opened by default when the only thing standing between this product and a
@@ -672,6 +724,19 @@ function ProductCard({ row, competitors, previous, busy, checking, onCheck, onMa
 
                     {m.price != null && m.status !== 'rejected' && (
                       <div className="flex items-center gap-1 shrink-0">
+                        {m.is_chosen && (
+                          <span className="text-emerald-400 text-xs px-2">● порівнюємо з цією</span>
+                        )}
+                        {!m.is_chosen && (
+                          <button
+                            disabled={busy === m.id}
+                            onClick={() => onChoose(m.id)}
+                            className="text-cyan-400 hover:text-cyan-300 text-xs px-2 py-1 transition-colors"
+                            title="Порівнювати ціну саме з цією позицією"
+                          >
+                            Порівнювати з цією
+                          </button>
+                        )}
                         {m.status !== 'confirmed' && (
                           <button
                             disabled={busy === m.id}
@@ -799,11 +864,7 @@ function CompetitorsTab({ competitors, busy, onAdd, onToggle, onCity, onDelete }
                 <div className="text-zinc-600 text-xs mt-0.5">
                   Перевірено: {when(c.last_checked_at)}
                 </div>
-                {!c.search_url && (
-                  <div className="text-zinc-500 text-xs mt-1">
-                    Пошуку на сайті немає — читаємо каталог через sitemap.
-                  </div>
-                )}
+
                 <div className="text-zinc-600 text-xs mt-0.5">
                   Ціни читаємо для міста:{' '}
                   <span className="text-zinc-400">

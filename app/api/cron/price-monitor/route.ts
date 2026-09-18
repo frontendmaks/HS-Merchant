@@ -3,6 +3,7 @@ export const maxDuration = 300
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { runPriceCheck } from '@/lib/price-run'
+import { buildReport, sendReport } from '@/lib/price-report'
 
 /**
  * 09:30 Kyiv, every day.
@@ -46,7 +47,12 @@ export async function GET(request: NextRequest) {
         error: result.errors.length ? result.errors.join('; ') : null,
       }).eq('id', runId)
     }
-    return NextResponse.json({ ok: true, ...result })
+    // The report goes out after the pass, not with it: the counts have to be
+    // of what was just collected, not of yesterday's rows
+    const report = await buildReport(service)
+    const notified = await sendReport(service, report)
+
+    return NextResponse.json({ ok: true, ...result, report, notified })
   } catch (err) {
     if (runId) {
       await service.from('price_runs').update({
