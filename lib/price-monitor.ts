@@ -6,13 +6,22 @@
  * here changes a price by itself: the page recommends, a person decides.
  */
 
-import { contextQuery, contextMatches } from '@/lib/meat-context'
+import { contextQuery, contextMatches, synonyms } from '@/lib/meat-context'
 
 /** Words that say nothing about which product this is. */
 const NOISE = new Set([
   'тм', 'тд', 'від', 'для', 'з', 'із', 'в', 'у', 'на', 'та', 'і', 'й', 'the',
   'продукт', 'товар', 'шт', 'уп', 'упаковка', 'пак', 'ваговий', 'ваговa',
 ])
+
+/**
+ * Слова про стан і пакування, а не про сам товар.
+ *
+ * Конкуренти пишуть «Стегно куряче Наша Ряба охолоджене ~1кг», ми — «Стегно
+ * куряче». Якщо рахувати «охолоджене» за ознаку товару, та сама курятина
+ * набирає 0.41 і відпадає, хоча це буквально одне й те саме.
+ */
+const QUALIFIER = /^(охолодж|заморож|свіжоморож|морож|свіж|вагов|фасов|нарізк|нарізан|підлож|лоток|домашн|н\/к|в\/ґ|в\/г|в\/с|в\/у|с\/к|в\/к|к\/в|перш|вищ|ґатун|гатун|сорт)/
 
 /** Grams, kilograms, millilitres, litres — in grams or millilitres. */
 const UNITS: Record<string, number> = {
@@ -50,11 +59,12 @@ export function extractAmount(raw: string): number | null {
   return value * (UNITS[last[2]] ?? 1)
 }
 
-const tokens = (raw: string): string[] =>
+const tokens = (raw: string, dropQualifiers = true): string[] =>
   normalizeTitle(raw)
     .split(' ')
     .map(t => t.replace(/[.,]+$/, ''))
-    .filter(t => t.length > 1 && !NOISE.has(t) && !/^\d+$/.test(t))
+    .filter(t => t.length > 1 && !NOISE.has(t) && !/\d/.test(t)
+      && !(dropQualifiers && QUALIFIER.test(t)))
 
 /** Dice coefficient over character bigrams — forgiving of endings and typos. */
 function bigramDice(a: string, b: string): number {
@@ -104,21 +114,30 @@ export function similarity(ours: string, theirs: string, mode: MatchMode = 'simi
   const a = tokens(ours), b = tokens(theirs)
   if (!a.length || !b.length) return 0
 
-  const setB = new Set(b)
   const matched = new Set<string>()
   let overlap = 0
   for (const t of a) {
-    const hit = b.find(o => !matched.has(o) && sameWord(t, o))
+    const hit = b.find(o => !matched.has(o) && (sameWord(t, o) || synonyms(t, o)))
     if (hit) { matched.add(hit); overlap++ }
   }
-  // Against the longer name, not the shorter one. Scoring against the shorter
-  // rewards being a subset, which is how «Філе із курячого стегна» scored a
-  // perfect overlap with «Філе куряче» — every word of ours is in theirs, and
-  // the one word that makes it a different cut was free.
-  const jaccard = overlap / Math.max(a.length, b.length)
+
+  /**
+   * Скільки з наших слів є в них — головний сигнал.
+   *
+   * Раніше оцінка ділилась на довшу назву, тож кожне зайве слово конкурента
+   * псувало результат. Але зайві слова — це майже завжди бренд і стан, а не
+   * інший товар: «Стегно куряче Наша Ряба» це наше стегно куряче. Те, що
+   * справді робить товар іншим — вид м'яса, відруб, тип — перевіряє словник
+   * окремо й жорстко, тому тут можна дивитись на покриття.
+   */
+  const coverage = overlap / a.length
+
+  // Зайві слова все ж трохи знижують упевненість — але не топлять її
+  const extras = Math.max(0, b.length - overlap)
+  const spread = Math.max(0.65, 1 - 0.06 * extras)
 
   const dice = bigramDice(normalizeTitle(ours), normalizeTitle(theirs))
-  let score = (jaccard + dice) / 2
+  let score = (coverage * 0.7 + dice * 0.3) * spread
 
   // What the product *is* — «Свинина», «Олія». Without this check «Свинина
   // тушкована» and «Яловичина тушкована» score as a confident match, because
@@ -126,9 +145,12 @@ export function similarity(ours: string, theirs: string, mode: MatchMode = 'simi
   // Both ways. Checking only ours lets «Шашлик з курячого філе» through: our
   // «філе» appears in their name, so nothing objects — while what they are
   // selling is a kebab.
+  // Через словник теж: «ніжка» і «лапки» — той самий відруб, і карати за це
+  // означає відкидати правильний збіг за те, що конкурент назвав його інакше
+  const same = (x: string, y: string) => sameWord(x, y) || synonyms(x, y)
   const ourHead = a[0], theirHead = b[0]
-  if (ourHead && !b.some(t => sameWord(ourHead, t))) score *= 0.55
-  if (theirHead && !a.some(t => sameWord(theirHead, t))) score *= 0.55
+  if (ourHead && !b.some(t => same(ourHead, t))) score *= 0.55
+  if (theirHead && !a.some(t => same(theirHead, t))) score *= 0.55
 
   // Marinated, smoked, cooked — a real difference in product and in price,
   // but a near miss worth showing rather than hiding

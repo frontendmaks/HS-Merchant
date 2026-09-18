@@ -26,7 +26,7 @@ const SPECIES: Record<string, string[]> = {
 
 /** The part of the animal. */
 const CUTS: Record<string, string[]> = {
-  стегно:    ['стегн', 'окіст'],
+  стегно:    ['стегн', 'стеген', 'окіст'],
   філе:      ['філе', 'філей'],
   крило:     ['крил'],
   гомілка:   ['гоміл'],
@@ -37,7 +37,7 @@ const CUTS: Record<string, string[]> = {
   лопатка:   ['лопатк'],
   рулька:    ['рульк', 'голяшк'],
   корейка:   ['корейк', 'карбонад'],
-  ніжка:     ['ніжк', 'лапк'],
+  ніжка:     ['ніжк', 'лапк', 'гомілк'],
   печінка:   ['печінк'],
   серце:     ['серц'],
   язик:      ['язик'],
@@ -169,4 +169,21 @@ export function contextQuery(name: string): string | null {
   const c = describe(name)
   const parts = [c.cut ?? c.form, c.species].filter(Boolean)
   return parts.length === 2 ? parts.join(' ') : null
+}
+
+/**
+ * Чи означають два слова те саме в мові цього ремесла.
+ *
+ * «Лапки» і «ніжка» — той самий відруб, «курча» і «курятина» — та сама птиця.
+ * Порівняння за літерами цього не бачить, а словник бачить.
+ */
+export function synonyms(a: string, b: string): boolean {
+  for (const table of [SPECIES, CUTS, FORMS]) {
+    for (const stems of Object.values(table)) {
+      const hasA = stems.some(stem => a.startsWith(stem) || stem.startsWith(a))
+      const hasB = stems.some(stem => b.startsWith(stem) || stem.startsWith(b))
+      if (hasA && hasB) return true
+    }
+  }
+  return false
 }
