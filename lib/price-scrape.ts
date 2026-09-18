@@ -177,6 +177,31 @@ export function fromCards(
     if (at < 0) continue
 
     const window = html.slice(Math.max(0, at - 400), at + 1800)
+
+    // A card built for screen readers states the whole offer in one attribute:
+    // «Куряче крило кисть охолоджене; 100г; 4.78 грн». That is name, weight and
+    // price already separated — better than anything guessed from the markup,
+    // and it is what the shop itself considers the description of the card.
+    const aria = window.match(/aria-label=["']([^"']{8,200})["']/i)
+    if (aria && /грн|₴/i.test(aria[1])) {
+      const parts = decode(aria[1]).split(';').map(x => x.trim()).filter(Boolean)
+      const priced = parts.find(x => /грн|₴/i.test(x))
+      const weighed = parts.find(x => /\d\s*(кг|г|мл|л)\b/i.test(x) && !/грн|₴/i.test(x))
+      const value = priced
+        ? Number(priced.replace(/[^\d.,]/g, '').replace(',', '.'))
+        : NaN
+
+      if (parts[0] && Number.isFinite(value) && value > 0) {
+        out.push({
+          title: parts[0],
+          price: value,
+          url: link,
+          unitLabel: weighed ? `/${weighed.replace(/\s+/g, '')}` : undefined,
+        })
+        continue
+      }
+    }
+
     const priceMatch = window.match(PRICE_NEAR) ?? window.match(PRICE_CLASS)
     if (!priceMatch) continue
 
