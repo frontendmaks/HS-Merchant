@@ -38,6 +38,7 @@ interface Match {
   context_label: string | null
   context_note: string | null
   is_manual: boolean
+  pinned_url: string | null
   our_amount: number | null; competitor_amount: number | null
   /** Their price at our pack size; null when either size is unknown */
   normalized_price: number | null
@@ -187,8 +188,10 @@ export default function PricesClient({
     try {
       const res = await fetch('/api/prices/run')
       const data = await res.json()
-      setRun(data.run ?? null)
-      if (data.run?.status !== 'running' && polling.current) {
+      setRun(data.run ? { ...data.run, queued: data.queued ?? 0 } : null)
+      // Чекаємо не лише на прогін, а й на збирач: поки в черзі є сторінки,
+      // робота триває
+      if (data.run?.status !== 'running' && !(data.queued > 0) && polling.current) {
         clearInterval(polling.current)
         polling.current = null
         router.refresh()
@@ -702,7 +705,46 @@ function ProductCard({
             </div>
           ) : (
             <div className="divide-y divide-zinc-800/60">
-              {row.all.map(m => {
+              {/* Згруповано по конкурентах: питання «скільки це коштує в
+                  Метро» ставлять про магазин, а не про перелік пропозицій */}
+              {[...new Map(row.all.map(m => [m.competitor_id, m])).keys()].map(cid => {
+                const offers = row.all
+                  .filter(m => m.competitor_id === cid && m.price != null)
+                  .sort((a, b) => (b.is_chosen ? 1 : 0) - (a.is_chosen ? 1 : 0)
+                    || Number(b.similarity ?? 0) - Number(a.similarity ?? 0))
+                const blank = row.all.filter(m => m.competitor_id === cid && m.price == null)
+                const used = offers.find(o => o.is_chosen) ?? offers[0]
+
+                return (
+                  <div key={cid} className="py-1">
+                    <div className="px-4 py-2 flex items-center gap-2 flex-wrap">
+                      <span className="text-zinc-200 text-xs font-medium">{nameOf(cid)}</span>
+                      {used?.price_per_kg != null && (
+                        <span className="text-white text-xs tabular-nums">
+                          {money(Number(used.price_per_kg))}<span className="text-zinc-600">/кг</span>
+                        </span>
+                      )}
+                      {used?.price_per_kg != null && our > 0 && (
+                        <span className={`text-xs tabular-nums ${
+                          Number(used.price_per_kg) < our ? 'text-red-400' : 'text-emerald-400'
+                        }`}>
+                          {Number(used.price_per_kg) < our ? 'дешевше на ' : 'дорожче на '}
+                          {money(Math.abs(Math.round(Number(used.price_per_kg) - our)))}
+                        </span>
+                      )}
+                      {!offers.length && (
+                        <span className="text-zinc-600 text-xs">
+                          {blank[0]?.error ?? 'немає збігу'}
+                        </span>
+                      )}
+                      {offers.length > 1 && (
+                        <span className="text-zinc-600 text-xs">
+                          · ще {offers.length - 1} на вибір
+                        </span>
+                      )}
+                    </div>
+                    <div className="pl-4 border-l border-zinc-800 ml-4">
+                      {offers.map(m => {
                 const was = previous.get(`${m.product_id}|${m.competitor_id}`)
                 const score = Number(m.similarity ?? 0)
                 // Judged against this product's own setting, not a fixed number
@@ -711,15 +753,11 @@ function ProductCard({
                   <div key={m.id} className="px-4 py-2.5 flex items-start gap-3 flex-wrap">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-zinc-300 text-xs font-medium">{nameOf(m.competitor_id)}</span>
                         {m.is_manual && (
                           <span className="text-cyan-400 text-xs">✎ внесено вручну</span>
                         )}
                         {m.status === 'confirmed' && !m.is_manual && (
                           <span className="text-emerald-400 text-xs">✓ підтверджено</span>
-                        )}
-                        {m.status === 'rejected' && (
-                          <span className="text-zinc-600 text-xs">відхилено</span>
                         )}
                         {m.similarity != null && m.status === 'auto' && (
                           <span className={`text-xs ${weak ? 'text-amber-400' : 'text-zinc-600'}`}>
@@ -787,10 +825,12 @@ function ProductCard({
                       )}
                     </div>
 
-                    {m.price != null && m.status !== 'rejected' && (
+                    {m.price != null && (
                       <div className="flex items-center gap-1 shrink-0">
                         {m.is_chosen && (
-                          <span className="text-emerald-400 text-xs px-2">● порівнюємо з цією</span>
+                          <span className="text-emerald-400 text-xs px-2">
+                            ● порівнюємо з цією{m.pinned_url ? ' · беремо звідси щоранку' : ''}
+                          </span>
                         )}
                         {!m.is_chosen && (
                           <button
@@ -822,6 +862,10 @@ function ProductCard({
                         </button>
                       </div>
                     )}
+                  </div>
+                )
+                      })}
+                    </div>
                   </div>
                 )
               })}
@@ -1253,6 +1297,8 @@ interface RunState {
   error: string | null
   started_at: string
   finished_at: string | null
+  /** Сторінок у черзі на збирач */
+  queued?: number
 }
 
 /**
@@ -1265,6 +1311,23 @@ interface RunState {
 function RunStatus({ run }: { run: RunState }) {
   const running = run.status === 'running'
   const pct = run.total > 0 ? Math.min(100, Math.round((run.done / run.total) * 100)) : 0
+
+  const queued = run.queued ?? 0
+
+  if (!running && queued > 0) {
+    return (
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3
+                      flex items-center gap-3 flex-wrap">
+        <span className="w-3 h-3 rounded-full border-2 border-cyan-500 border-t-transparent
+                         animate-spin shrink-0" />
+        <span className="text-white text-sm">Збирач дочитує сайти</span>
+        <span className="text-zinc-500 text-xs">лишилось сторінок: {queued}</span>
+        <span className="text-zinc-600 text-xs">
+          Магазини, які не віддають сторінки серверу, читає браузер — це кілька хвилин
+        </span>
+      </div>
+    )
+  }
 
   if (!running && run.status === 'done' && !run.error) {
     return (

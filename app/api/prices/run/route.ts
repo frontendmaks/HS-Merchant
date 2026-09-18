@@ -10,13 +10,21 @@ import { runPriceCheck } from '@/lib/price-run'
 export async function GET() {
   if (!await currentActor()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data } = await createServiceClient()
-    .from('price_runs')
-    .select('id, status, total, done, matched, missed, current_step, error, started_at, finished_at')
-    .order('started_at', { ascending: false })
-    .limit(1).single()
+  const service = createServiceClient()
+  const [{ data }, { count: queued }] = await Promise.all([
+    service.from('price_runs')
+      .select('id, status, total, done, matched, missed, current_step, error, started_at, finished_at')
+      .order('started_at', { ascending: false })
+      .limit(1).single(),
+    // Сторінки, які ще чекають на збирач. Прогін на сервері може вже
+    // завершитись, а робота — ні: магазини, що не віддають сторінки серверу,
+    // дочитуються браузером, і «готово» до того моменту було б неправдою.
+    service.from('price_render_tasks')
+      .select('id', { count: 'exact', head: true })
+      .in('status', ['pending', 'taken']),
+  ])
 
-  return NextResponse.json({ run: data ?? null })
+  return NextResponse.json({ run: data ?? null, queued: queued ?? 0 })
 }
 
 export async function POST(req: Request) {

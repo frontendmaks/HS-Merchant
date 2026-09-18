@@ -105,7 +105,16 @@ export async function storeRendered(
   const ourAmount = extractAmount(ourName)
   const ourPerKg = ourPricePerKg(Number(product.price ?? 0), ourAmount)
 
+  const { data: refused } = await service
+    .from('price_rejections')
+    .select('competitor_title')
+    .eq('product_id', task.product_id)
+    .eq('competitor_id', task.competitor_id)
+
+  const rejected = new Set((refused ?? []).map(r => r.competitor_title as string))
+
   const scored = items
+    .filter(i => !rejected.has(i.title))
     .filter(i => sameKind(ourName, i.title))
     .map(i => ({ ...i, score: similarity(ourName, i.title, mode) }))
     .sort((a, b) => b.score - a.score)

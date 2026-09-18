@@ -133,14 +133,34 @@ export async function runPriceCheck(
   const { data: products } = await service
     .from('products').select('id, name, price').in('id', productIds)
 
-  // A person's own correction outranks anything the matcher decides today
-  const { data: pinned } = await service
+  /**
+   * Те, що людина вже вирішила.
+   *
+   * Підтверджену позицію не треба шукати вдруге: ми знаємо її сторінку й
+   * читаємо ціну прямо звідти. Пошук лишається для нового — нових товарів і
+   * нових конкурентів. Це і швидше, і стабільніше: результат не залежить від
+   * того, що сьогодні віддасть пошук магазину.
+   */
+  const { data: pins } = await service
     .from('price_matches')
-    .select('product_id, competitor_id, status, competitor_title, competitor_url, price')
-    .in('status', ['confirmed', 'rejected'])
+    .select('id, product_id, competitor_id, competitor_title, pinned_url')
+    .not('pinned_url', 'is', null)
 
-  const decided = new Map(
-    (pinned ?? []).map(m => [`${m.product_id}|${m.competitor_id}`, m]),
+  const pinnedBy = new Map<string, { id: string; pinned_url: string; competitor_title: string | null }>()
+  for (const m of pins ?? []) {
+    pinnedBy.set(`${m.product_id}|${m.competitor_id}`, {
+      id: m.id as string,
+      pinned_url: m.pinned_url as string,
+      competitor_title: m.competitor_title as string | null,
+    })
+  }
+
+  // Відхилене людиною — щоб не пропонувати той самий хибний збіг знову
+  const { data: refused } = await service
+    .from('price_rejections').select('product_id, competitor_id, competitor_title')
+
+  const rejected = new Set(
+    (refused ?? []).map(r => `${r.product_id}|${r.competitor_id}|${r.competitor_title}`),
   )
 
   const now = new Date().toISOString()
@@ -168,10 +188,37 @@ export async function runPriceCheck(
 
     for (const product of products ?? []) {
       const key = `${product.id}|${rival.id}`
-      const decision = decided.get(key)
+      const pin = pinnedBy.get(key)
 
-      // Rejected by hand: do not keep proposing it every morning
-      if (decision?.status === 'rejected') continue
+      // Підтверджена позиція: просто перечитуємо її сторінку
+      if (pin) {
+        const page = await readProduct(withCity(pin.pinned_url, rival.city_path))
+        await sleep(GAP_MS)
+
+        if (page) {
+          const theirs = extractAmount(page.title)
+          const ourAmount = extractAmount(product.name as string)
+          await service.from('price_matches').update({
+            price: page.price,
+            price_per_kg: theirs ? pricePerKg(page.price, theirs) : page.price,
+            our_price_per_kg: ourPricePerKg(Number(product.price ?? 0), ourAmount),
+            competitor_amount: theirs,
+            checked_at: now,
+            error: null,
+          }).eq('id', pin.id)
+
+          await service.from('price_snapshots').insert({
+            product_id: product.id, competitor_id: rival.id,
+            price: page.price, our_price: product.price,
+          })
+          result.matched++
+        } else {
+          await service.from('price_matches')
+            .update({ checked_at: now, error: 'Сторінка не відповіла' }).eq('id', pin.id)
+          result.missed++
+        }
+        continue
+      }
 
       if (runId) {
         await service.from('price_runs').update({
@@ -203,6 +250,7 @@ export async function runPriceCheck(
       // returns everything a poultry shop sells, and a score alone let kebabs
       // and sausage sit in the details of a chicken thigh.
       const scored = items
+        .filter(i => !rejected.has(`${product.id}|${rival.id}|${i.title}`))
         .filter(i => sameKind(product.name as string, i.title))
         .map(i => ({ ...i, score: similarity(product.name as string, i.title, mode) }))
         .sort((a, b) => b.score - a.score)
