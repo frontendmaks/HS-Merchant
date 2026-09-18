@@ -4,6 +4,7 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { isAdmin, type UserRole } from '@/lib/getRole'
 import { NOTIFICATION_TYPES } from '@/lib/requests'
+import { cleanNote, noteToPlain, noteIsEmpty } from '@/lib/rich-text'
 
 async function getCaller() {
   const cookieStore = await cookies()
@@ -31,8 +32,19 @@ export async function POST(request: NextRequest) {
   const caller = await getCaller()
   if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { request_id, body } = await request.json() as { request_id: string; body: string }
-  if (!request_id || !body?.trim()) {
+  const { request_id, body, body_rich } = await request.json() as {
+    request_id: string
+    body?: string
+    body_rich?: unknown
+  }
+
+  // Whatever the browser sent is filtered down to the note format before
+  // anything is stored, and the plain text is derived from the result rather
+  // than taken from the caller — the two can then never disagree
+  const rich = body_rich === undefined ? null : cleanNote(body_rich)
+  const text = rich && !noteIsEmpty(rich) ? noteToPlain(rich) : (body ?? '').trim()
+
+  if (!request_id || !text) {
     return NextResponse.json({ error: 'Текст нотатки обовʼязковий' }, { status: 400 })
   }
 
@@ -57,15 +69,16 @@ export async function POST(request: NextRequest) {
   const { data: note, error } = await service.from('request_notes').insert({
     request_id,
     author_id: caller.id,
-    body: body.trim(),
-  }).select('id, body, created_at, author_id').single()
+    body: text,
+    body_rich: rich?.length ? rich : null,
+  }).select('id, body, body_rich, created_at, author_id').single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const name = caller.full_name?.trim() || caller.email
 
   await service.from('request_events').insert({
-    request_id, actor_id: caller.id, type: 'note', new_value: body.trim().slice(0, 200),
+    request_id, actor_id: caller.id, type: 'note', new_value: text.slice(0, 200),
   })
 
   // Everyone on the thread hears about a note, except whoever wrote it
@@ -79,7 +92,7 @@ export async function POST(request: NextRequest) {
         request_id,
         type: NOTIFICATION_TYPES.note,
         title: `${name} додав нотатку`,
-        body: body.trim().slice(0, 160),
+        body: text.slice(0, 160),
       }))
     )
   }

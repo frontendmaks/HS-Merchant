@@ -1,6 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import RichNote from './RichNote'
+import NoteBody from './NoteBody'
+import { cleanNote, type NoteBlock } from '@/lib/rich-text'
 import {
   REQUEST_CATEGORIES, STATUS_META, PRIORITY_META, STATUS_KEYS, PRIORITY_KEYS,
   EVENT_META, eventValue, categoryByKey, categoryLabel, sortForInbox,
@@ -14,6 +17,7 @@ const POLL_MS = 15_000
 
 interface Person { id: string; full_name: string | null; email: string; role: string }
 interface Note {
+  body_rich?: unknown
   id: string
   body: string
   created_at: string
@@ -994,7 +998,6 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
   onDelete: (id: string) => Promise<void>
   onNoteAdded: () => Promise<void>
 }) {
-  const [note, setNote] = useState('')
   const [savingNote, setSavingNote] = useState(false)
   const [noteError, setNoteError] = useState('')
   const [editingPeople, setEditingPeople] = useState(false)
@@ -1018,23 +1021,21 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
   const awaitingMyDecision = r.status === 'pending_review' && isAuthor
   const [resolveTo, setResolveTo] = useState<RequestStatus | null>(null)
 
-  async function addNote(e: React.FormEvent) {
-    e.preventDefault()
-    if (!note.trim()) return
+  async function addNote(blocks: NoteBlock[]) {
     setNoteError('')
     setSavingNote(true)
     try {
       const res = await fetch('/api/requests/notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id: r.id, body: note }),
+        body: JSON.stringify({ request_id: r.id, body_rich: blocks }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Помилка')
-      setNote('')
       await onNoteAdded()
     } catch (e) {
       setNoteError(e instanceof Error ? e.message : String(e))
+      throw e
     } finally {
       setSavingNote(false)
     }
@@ -1316,7 +1317,7 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
                         <span className="text-zinc-300 text-xs font-medium">{name(n.author)}</span>
                         <span className="text-zinc-600 text-xs">{fmtDateTime(n.created_at)}</span>
                       </div>
-                      <div className="text-zinc-200 text-sm mt-0.5 whitespace-pre-wrap">{n.body}</div>
+                      <NoteBody blocks={cleanNote(n.body_rich)} plain={n.body} />
                     </div>
                   </div>
                 ))}
@@ -1324,21 +1325,7 @@ function DetailModal({ request: r, me, people, isAdmin, busy, onClose, onPatch, 
             )}
 
             {canEdit && (
-              <form onSubmit={addNote} className="flex gap-2">
-                <input
-                  value={note}
-                  onChange={e => setNote(e.target.value)}
-                  placeholder="Додати нотатку..."
-                  className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-red-500"
-                />
-                <button
-                  type="submit"
-                  disabled={savingNote || !note.trim()}
-                  className="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-200 text-sm rounded-lg transition-colors"
-                >
-                  {savingNote ? '...' : 'Додати'}
-                </button>
-              </form>
+              <RichNote requestId={r.id} onSubmit={addNote} busy={savingNote} />
             )}
             {noteError && <div className="text-red-400 text-xs mt-1.5">{noteError}</div>}
           </div>

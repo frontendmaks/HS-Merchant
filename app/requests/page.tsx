@@ -13,7 +13,7 @@ const SELECT = `
   created_at, updated_at, completed_at, created_by,
   author:profiles!requests_created_by_fkey(id, full_name, email),
   assignees:request_assignees(user:profiles!request_assignees_user_id_fkey(id, full_name, email)),
-  notes:request_notes(id, body, created_at, author_id,
+  notes:request_notes(id, body, body_rich, created_at, author_id,
                       author:profiles!request_notes_author_id_fkey(full_name, email)),
   events:request_events(id, type, old_value, new_value, created_at,
                         actor:profiles!request_events_actor_id_fkey(full_name, email))
