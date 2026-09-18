@@ -2,7 +2,10 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { advise, VERDICT_META, MATCH_TRUSTED, type Verdict } from '@/lib/price-monitor'
+import {
+  advise, VERDICT_META, MATCH_MODES, amountLabel,
+  type Verdict, type MatchMode,
+} from '@/lib/price-monitor'
 
 interface Competitor {
   id: string
@@ -17,12 +20,17 @@ interface Product {
   id: string; name: string; price: number | null
   category_name: string | null; stock: number | null
 }
-interface Watch { product_id: string; added_at: string; product: Product | null }
+interface Watch {
+  product_id: string; added_at: string; match_mode: MatchMode; product: Product | null
+}
 interface Match {
   id: string; product_id: string; competitor_id: string
   competitor_title: string | null; competitor_url: string | null
   price: number | null; similarity: number | null
   status: string; checked_at: string | null; error: string | null
+  our_amount: number | null; competitor_amount: number | null
+  /** Their price at our pack size; null when either size is unknown */
+  normalized_price: number | null
 }
 interface Snapshot { product_id: string; competitor_id: string; price: number; captured_at: string }
 
@@ -42,7 +50,7 @@ export default function PricesClient({ competitors, watches, matches, history }:
   const router = useRouter()
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-  const [tab, setTab] = useState<'overview' | 'competitors'>('overview')
+  const [tab, setTab] = useState<'overview' | 'settings' | 'competitors'>('overview')
   const [filter, setFilter] = useState<Verdict | 'all'>('all')
   const [adding, setAdding] = useState(false)
 
@@ -73,20 +81,28 @@ export default function PricesClient({ competitors, watches, matches, history }:
     .filter(w => w.product)
     .map(w => {
       const product = w.product!
+      const mode = w.match_mode ?? 'similar'
+      const trusted = MATCH_MODES[mode].trusted
       const found = (byProduct.get(product.id) ?? []).filter(
         m => m.status !== 'rejected' && m.price != null
-          && (m.status === 'confirmed' || Number(m.similarity ?? 0) >= MATCH_TRUSTED),
+          && (m.status === 'confirmed' || Number(m.similarity ?? 0) >= trusted),
       )
-      const advice = advise(Number(product.price ?? 0), found.map(m => Number(m.price)))
+      // The scaled figure where sizes are known, the printed one otherwise —
+      // comparing 1 кг against our 500 г by its tag would invert the answer
+      const advice = advise(
+        Number(product.price ?? 0),
+        found.map(m => Number(m.normalized_price ?? m.price)),
+      )
       return {
         product,
+        mode,
         all: byProduct.get(product.id) ?? [],
         used: found,
         advice,
         /** Anything matched but too weak to price against, awaiting a person */
         unsure: (byProduct.get(product.id) ?? []).filter(
           m => m.status === 'auto' && m.price != null
-            && Number(m.similarity ?? 0) < MATCH_TRUSTED),
+            && Number(m.similarity ?? 0) < trusted),
       }
     }), [watches, byProduct])
 
@@ -151,7 +167,11 @@ export default function PricesClient({ competitors, watches, matches, history }:
       )}
 
       <div className="flex gap-1 border-b border-zinc-800">
-        {([['overview', 'Огляд'], ['competitors', `Конкуренти (${competitors.length})`]] as const).map(
+        {([
+          ['overview', 'Огляд'],
+          ['settings', `Налаштування моніторингу (${watches.length})`],
+          ['competitors', `Конкуренти (${competitors.length})`],
+        ] as const).map(
           ([k, label]) => (
             <button
               key={k}
@@ -178,8 +198,8 @@ export default function PricesClient({ competitors, watches, matches, history }:
             <Empty
               title="Оберіть позиції для моніторингу"
               body="Стежимо лише за тим, що ви обрали. Щоденний обхід усього каталогу — це переважно шум."
-              action={<button onClick={() => setAdding(true)}
-                className="text-red-400 hover:text-red-300 text-sm">Додати товари →</button>}
+              action={<button onClick={() => setTab('settings')}
+                className="text-red-400 hover:text-red-300 text-sm">Налаштувати моніторинг →</button>}
             />
           ) : (
             <>
@@ -236,6 +256,18 @@ export default function PricesClient({ competitors, watches, matches, history }:
             </>
           )}
         </>
+      ) : tab === 'settings' ? (
+        <SettingsTab
+          rows={rows}
+          busy={busy}
+          onAdd={() => setAdding(true)}
+          onMode={(ids, mode) => call('/api/prices/watch', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ productIds: ids, mode }),
+          }, ids[0] ?? 'mode')}
+          onRemove={id => call(`/api/prices/watch?product_id=${id}`, { method: 'DELETE' }, id)}
+        />
       ) : (
         <CompetitorsTab
           competitors={competitors}
@@ -321,6 +353,7 @@ function Verdicts({ summary, filter, onFilter }: {
 
 interface Row {
   product: Product
+  mode: MatchMode
   all: Match[]
   used: Match[]
   unsure: Match[]
@@ -355,7 +388,10 @@ function ProductCard({ row, competitors, previous, busy, onMatch, onRemove }: {
             )}
           </div>
           <div className="text-white text-sm mt-1.5">{row.product.name}</div>
-          <div className="text-zinc-500 text-xs mt-0.5">{row.advice.reason}</div>
+          <div className="text-zinc-500 text-xs mt-0.5">
+            {row.advice.reason}
+            <span className="text-zinc-600"> · {MATCH_MODES[row.mode].label}</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-5 shrink-0">
@@ -401,7 +437,8 @@ function ProductCard({ row, competitors, previous, busy, onMatch, onRemove }: {
               {row.all.map(m => {
                 const was = previous.get(`${m.product_id}|${m.competitor_id}`)
                 const score = Number(m.similarity ?? 0)
-                const weak = m.status === 'auto' && score < MATCH_TRUSTED
+                // Judged against this product's own setting, not a fixed number
+                const weak = m.status === 'auto' && score < MATCH_MODES[row.mode].trusted
                 return (
                   <div key={m.id} className="px-4 py-2.5 flex items-start gap-3 flex-wrap">
                     <div className="min-w-0 flex-1">
@@ -434,7 +471,17 @@ function ProductCard({ row, competitors, previous, busy, onMatch, onRemove }: {
                     </div>
 
                     <div className="text-right shrink-0">
-                      <div className="text-white text-sm tabular-nums">{money(m.price)}</div>
+                      <div className="text-white text-sm tabular-nums">
+                        {money(m.normalized_price != null ? Number(m.normalized_price) : m.price)}
+                      </div>
+                      {/* Both numbers, because the scaled one is not their
+                          price tag and should never be mistaken for it */}
+                      {m.normalized_price != null && m.competitor_amount != null
+                        && Math.round(Number(m.normalized_price)) !== Math.round(Number(m.price ?? 0)) && (
+                        <div className="text-zinc-600 text-xs">
+                          зведено з {money(m.price)} за {amountLabel(Number(m.competitor_amount))}
+                        </div>
+                      )}
                       {was != null && m.price != null && Math.round(was) !== Math.round(Number(m.price)) && (
                         <div className={`text-xs tabular-nums ${
                           Number(m.price) > was ? 'text-red-400' : 'text-emerald-400'
@@ -500,6 +547,7 @@ function CompetitorsTab({ competitors, busy, onAdd, onToggle, onDelete }: {
   const [name, setName] = useState('')
   const [site, setSite] = useState('')
   const [search, setSearch] = useState('')
+  const [manual, setManual] = useState(false)
 
   const field = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-red-500'
 
@@ -508,33 +556,46 @@ function CompetitorsTab({ competitors, busy, onAdd, onToggle, onDelete }: {
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
         <div className="text-white text-sm font-medium">Додати конкурента</div>
 
-        {/* The search address is the whole trick, so it is explained where it
-            is typed rather than in documentation nobody opens */}
         <p className="text-zinc-500 text-xs leading-relaxed">
-          Потрібна адреса <span className="text-zinc-300">пошуку</span> на сайті конкурента,
-          а не головна сторінка. Знайдіть у них будь-який товар через пошук, скопіюйте адресу
-          з рядка браузера і замініть у ній свій запит на <code className="text-red-400">{'{q}'}</code>.
-          <br />
-          Наприклад: <code className="text-zinc-400">https://shop.ua/search?q=</code>
-          <code className="text-red-400">{'{q}'}</code>
+          Достатньо назви й адреси сайту — пошук на ньому знайдеться сам.
+          Перевірка займає кілька секунд.
         </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <input value={name} onChange={e => setName(e.target.value)}
-            placeholder="Назва — напр. Сільпо" className={field} />
+            placeholder="Назва — напр. Родинна Ковбаска" className={field} />
           <input value={site} onChange={e => setSite(e.target.value)}
-            placeholder="https://shop.ua" className={field} />
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="https://shop.ua/search?q={q}" className={field} />
+            placeholder="https://rodynna-kovbaska.ua" className={field} />
         </div>
 
+        {/* Kept, but out of the way: needed only by the rare shop whose search
+            is somewhere no common platform puts it */}
         <button
-          disabled={busy === 'add' || !name.trim() || !site.trim() || !search.trim()}
+          type="button"
+          onClick={() => setManual(!manual)}
+          className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
+        >
+          {manual ? '− Сховати' : '+ Вказати адресу пошуку вручну'}
+        </button>
+
+        {manual && (
+          <div className="space-y-1.5">
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="https://shop.ua/search?q={q}" className={field} />
+            <p className="text-zinc-600 text-xs">
+              Знайдіть у них будь-який товар через пошук, скопіюйте адресу з рядка
+              браузера і замініть свій запит на <code className="text-red-400">{'{q}'}</code>.
+            </p>
+          </div>
+        )}
+
+        <button
+          disabled={busy === 'add' || !name.trim() || !site.trim()}
           onClick={() => { onAdd({ name, site_url: site, search_url: search }); setName(''); setSite(''); setSearch('') }}
           className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white text-sm
                      font-medium px-4 py-2 rounded-lg transition-colors"
         >
-          {busy === 'add' ? 'Додається…' : 'Додати'}
+          {busy === 'add' ? 'Шукаємо пошук на сайті…' : 'Додати'}
         </button>
       </div>
 
@@ -558,6 +619,12 @@ function CompetitorsTab({ competitors, busy, onAdd, onToggle, onDelete }: {
                 <div className="text-zinc-600 text-xs mt-0.5">
                   Перевірено: {when(c.last_checked_at)}
                 </div>
+                {!c.search_url && (
+                  <div className="text-amber-400 text-xs mt-1">
+                    ⚠ Пошук на сайті не знайдено — конкурент не перевіряється.
+                    Вкажіть адресу пошуку вручну.
+                  </div>
+                )}
                 {c.last_error && (
                   <div className="text-amber-400 text-xs mt-1">⚠ {c.last_error}</div>
                 )}
@@ -679,6 +746,157 @@ function AddProducts({ existing, onClose, onAdd }: {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Which of our products are watched, and how strictly each is matched.
+ *
+ * Separate from the overview because these are two different jobs: the overview
+ * answers "what should I do about prices today", this answers "what are we even
+ * comparing" — a question you revisit rarely and in bulk.
+ */
+function SettingsTab({ rows, busy, onAdd, onMode, onRemove }: {
+  rows: Row[]
+  busy: string
+  onAdd: () => void
+  onMode: (ids: string[], mode: MatchMode) => void
+  onRemove: (id: string) => void
+}) {
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [query, setQuery] = useState('')
+
+  const shown = query.trim()
+    ? rows.filter(r => r.product.name.toLowerCase().includes(query.trim().toLowerCase()))
+    : rows
+
+  const toggle = (id: string) => setPicked(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+        <div className="text-white text-sm font-medium">Ступінь схожості</div>
+        <p className="text-zinc-500 text-xs mt-1.5 leading-relaxed">
+          Задається для кожного товару окремо. Для банки з відомою маркою існує рівно
+          один відповідник, і все інше під тією ж назвою — сміття. Для фаршу чи олії
+          прямого відповідника немає взагалі: там питання в тому, скільки коштує
+          рівноцінна пачка деінде.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
+          {(Object.keys(MATCH_MODES) as MatchMode[]).map(key => (
+            <div key={key} className="bg-zinc-800/40 rounded-lg px-3 py-2.5">
+              <div className="text-zinc-200 text-xs font-medium">{MATCH_MODES[key].label}</div>
+              <div className="text-zinc-500 text-xs mt-1 leading-relaxed">{MATCH_MODES[key].hint}</div>
+            </div>
+          ))}
+        </div>
+        <p className="text-zinc-600 text-xs mt-3 leading-relaxed">
+          Де фасування різні й режим це дозволяє, ціна конкурента зводиться до нашої
+          пачки: їхній кілограм за 300 ₴ проти нашої півкілограмової за 180 ₴ — це вони
+          дешевші, хоча на ціннику більше число.
+        </p>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Фільтр за назвою"
+          className="flex-1 min-w-[200px] bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2
+                     text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-red-500"
+        />
+        <button
+          onClick={onAdd}
+          className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium
+                     px-4 py-2 rounded-lg transition-colors"
+        >
+          + Додати товари
+        </button>
+      </div>
+
+      {picked.size > 0 && (
+        <div className="bg-zinc-800/60 border border-zinc-700 rounded-xl px-4 py-3
+                        flex items-center gap-3 flex-wrap sticky top-2 z-10">
+          <span className="text-white text-sm">Обрано: {picked.size}</span>
+          <span className="text-zinc-500 text-xs">Змінити ступінь на:</span>
+          {(Object.keys(MATCH_MODES) as MatchMode[]).map(key => (
+            <button
+              key={key}
+              disabled={!!busy}
+              onClick={() => { onMode([...picked], key); setPicked(new Set()) }}
+              className="bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-zinc-100
+                         text-xs px-3 py-1.5 rounded-lg transition-colors"
+            >
+              {MATCH_MODES[key].label}
+            </button>
+          ))}
+          <button onClick={() => setPicked(new Set())}
+            className="text-zinc-500 hover:text-white text-xs ml-auto">× зняти</button>
+        </div>
+      )}
+
+      {!rows.length ? (
+        <Empty
+          title="Жодного товару ще не обрано"
+          body="Оберіть позиції, ціни яких варто тримати під наглядом. Решта каталогу перевірятись не буде."
+          action={<button onClick={onAdd}
+            className="text-red-400 hover:text-red-300 text-sm">Додати товари →</button>}
+        />
+      ) : (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl divide-y divide-zinc-800">
+          {shown.map(row => {
+            const on = picked.has(row.product.id)
+            const amount = amountLabel(
+              row.all[0]?.our_amount != null ? Number(row.all[0].our_amount) : null)
+            return (
+              <div key={row.product.id}
+                className={`px-4 py-3 flex items-center gap-3 flex-wrap transition-colors ${
+                  on ? 'bg-red-600/10' : ''
+                }`}>
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => toggle(row.product.id)}
+                  className="accent-red-600 w-4 h-4 shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="text-white text-sm truncate">{row.product.name}</div>
+                  <div className="text-zinc-500 text-xs mt-0.5">
+                    {money(row.product.price)}
+                    {amount && <span className="text-zinc-600"> · фасування {amount}</span>}
+                    {' · '}{row.product.category_name ?? 'без категорії'}
+                  </div>
+                </div>
+
+                <select
+                  value={row.mode}
+                  disabled={busy === row.product.id}
+                  onChange={e => onMode([row.product.id], e.target.value as MatchMode)}
+                  className="bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5
+                             text-white text-xs focus:outline-none focus:border-red-500 shrink-0"
+                >
+                  {(Object.keys(MATCH_MODES) as MatchMode[]).map(key => (
+                    <option key={key} value={key}>{MATCH_MODES[key].label}</option>
+                  ))}
+                </select>
+
+                <button
+                  onClick={() => onRemove(row.product.id)}
+                  disabled={busy === row.product.id}
+                  className="text-zinc-500 hover:text-red-400 text-xs px-2 py-1 transition-colors shrink-0"
+                >
+                  Прибрати
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

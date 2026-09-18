@@ -16,10 +16,12 @@ export default async function PriceMonitorPage() {
       .select('id, name, site_url, search_url, is_active, last_checked_at, last_error')
       .order('created_at'),
     service.from('price_watches')
-      .select('product_id, added_at, product:products(id, name, price, category_name, stock, status)')
+      .select('product_id, added_at, match_mode, product:products(id, name, price, category_name, stock, status)')
       .order('added_at', { ascending: false }),
     service.from('price_matches')
-      .select('id, product_id, competitor_id, competitor_title, competitor_url, price, similarity, status, checked_at, error'),
+      .select(`id, product_id, competitor_id, competitor_title, competitor_url,
+               price, similarity, status, checked_at, error,
+               our_amount, competitor_amount, normalized_price`),
   ])
 
   // Yesterday's price per pair, so a move can be shown rather than just a level

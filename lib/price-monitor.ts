@@ -79,7 +79,7 @@ function bigramDice(a: string, b: string): number {
  * size that disagrees cuts the score hard rather than zeroing it, so a wrong
  * match still surfaces for a person to reject instead of vanishing silently.
  */
-export function similarity(ours: string, theirs: string): number {
+export function similarity(ours: string, theirs: string, mode: MatchMode = 'similar'): number {
   const a = tokens(ours), b = tokens(theirs)
   if (!a.length || !b.length) return 0
 
@@ -101,15 +101,81 @@ export function similarity(ours: string, theirs: string): number {
   const amountA = extractAmount(ours), amountB = extractAmount(theirs)
   if (amountA && amountB) {
     const ratio = Math.min(amountA, amountB) / Math.max(amountA, amountB)
-    if (ratio < 0.95) score *= 0.4
+    if (ratio < 0.95) {
+      // When sizes may be scaled, a different pack is not a different product —
+      // it costs a little confidence, not the match. When they may not, it is
+      // the wrong offer and scores accordingly.
+      score *= MATCH_MODES[mode].allowScaling ? 0.88 : 0.4
+    }
   }
   return Math.min(1, Math.round(score * 1000) / 1000)
 }
 
-/** Below this a match is not worth storing — it is a different product. */
-export const MATCH_FLOOR = 0.42
-/** At or above this the match is good enough to price against unreviewed. */
-export const MATCH_TRUSTED = 0.62
+/**
+ * How strictly a given product should be matched.
+ *
+ * A jar of a named brand has exactly one counterpart on another site, and
+ * anything else found under that name is noise. Mince, oil or sugar have no
+ * single counterpart at all — there the question is what an equivalent pack
+ * costs elsewhere, whoever makes it. One threshold cannot serve both.
+ */
+export const MATCH_MODES = {
+  exact: {
+    label: 'Точна позиція',
+    hint: 'Той самий товар того самого виробника. Інше фасування не рахується.',
+    floor: 0.60,
+    trusted: 0.78,
+    /** Whether 500 г may be compared with 1 кг by scaling the price */
+    allowScaling: false,
+  },
+  similar: {
+    label: 'Той самий товар',
+    hint: 'Той самий товар будь-якого виробника. Різне фасування зводиться до нашого.',
+    floor: 0.42,
+    trusted: 0.62,
+    allowScaling: true,
+  },
+  loose: {
+    label: 'Схоже за складом',
+    hint: 'Близька за суттю позиція — для товарів без прямого аналога. Більше збігів, більше ручної перевірки.',
+    floor: 0.30,
+    trusted: 0.48,
+    allowScaling: true,
+  },
+} as const
+
+export type MatchMode = keyof typeof MATCH_MODES
+export const isMatchMode = (v: unknown): v is MatchMode =>
+  typeof v === 'string' && v in MATCH_MODES
+
+/** Used where a mode is not in play — the mid setting's numbers. */
+export const MATCH_FLOOR = MATCH_MODES.similar.floor
+export const MATCH_TRUSTED = MATCH_MODES.similar.trusted
+
+/**
+ * Their price at our pack size.
+ *
+ * This is the point of recording sizes. A rival selling 1 кг for 300 ₴ is not
+ * dearer than our 500 г at 180 ₴ — they are cheaper, and comparing the two
+ * printed numbers says the opposite. Returns null when either size is unknown,
+ * because a guessed size would move the answer without saying so.
+ */
+export function scaleToOurPack(
+  theirPrice: number,
+  theirAmount: number | null,
+  ourAmount: number | null,
+): number | null {
+  if (!theirAmount || !ourAmount || theirAmount <= 0 || ourAmount <= 0) return null
+  return Math.round(theirPrice * (ourAmount / theirAmount) * 100) / 100
+}
+
+/** «за 500 г» — how a scaled figure is labelled so nobody reads it as a price tag. */
+export function amountLabel(grams: number | null): string | null {
+  if (!grams) return null
+  return grams >= 1000
+    ? `${Number((grams / 1000).toFixed(2))} кг`
+    : `${Math.round(grams)} г`
+}
 
 export type Verdict = 'expensive' | 'cheap' | 'aligned' | 'no_data'
 

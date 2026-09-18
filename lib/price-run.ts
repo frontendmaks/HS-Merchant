@@ -6,7 +6,10 @@
  */
 import { createServiceClient } from '@/lib/supabase/service'
 import { searchCompetitor } from '@/lib/price-scrape'
-import { similarity, MATCH_FLOOR } from '@/lib/price-monitor'
+import {
+  similarity, extractAmount, scaleToOurPack, MATCH_MODES, isMatchMode,
+  type MatchMode,
+} from '@/lib/price-monitor'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -25,11 +28,18 @@ export interface RunResult {
 
 export async function runPriceCheck(service: Service = createServiceClient()): Promise<RunResult> {
   const [{ data: watches }, { data: competitors }] = await Promise.all([
-    service.from('price_watches').select('product_id'),
-    service.from('price_competitors').select('id, name, search_url').eq('is_active', true),
+    service.from('price_watches').select('product_id, match_mode'),
+    service.from('price_competitors').select('id, name, search_url')
+      .eq('is_active', true).not('search_url', 'is', null),
   ])
 
   const productIds = (watches ?? []).map(w => w.product_id as string)
+  const modeOf = new Map<string, MatchMode>(
+    (watches ?? []).map(w => [
+      w.product_id as string,
+      isMatchMode(w.match_mode) ? w.match_mode : 'similar',
+    ]),
+  )
   const rivals = competitors ?? []
   const result: RunResult = {
     products: productIds.length, competitors: rivals.length,
@@ -75,16 +85,19 @@ export async function runPriceCheck(service: Service = createServiceClient()): P
         continue
       }
 
+      const mode = modeOf.get(product.id as string) ?? 'similar'
+      const ourAmount = extractAmount(product.name as string)
+
       // A confirmed match is re-priced from the same listing, not re-matched
       const scored = items
-        .map(i => ({ ...i, score: similarity(product.name as string, i.title) }))
+        .map(i => ({ ...i, score: similarity(product.name as string, i.title, mode) }))
         .sort((a, b) => b.score - a.score)
 
       const best = decision?.status === 'confirmed' && decision.competitor_title
         ? scored.find(i => i.title === decision.competitor_title) ?? scored[0]
         : scored[0]
 
-      if (!best || best.score < MATCH_FLOOR) {
+      if (!best || best.score < MATCH_MODES[mode].floor) {
         await service.from('price_matches').upsert({
           product_id: product.id, competitor_id: rival.id,
           checked_at: now, error: 'Схожої позиції не знайдено',
@@ -94,17 +107,27 @@ export async function runPriceCheck(service: Service = createServiceClient()): P
         continue
       }
 
+      const theirAmount = extractAmount(best.title)
+      // Only where the mode permits it: under «Точна позиція» a different pack
+      // is a different offer, and scaling it would invent a comparison the
+      // setting exists to refuse
+      const normalized = MATCH_MODES[mode].allowScaling
+        ? scaleToOurPack(best.price, theirAmount, ourAmount)
+        : null
+
       await service.from('price_matches').upsert({
         product_id: product.id, competitor_id: rival.id,
         competitor_title: best.title, competitor_url: best.url,
         price: best.price, similarity: best.score,
+        our_amount: ourAmount, competitor_amount: theirAmount,
+        normalized_price: normalized,
         status: decision?.status === 'confirmed' ? 'confirmed' : 'auto',
         checked_at: now, error: null,
       }, { onConflict: 'product_id,competitor_id' })
 
       await service.from('price_snapshots').insert({
         product_id: product.id, competitor_id: rival.id,
-        price: best.price, our_price: product.price,
+        price: normalized ?? best.price, our_price: product.price,
       })
       result.matched++
     }
