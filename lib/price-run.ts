@@ -372,7 +372,7 @@ export async function runPriceCheck(
 
       await service.from('price_snapshots').insert({
         product_id: product.id, competitor_id: rival.id,
-        price: normalized ?? best.price, our_price: product.price,
+        price: normalized ?? chosen.price, our_price: product.price,
       })
       result.matched++
     }
