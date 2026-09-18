@@ -6,7 +6,7 @@
  */
 import { createServiceClient } from '@/lib/supabase/service'
 import { searchCompetitor, type Found } from '@/lib/price-scrape'
-import { fetchCatalog, shortlist, readProduct } from '@/lib/price-catalog'
+import { fetchCatalog, shortlist, readProduct, withCity } from '@/lib/price-catalog'
 import {
   similarity, extractAmount, scaleToOurPack, queryVariants,
   MATCH_MODES, isMatchMode, type MatchMode,
@@ -41,14 +41,15 @@ const CATALOG_TTL_MS = 3 * 864e5
  */
 async function candidates(
   service: Service,
-  rival: { id: string; search_url: string | null; site_url: string
+  rival: { id: string; search_url: string | null; site_url: string; city_path: string
            catalog_urls: unknown; catalog_synced_at: string | null },
   productName: string,
 ): Promise<{ items: Found[]; error?: string }> {
   if (rival.search_url) {
     let lastError: string | undefined
     for (const query of queryVariants(productName)) {
-      const attempt = await searchCompetitor(rival.search_url, query)
+      const attempt = await searchCompetitor(
+        withCity(rival.search_url, rival.city_path), query, 15_000, rival.city_path)
       if (attempt.items.length) return attempt
       lastError = attempt.error
       await sleep(500)
@@ -79,7 +80,8 @@ async function candidates(
   if (!picked.length) return { items: [], error: 'Схожої позиції немає в каталозі' }
 
   const items: Found[] = []
-  for (const url of picked) {
+  for (const raw of picked) {
+    const url = withCity(raw, rival.city_path)
     const page = await readProduct(url)
     await sleep(400)
     if (page) items.push({ title: page.title, price: page.price, url })
@@ -90,17 +92,22 @@ async function candidates(
 export async function runPriceCheck(
   service: Service = createServiceClient(),
   runId?: string,
+  /** One product instead of every watched one */
+  onlyProductId?: string,
 ): Promise<RunResult> {
   const [{ data: watches }, { data: competitors }] = await Promise.all([
     service.from('price_watches').select('product_id, match_mode'),
     // No search_url filter any more: a site without one is read from its
     // sitemap instead of being skipped
     service.from('price_competitors')
-      .select('id, name, site_url, search_url, catalog_urls, catalog_synced_at')
+      .select(`id, name, site_url, search_url, city_path,
+               catalog_urls, catalog_synced_at`)
       .eq('is_active', true),
   ])
 
-  const productIds = (watches ?? []).map(w => w.product_id as string)
+  const productIds = (watches ?? [])
+    .map(w => w.product_id as string)
+    .filter(id => !onlyProductId || id === onlyProductId)
   const modeOf = new Map<string, MatchMode>(
     (watches ?? []).map(w => [
       w.product_id as string,

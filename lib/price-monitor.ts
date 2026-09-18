@@ -213,6 +213,8 @@ export interface Advice {
   verdict: Verdict
   /** Our price minus the cheapest competitor, as a share of theirs */
   gapPct: number | null
+  /** …and the same difference in hryvnia, which is what people act on */
+  gapUah: number | null
   cheapest: number | null
   average: number | null
   /** What to change the price to, when changing it is worth suggesting */
@@ -220,48 +222,69 @@ export interface Advice {
   reason: string
 }
 
+/** Where the line between noise and a problem sits. Editable on the page. */
+export interface Thresholds {
+  /** A gap smaller than this many hryvnia is noise, whatever the percentage */
+  minAbs: number
+  /** …and smaller than this share of their price is noise, whatever the sum */
+  minPct: number
+  /** How far under the cheapest rival a corrected price lands */
+  undercutPct: number
+}
+
+export const DEFAULT_THRESHOLDS: Thresholds = { minAbs: 15, minPct: 5, undercutPct: 2 }
+
 /**
  * Turns a set of competitor prices into one sentence a person can act on.
  *
- * The bands are deliberately wide. A two-percent difference is not a pricing
- * problem, and a page that flags one teaches people to ignore it.
+ * A gap must clear both tests to count. Percentages on their own treat a 20 ₴
+ * line and a 500 ₴ line alike; hryvnia on its own flags everything expensive.
+ * Five hryvnia apart is not a pricing problem at any price, and a page that
+ * says otherwise teaches people to ignore it.
  */
-export function advise(ourPrice: number, prices: number[]): Advice {
+export function advise(
+  ourPrice: number,
+  prices: number[],
+  t: Thresholds = DEFAULT_THRESHOLDS,
+): Advice {
   const valid = prices.filter(p => Number.isFinite(p) && p > 0)
   if (!valid.length || !ourPrice) {
     return {
-      verdict: 'no_data', gapPct: null, cheapest: null, average: null,
+      verdict: 'no_data', gapPct: null, gapUah: null, cheapest: null, average: null,
       suggested: null, reason: 'Немає цін конкурентів',
     }
   }
 
   const cheapest = Math.min(...valid)
   const average = valid.reduce((s, p) => s + p, 0) / valid.length
-  const gapPct = ((ourPrice - cheapest) / cheapest) * 100
+  const gapUah = ourPrice - cheapest
+  const gapPct = (gapUah / cheapest) * 100
 
-  if (gapPct > 10) {
-    // Just under the cheapest, not far under: undercutting by a lot gives away
-    // margin the price did not need to lose
-    const suggested = Math.max(1, Math.round(cheapest * 0.98))
+  const matters = Math.abs(gapUah) >= t.minAbs && Math.abs(gapPct) >= t.minPct
+  // Just under the cheapest, not far under: undercutting by more than it takes
+  // gives away margin the price did not need to lose
+  const target = Math.max(1, Math.round(cheapest * (1 - t.undercutPct / 100)))
+
+  if (matters && gapUah > 0) {
     return {
-      verdict: 'expensive', gapPct, cheapest, average, suggested,
-      reason: `Дорожче за найдешевшого на ${gapPct.toFixed(0)}%`,
+      verdict: 'expensive', gapPct, gapUah, cheapest, average, suggested: target,
+      reason: `Дорожче за найдешевшого на ${Math.round(gapUah)} ₴ (${gapPct.toFixed(0)}%)`,
     }
   }
 
-  if (gapPct < -12) {
-    // Room to raise, but only up to just under the cheapest rival
-    const suggested = Math.round(cheapest * 0.97)
+  if (matters && gapUah < 0) {
     return {
-      verdict: 'cheap', gapPct, cheapest, average,
-      suggested: suggested > ourPrice ? suggested : null,
-      reason: `Дешевше за найдешевшого на ${Math.abs(gapPct).toFixed(0)}% — можна підняти`,
+      verdict: 'cheap', gapPct, gapUah, cheapest, average,
+      suggested: target > ourPrice ? target : null,
+      reason: `Дешевше за найдешевшого на ${Math.round(-gapUah)} ₴ (${Math.abs(gapPct).toFixed(0)}%) — є запас`,
     }
   }
 
   return {
-    verdict: 'aligned', gapPct, cheapest, average, suggested: null,
-    reason: 'Ціна в ринку',
+    verdict: 'aligned', gapPct, gapUah, cheapest, average, suggested: null,
+    reason: Math.abs(gapUah) < 1
+      ? 'Ціна збігається з ринком'
+      : `Різниця ${Math.round(Math.abs(gapUah))} ₴ — несуттєво`,
   }
 }
 

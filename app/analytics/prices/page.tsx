@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import { redirect } from 'next/navigation'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
 import { createServiceClient } from '@/lib/supabase/service'
+import { DEFAULT_THRESHOLDS } from '@/lib/price-monitor'
 import PricesClient from './PricesClient'
 
 export default async function PriceMonitorPage() {
@@ -11,10 +12,11 @@ export default async function PriceMonitorPage() {
 
   const service = createServiceClient()
 
-  const [{ data: competitors }, { data: watches }, { data: matches }] = await Promise.all([
+  const [{ data: competitors }, { data: watches }, { data: matches }, { data: settings }] =
+    await Promise.all([
     service.from('price_competitors')
       .select(`id, name, site_url, search_url, is_active, last_checked_at,
-               last_error, catalog_synced_at`)
+               last_error, catalog_synced_at, city_path`)
       .order('created_at'),
     service.from('price_watches')
       .select('product_id, added_at, match_mode, product:products(id, name, price, category_name, stock, status)')
@@ -23,6 +25,7 @@ export default async function PriceMonitorPage() {
       .select(`id, product_id, competitor_id, competitor_title, competitor_url,
                price, similarity, status, checked_at, error,
                our_amount, competitor_amount, normalized_price`),
+    service.from('price_settings').select('*').eq('id', true).single(),
   ])
 
   // Yesterday's price per pair, so a move can be shown rather than just a level
@@ -39,6 +42,11 @@ export default async function PriceMonitorPage() {
       watches={(watches ?? []) as never}
       matches={matches ?? []}
       history={history ?? []}
+      thresholds={settings ? {
+        minAbs: Number(settings.min_abs_uah),
+        minPct: Number(settings.min_pct),
+        undercutPct: Number(settings.undercut_pct),
+      } : DEFAULT_THRESHOLDS}
     />
   )
 }

@@ -233,3 +233,27 @@ export async function readProduct(url: string): Promise<{ title: string; price: 
   const title = nameMatch ? decode(nameMatch[1].replace(/<[^>]+>/g, ' ')) : ''
   return title ? { title, price } : null
 }
+
+/**
+ * The same product page, for a given city.
+ *
+ * A shop serving several cities prices them differently — chicken fillet is
+ * 219 ₴ in Lviv and 210 ₴ in Vinnytsia on the same site. Reading whichever page
+ * a link happened to point at makes the comparison depend on chance, so every
+ * URL is rewritten to the city we are actually competing in.
+ */
+export function withCity(url: string, cityPath: string): string {
+  const city = cityPath.replace(/^\/+|\/+$/g, '')
+  if (!city) return url
+  try {
+    const u = new URL(url)
+    const parts = u.pathname.split('/').filter(Boolean)
+    // Drop a city prefix already there, then put ours in front
+    const marker = parts.findIndex(p => /^(product|products|tovar|goods|item)$/i.test(p))
+    const tail = marker > 0 ? parts.slice(marker) : parts
+    u.pathname = '/' + [city, ...tail].join('/')
+    return u.toString()
+  } catch {
+    return url
+  }
+}

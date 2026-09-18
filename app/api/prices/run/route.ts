@@ -19,12 +19,16 @@ export async function GET() {
   return NextResponse.json({ run: data ?? null })
 }
 
-export async function POST() {
+export async function POST(req: Request) {
   const actor = await currentActor()
   if (!actor) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!canAccess('priceMonitor', await getCurrentRole())) {
     return NextResponse.json({ error: 'Немає доступу' }, { status: 403 })
   }
+
+  // Checking one row is a different, much shorter job than a full pass, so it
+  // does not queue behind one or block the next
+  const { productId } = await req.json().catch(() => ({})) as { productId?: string }
 
   const service = createServiceClient()
 
@@ -46,13 +50,17 @@ export async function POST() {
   }
 
   const { data: run } = await service.from('price_runs')
-    .insert({ started_by: actor.id, trigger: 'manual', current_step: 'Готуємось…' })
+    .insert({
+      started_by: actor.id,
+      trigger: productId ? 'single' : 'manual',
+      current_step: 'Готуємось…',
+    })
     .select('id').single()
 
   const runId = run?.id as string | undefined
 
   try {
-    const result = await runPriceCheck(service, runId)
+    const result = await runPriceCheck(service, runId, productId)
     if (runId) {
       await service.from('price_runs').update({
         status: 'done', done: result.matched + result.missed,

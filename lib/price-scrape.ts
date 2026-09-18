@@ -1,4 +1,4 @@
-import { readProduct } from '@/lib/price-catalog'
+import { readProduct, withCity } from '@/lib/price-catalog'
 /**
  * Reading prices off a competitor's search results.
  *
@@ -145,6 +145,8 @@ export async function searchCompetitor(
   searchTemplate: string,
   query: string,
   timeoutMs = 15_000,
+  /** Follow result links in this city, so the prices read are the right ones */
+  cityPath = '',
 ): Promise<{ items: Found[]; error?: string }> {
   const url = buildSearchUrl(searchTemplate, query)
 
@@ -168,7 +170,7 @@ export async function searchCompetitor(
     // cards with a link each. The links are the reliable part: follow them and
     // read the product pages, which do mark themselves up properly.
     if (!structured.length) {
-      const links = productLinks(html, url)
+      const links = productLinks(html, url).map(l => withCity(l, cityPath))
       if (links.length) {
         const read = await Promise.all(links.slice(0, 6).map(readProduct))
         const found: Found[] = read

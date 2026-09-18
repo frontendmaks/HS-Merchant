@@ -92,10 +92,23 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   const g = await guard(); if (g.error) return g.error
-  const { id, is_active } = await req.json() as { id: string; is_active: boolean }
+  const { id, is_active, city_path, search_url } = await req.json() as {
+    id: string; is_active?: boolean; city_path?: string; search_url?: string
+  }
+
+  const patch: Record<string, unknown> = {}
+  if (is_active !== undefined) patch.is_active = !!is_active
+  if (city_path !== undefined) {
+    patch.city_path = city_path.trim().replace(/^\/+|\/+$/g, '').slice(0, 40)
+    // The stored catalogue holds URLs for the old city, so it is dropped
+    // rather than left to serve the wrong prices until it next expires
+    patch.catalog_urls = null
+    patch.catalog_synced_at = null
+  }
+  if (search_url !== undefined) patch.search_url = search_url.trim() || null
 
   const { error } = await createServiceClient()
-    .from('price_competitors').update({ is_active: !!is_active }).eq('id', id)
+    .from('price_competitors').update(patch).eq('id', id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })

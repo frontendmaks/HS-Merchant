@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  advise, VERDICT_META, MATCH_MODES, amountLabel,
-  type Verdict, type MatchMode,
+  advise, VERDICT_META, MATCH_MODES, amountLabel, DEFAULT_THRESHOLDS,
+  type Verdict, type MatchMode, type Thresholds,
 } from '@/lib/price-monitor'
 
 interface Competitor {
   id: string
   name: string
   site_url: string
-  search_url: string
+  search_url: string | null
+  city_path: string
   is_active: boolean
   last_checked_at: string | null
   last_error: string | null
@@ -41,11 +42,14 @@ const when = (iso: string | null) => iso
   ? new Date(iso).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
   : 'ще не перевірялось'
 
-export default function PricesClient({ competitors, watches, matches, history }: {
+export default function PricesClient({
+  competitors, watches, matches, history, thresholds = DEFAULT_THRESHOLDS,
+}: {
   competitors: Competitor[]
   watches: Watch[]
   matches: Match[]
   history: Snapshot[]
+  thresholds?: Thresholds
 }) {
   const router = useRouter()
   const [busy, setBusy] = useState('')
@@ -55,6 +59,7 @@ export default function PricesClient({ competitors, watches, matches, history }:
   const [adding, setAdding] = useState(false)
   const [run, setRun] = useState<RunState | null>(null)
   const polling = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [checkingId, setCheckingId] = useState<string | null>(null)
 
   const byProduct = useMemo(() => {
     const map = new Map<string, Match[]>()
@@ -94,6 +99,7 @@ export default function PricesClient({ competitors, watches, matches, history }:
       const advice = advise(
         Number(product.price ?? 0),
         found.map(m => Number(m.normalized_price ?? m.price)),
+        thresholds,
       )
       return {
         product,
@@ -106,7 +112,7 @@ export default function PricesClient({ competitors, watches, matches, history }:
           m => m.status === 'auto' && m.price != null
             && Number(m.similarity ?? 0) < trusted),
       }
-    }), [watches, byProduct])
+    }), [watches, byProduct, thresholds])
 
   const summary = useMemo(() => {
     const count = (v: Verdict) => rows.filter(r => r.advice.verdict === v).length
@@ -130,6 +136,12 @@ export default function PricesClient({ competitors, watches, matches, history }:
 
   const shown = filter === 'all' ? rows : rows.filter(r => r.advice.verdict === filter)
 
+  /** Rows worth acting on, dearest mistake first. */
+  const actions = useMemo(() => rows
+    .filter(r => r.advice.suggested != null && r.advice.verdict !== 'aligned')
+    .sort((a, b) => Math.abs(b.advice.gapUah ?? 0) - Math.abs(a.advice.gapUah ?? 0))
+    .slice(0, 12), [rows])
+
   /** Follows the pass while it runs, so the button is not a black box. */
   const poll = useCallback(async () => {
     try {
@@ -149,7 +161,8 @@ export default function PricesClient({ competitors, watches, matches, history }:
     return () => { if (polling.current) clearInterval(polling.current) }
   }, [poll])
 
-  async function startRun() {
+  async function startRun(productId?: string) {
+    setCheckingId(productId ?? null)
     setError('')
     setRun({ status: 'running', total: 0, done: 0, matched: 0, missed: 0,
              current_step: 'Запускаємо…', error: null, started_at: new Date().toISOString(),
@@ -158,7 +171,11 @@ export default function PricesClient({ competitors, watches, matches, history }:
     if (!polling.current) polling.current = setInterval(() => void poll(), 2000)
 
     try {
-      const res = await fetch('/api/prices/run', { method: 'POST' })
+      const res = await fetch('/api/prices/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(productId ? { productId } : {}),
+      })
       const data = await res.json()
       if (!res.ok && res.status !== 409) throw new Error(data.error || 'Помилка')
     } catch (e) {
@@ -186,7 +203,7 @@ export default function PricesClient({ competitors, watches, matches, history }:
   const active = competitors.filter(c => c.is_active).length
 
   return (
-    <div className="p-4 sm:p-6 space-y-5 max-w-[1400px] mx-auto">
+    <div className="p-4 sm:p-6 space-y-5 max-w-[1400px] mx-auto print-plain">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">Моніторинг цін</h1>
@@ -195,9 +212,30 @@ export default function PricesClient({ competitors, watches, matches, history }:
             {' '}оновлення щодня о 9:30
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap no-print">
+          {watches.length > 0 && (
+            <>
+              <a
+                href="/api/prices/export"
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm
+                           px-3 py-2 rounded-lg transition-colors"
+              >
+                ⤓ XLSX
+              </a>
+              {/* Print, not a generated file: the browser's own "save as PDF"
+                  produces exactly what is on screen, and a second rendering
+                  engine would be one more thing to keep in step with it */}
+              <button
+                onClick={() => window.print()}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm
+                           px-3 py-2 rounded-lg transition-colors"
+              >
+                ⎙ PDF
+              </button>
+            </>
+          )}
           <button
-            onClick={startRun}
+            onClick={() => startRun()}
             disabled={run?.status === 'running' || !watches.length || !competitors.length}
             className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white text-sm
                        font-medium px-4 py-2 rounded-lg transition-colors"
@@ -215,7 +253,7 @@ export default function PricesClient({ competitors, watches, matches, history }:
 
       {run && <RunStatus run={run} />}
 
-      <div className="flex gap-1 border-b border-zinc-800">
+      <div className="flex gap-1 border-b border-zinc-800 no-print">
         {([
           ['overview', 'Огляд'],
           ['settings', `Налаштування моніторингу (${watches.length})`],
@@ -267,6 +305,44 @@ export default function PricesClient({ competitors, watches, matches, history }:
                 </div>
               )}
 
+              {actions.length > 0 && (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-zinc-800">
+                    <div className="text-white text-sm font-medium">Що робити з цінами</div>
+                    <div className="text-zinc-500 text-xs mt-0.5">
+                      Показані лише позиції, де різниця більша за {thresholds.minAbs} ₴
+                      і за {thresholds.minPct}% одночасно
+                    </div>
+                  </div>
+                  <div className="divide-y divide-zinc-800/60">
+                    {actions.map(r => {
+                      const our = Number(r.product.price ?? 0)
+                      const delta = (r.advice.suggested ?? our) - our
+                      return (
+                        <div key={r.product.id}
+                          className="px-4 py-2.5 flex items-center gap-3 flex-wrap">
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            VERDICT_META[r.advice.verdict].dot}`} />
+                          <span className="text-zinc-200 text-xs min-w-0 flex-1 truncate">
+                            {r.product.name}
+                          </span>
+                          <span className="text-zinc-500 text-xs tabular-nums shrink-0">
+                            {money(our)} → <span className={
+                              delta < 0 ? 'text-red-400' : 'text-emerald-400'
+                            }>{money(r.advice.suggested)}</span>
+                          </span>
+                          <span className={`text-xs tabular-nums shrink-0 w-16 text-right ${
+                            delta < 0 ? 'text-red-400' : 'text-emerald-400'
+                          }`}>
+                            {delta > 0 ? '+' : ''}{Math.round(delta)} ₴
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               {summary.lift > 0 && (
                 <div className="bg-amber-950/30 border border-amber-900/60 rounded-xl px-4 py-3">
                   <div className="text-amber-300 text-sm font-medium">
@@ -304,6 +380,8 @@ export default function PricesClient({ competitors, watches, matches, history }:
                     competitors={competitors}
                     previous={previous}
                     busy={busy}
+                    checking={run?.status === 'running' && checkingId === row.product.id}
+                    onCheck={() => startRun(row.product.id)}
                     onMatch={(id, status) => call('/api/prices/match', {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
@@ -322,6 +400,12 @@ export default function PricesClient({ competitors, watches, matches, history }:
         <SettingsTab
           rows={rows}
           busy={busy}
+          thresholds={thresholds}
+          onThresholds={t => call('/api/prices/settings', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(t),
+          }, 'thresholds')}
           onAdd={() => setAdding(true)}
           onMode={(ids, mode) => call('/api/prices/watch', {
             method: 'PATCH',
@@ -343,6 +427,11 @@ export default function PricesClient({ competitors, watches, matches, history }:
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id, is_active }),
+          }, id)}
+          onCity={(id, city_path) => call('/api/prices/competitors', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, city_path }),
           }, id)}
           onDelete={id => call(`/api/prices/competitors?id=${id}`, { method: 'DELETE' }, id)}
         />
@@ -425,11 +514,13 @@ interface Row {
   advice: ReturnType<typeof advise>
 }
 
-function ProductCard({ row, competitors, previous, busy, onMatch, onRemove }: {
+function ProductCard({ row, competitors, previous, busy, checking, onCheck, onMatch, onRemove }: {
   row: Row
   competitors: Competitor[]
   previous: Map<string, number>
   busy: string
+  checking: boolean
+  onCheck: () => void
   onMatch: (id: string, status: string) => void
   onRemove: () => void
 }) {
@@ -474,6 +565,13 @@ function ProductCard({ row, competitors, previous, busy, onMatch, onRemove }: {
           <div className="text-right">
             <div className="text-zinc-500 text-xs">Найдешевший</div>
             <div className="text-zinc-300 text-sm tabular-nums">{money(row.advice.cheapest)}</div>
+            {row.advice.gapUah != null && Math.abs(row.advice.gapUah) >= 1 && (
+              <div className={`text-xs tabular-nums ${
+                row.advice.gapUah > 0 ? 'text-red-400' : 'text-emerald-400'
+              }`}>
+                {row.advice.gapUah > 0 ? '+' : ''}{Math.round(row.advice.gapUah)} ₴
+              </div>
+            )}
           </div>
           {row.advice.suggested != null && (
             <div className="text-right">
@@ -489,6 +587,15 @@ function ProductCard({ row, competitors, previous, busy, onMatch, onRemove }: {
               </div>
             </div>
           )}
+          <button
+            onClick={onCheck}
+            disabled={checking}
+            className="text-zinc-400 hover:text-white disabled:opacity-40 text-xs
+                       px-2 py-1 transition-colors"
+            title="Перевірити лише цей товар"
+          >
+            {checking ? 'Перевіряємо…' : '↻ Перевірити'}
+          </button>
           <button
             onClick={() => setOpen(!open)}
             className="text-zinc-500 hover:text-white text-xs px-2 py-1 transition-colors"
@@ -609,11 +716,12 @@ function ProductCard({ row, competitors, previous, busy, onMatch, onRemove }: {
   )
 }
 
-function CompetitorsTab({ competitors, busy, onAdd, onToggle, onDelete }: {
+function CompetitorsTab({ competitors, busy, onAdd, onToggle, onCity, onDelete }: {
   competitors: Competitor[]
   busy: string
   onAdd: (body: { name: string; site_url: string; search_url: string }) => void
   onToggle: (id: string, is_active: boolean) => void
+  onCity: (id: string, city: string) => void
   onDelete: (id: string) => void
 }) {
   const [name, setName] = useState('')
@@ -696,6 +804,12 @@ function CompetitorsTab({ competitors, busy, onAdd, onToggle, onDelete }: {
                     Пошуку на сайті немає — читаємо каталог через sitemap.
                   </div>
                 )}
+                <div className="text-zinc-600 text-xs mt-0.5">
+                  Ціни читаємо для міста:{' '}
+                  <span className="text-zinc-400">
+                    {c.city_path || 'за замовчуванням сайту'}
+                  </span>
+                </div>
                 {/* Only a real failure, and only once: "no search" is now a
                     route we take rather than a problem to report */}
                 {c.last_error && c.search_url && (
@@ -704,6 +818,23 @@ function CompetitorsTab({ competitors, busy, onAdd, onToggle, onDelete }: {
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
+                {/* Same site, different prices per city — chicken fillet is
+                    219 ₴ in Lviv and 210 ₴ in Vinnytsia. Reading whichever page
+                    a link points at makes the comparison depend on chance. */}
+                <label className="flex items-center gap-1.5">
+                  <span className="text-zinc-500 text-xs">Місто:</span>
+                  <input
+                    defaultValue={c.city_path}
+                    placeholder="за замовч."
+                    onBlur={e => {
+                      if (e.target.value.trim() !== c.city_path) {
+                        onCity(c.id, e.target.value)
+                      }
+                    }}
+                    className="w-28 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1
+                               text-white text-xs focus:outline-none focus:border-red-500"
+                  />
+                </label>
                 <button
                   disabled={busy === c.id}
                   onClick={() => onToggle(c.id, !c.is_active)}
@@ -830,12 +961,14 @@ function AddProducts({ existing, onClose, onAdd }: {
  * answers "what should I do about prices today", this answers "what are we even
  * comparing" — a question you revisit rarely and in bulk.
  */
-function SettingsTab({ rows, busy, onAdd, onMode, onRemove }: {
+function SettingsTab({ rows, busy, thresholds, onAdd, onMode, onRemove, onThresholds }: {
   rows: Row[]
   busy: string
+  thresholds: Thresholds
   onAdd: () => void
   onMode: (ids: string[], mode: MatchMode) => void
   onRemove: (id: string) => void
+  onThresholds: (t: Thresholds) => void
 }) {
   const [picked, setPicked] = useState<Set<string>>(new Set())
 
@@ -847,6 +980,8 @@ function SettingsTab({ rows, busy, onAdd, onMode, onRemove }: {
 
   return (
     <div className="space-y-4">
+      <ThresholdsBox thresholds={thresholds} busy={busy} onSave={onThresholds} />
+
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
         <div className="text-white text-sm font-medium">Ступінь схожості</div>
         <p className="text-zinc-500 text-xs mt-1.5 leading-relaxed">
@@ -1048,6 +1183,74 @@ function RunStatus({ run }: { run: RunState }) {
           не переривається.
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * Where the line between noise and a pricing problem sits.
+ *
+ * Both numbers, not one. Percentages alone treat a 20 ₴ line and a 500 ₴ line
+ * alike; hryvnia alone flags everything expensive. A gap has to clear both
+ * before the page calls it a problem.
+ */
+function ThresholdsBox({ thresholds, busy, onSave }: {
+  thresholds: Thresholds
+  busy: string
+  onSave: (t: Thresholds) => void
+}) {
+  const [draft, setDraft] = useState(thresholds)
+  const dirty = draft.minAbs !== thresholds.minAbs
+    || draft.minPct !== thresholds.minPct
+    || draft.undercutPct !== thresholds.undercutPct
+
+  const field = 'w-24 bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-white text-sm focus:outline-none focus:border-red-500'
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+      <div className="text-white text-sm font-medium">Коли різниця вважається суттєвою</div>
+      <p className="text-zinc-500 text-xs mt-1.5 leading-relaxed">
+        Позиція потрапляє в «Дорого» або «Дешево», лише коли різниця перевищує
+        обидва пороги. П&apos;ять гривень різниці — це не проблема ціноутворення
+        ні за якої ціни, і сторінка, яка про них кричить, привчає себе ігнорувати.
+      </p>
+
+      <div className="flex items-end gap-4 flex-wrap mt-3">
+        <label className="block">
+          <span className="text-zinc-400 text-xs block mb-1">Поріг, ₴</span>
+          <input type="number" min={0} max={10000} value={draft.minAbs}
+            onChange={e => setDraft({ ...draft, minAbs: Number(e.target.value) })}
+            className={field} />
+        </label>
+        <label className="block">
+          <span className="text-zinc-400 text-xs block mb-1">Поріг, %</span>
+          <input type="number" min={0} max={90} value={draft.minPct}
+            onChange={e => setDraft({ ...draft, minPct: Number(e.target.value) })}
+            className={field} />
+        </label>
+        <label className="block">
+          <span className="text-zinc-400 text-xs block mb-1">Підрізати на, %</span>
+          <input type="number" min={0} max={50} value={draft.undercutPct}
+            onChange={e => setDraft({ ...draft, undercutPct: Number(e.target.value) })}
+            className={field} />
+        </label>
+
+        {dirty && (
+          <button
+            disabled={busy === 'thresholds'}
+            onClick={() => onSave(draft)}
+            className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white text-sm
+                       font-medium px-4 py-2 rounded-lg transition-colors"
+          >
+            {busy === 'thresholds' ? 'Зберігаємо…' : 'Зберегти'}
+          </button>
+        )}
+      </div>
+
+      <p className="text-zinc-600 text-xs mt-3">
+        «Підрізати на» — наскільки нижче за найдешевшого конкурента ставити
+        рекомендовану ціну. Нуль означає рівно в його ціну.
+      </p>
     </div>
   )
 }
