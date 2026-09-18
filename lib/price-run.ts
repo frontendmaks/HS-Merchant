@@ -7,6 +7,7 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import { searchCompetitor, siteChrome, type Found } from '@/lib/price-scrape'
 import { fetchCatalog, shortlist, readProduct, withCity } from '@/lib/price-catalog'
+import { contextLabel, contextMatches } from '@/lib/meat-context'
 import {
   similarity, extractAmount, scaleToOurPack, queryVariants, sameKind,
   pricePerKg, ourPricePerKg, unitGrams, MATCH_MODES, isMatchMode, type MatchMode,
@@ -191,6 +192,18 @@ export async function runPriceCheck(
       const best = scored[0]
 
       if (!best || best.score < MATCH_MODES[mode].floor) {
+        // Nothing acceptable today means yesterday's guesses are not acceptable
+        // either. Without this a match the vocabulary now rejects — a turkey
+        // thigh under a chicken one — sits in the details for ever, because the
+        // cleanup only ran when there was something to replace it with.
+        await service.from('price_matches')
+          .delete()
+          .eq('product_id', product.id)
+          .eq('competitor_id', rival.id)
+          .eq('status', 'auto')
+          .eq('is_chosen', false)
+          .neq('competitor_url', '')
+
         await service.from('price_matches').upsert({
           product_id: product.id, competitor_id: rival.id,
           competitor_url: '', competitor_title: null,
@@ -224,6 +237,8 @@ export async function runPriceCheck(
         await service.from('price_matches').upsert({
           product_id: product.id, competitor_id: rival.id,
           price_per_kg: perKg, our_price_per_kg: ourPerKg,
+          context_label: contextLabel(offer.title) || null,
+          context_note: contextMatches(product.name as string, offer.title).reason,
           unit_label: offer.unitLabel ?? null,
           competitor_title: offer.title,
           // A shop that answers in JSON may give no link, and every offer then
@@ -237,8 +252,9 @@ export async function runPriceCheck(
         }, { onConflict: 'product_id,competitor_id,competitor_url' })
       }
 
-      // Anything this competitor no longer returns, unless a person pinned it
-      const keptUrls = keep.map(k => k.url ?? `#${k.title}`)
+      // Anything this competitor no longer returns, unless a person pinned it.
+      // The error placeholder is keyed on an empty url and is not an offer.
+      const keptUrls = [...keep.map(k => k.url ?? `#${k.title}`), '']
       if (keptUrls.length) {
         await service.from('price_matches')
           .delete()

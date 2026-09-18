@@ -25,6 +25,7 @@ export default async function PriceMonitorPage() {
       .select(`id, product_id, competitor_id, competitor_title, competitor_url,
                price, similarity, status, checked_at, error, is_chosen,
                price_per_kg, our_price_per_kg, unit_label,
+               context_label, context_note,
                our_amount, competitor_amount, normalized_price`),
     service.from('price_settings').select('*').eq('id', true).single(),
   ])

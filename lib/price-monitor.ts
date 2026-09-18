@@ -6,6 +6,8 @@
  * here changes a price by itself: the page recommends, a person decides.
  */
 
+import { contextQuery, contextMatches } from '@/lib/meat-context'
+
 /** Words that say nothing about which product this is. */
 const NOISE = new Set([
   'тм', 'тд', 'від', 'для', 'з', 'із', 'в', 'у', 'на', 'та', 'і', 'й', 'the',
@@ -127,6 +129,10 @@ export function similarity(ours: string, theirs: string, mode: MatchMode = 'simi
   const ourHead = a[0], theirHead = b[0]
   if (ourHead && !b.some(t => sameWord(ourHead, t))) score *= 0.55
   if (theirHead && !a.some(t => sameWord(theirHead, t))) score *= 0.55
+
+  // Marinated, smoked, cooked — a real difference in product and in price,
+  // but a near miss worth showing rather than hiding
+  score *= contextMatches(ours, theirs).penalty || 1
 
   const amountA = extractAmount(ours), amountB = extractAmount(theirs)
   if (amountA && amountB) {
@@ -370,7 +376,12 @@ export function queryVariants(productName: string): string[] {
   // first returns the few offers that can actually be the same product.
   const distinctive = words.slice(1).sort((a, b) => b.length - a.length)[0]
 
+  // «стегно індички» rather than «стегно»: the cut alone returns every bird
+  // in the shop, and the species is exactly what tells them apart
+  const contextual = contextQuery(productName)
+
   const out = [
+    contextual ?? '',
     distinctive,
     distinctive ? `${head} ${distinctive}` : '',
     normalizeTitle(productName).replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim(),
@@ -382,6 +393,9 @@ export function queryVariants(productName: string): string[] {
 
 /**
  * Is this offer the same kind of thing at all?
+ *
+ * Words first, then the trade's own vocabulary — see contextMatches, which is
+ * what actually separates a turkey thigh from a chicken one.
  *
  * A gate, not a score. Searching «куряче» returns everything a poultry shop
  * sells, and a soft penalty still let «Чевапчічі курячі» sit in the details of
@@ -398,5 +412,9 @@ export function sameKind(ours: string, theirs: string): boolean {
   const inOther = (word: string, other: string[]) =>
     other.slice(0, 3).some(o => sameWord(word, o))
 
-  return inOther(a[0], b) && inOther(b[0], a)
+  if (!inOther(a[0], b) || !inOther(b[0], a)) return false
+
+  // And the trade's own reading of both names. This is the check that knows a
+  // turkey thigh is not a chicken thigh, however alike the two names look.
+  return contextMatches(ours, theirs).ok
 }

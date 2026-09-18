@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { contextLabel } from '@/lib/meat-context'
 import {
   advise, VERDICT_META, MATCH_MODES, amountLabel, DEFAULT_THRESHOLDS,
   type Verdict, type MatchMode, type Thresholds,
@@ -33,6 +34,8 @@ interface Match {
   price_per_kg: number | null
   our_price_per_kg: number | null
   unit_label: string | null
+  context_label: string | null
+  context_note: string | null
   our_amount: number | null; competitor_amount: number | null
   /** Their price at our pack size; null when either size is unknown */
   normalized_price: number | null
@@ -600,6 +603,7 @@ function ProductCard({
   const [open, setOpen] = useState(awaiting)
   const meta = VERDICT_META[row.advice.verdict]
   const our = row.ourShown
+  const ourContext = contextLabel(row.product.name)
   const nameOf = (id: string) => competitors.find(c => c.id === id)?.name ?? '—'
 
   return (
@@ -619,6 +623,9 @@ function ProductCard({
             )}
           </div>
           <div className="text-white text-sm mt-1.5">{row.product.name}</div>
+          {ourContext && (
+            <div className="text-zinc-600 text-xs mt-0.5">{ourContext}</div>
+          )}
           <div className="text-zinc-500 text-xs mt-0.5">
             {awaiting
               ? `Знайдено ${row.unsure.length} схожу позицію — підтвердьте нижче`
@@ -710,14 +717,26 @@ function ProductCard({
                       {m.error ? (
                         <div className="text-zinc-600 text-xs mt-0.5">{m.error}</div>
                       ) : (
-                        <a
-                          href={m.competitor_url ?? undefined}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-zinc-500 hover:text-zinc-300 text-xs mt-0.5 block truncate transition-colors"
-                        >
-                          {m.competitor_title ?? '—'}
-                        </a>
+                        <>
+                          <a
+                            href={m.competitor_url?.startsWith('http') ? m.competitor_url : undefined}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-zinc-500 hover:text-zinc-300 text-xs mt-0.5 block truncate transition-colors"
+                          >
+                            {m.competitor_title ?? '—'}
+                          </a>
+                          {/* What the matcher understood this to be. A score
+                              explains nothing; «курятина · стегно» explains it */}
+                          {m.context_label && (
+                            <div className="text-zinc-600 text-xs mt-0.5">
+                              {m.context_label}
+                              {m.context_note && (
+                                <span className="text-amber-500/80"> · {m.context_note}</span>
+                              )}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
 
