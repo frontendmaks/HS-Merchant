@@ -13,8 +13,15 @@
  * step only narrows the field; it never decides.
  */
 
-/** The scheme Ukrainian shop engines use for slugs. */
-const TRANSLIT: Record<string, string> = {
+/**
+ * Two schemes, because one shop uses both.
+ *
+ * Родинна Ковбаска has «філе» as `f-le` on its older pages and `file` on its
+ * newer ones — і dropped in one, kept in the other. Matching a single scheme
+ * silently misses half a catalogue, which is how «Філе куряче» came back as
+ * "not found" while `file-z-kuriatyny` sat in the index.
+ */
+const SIMPLE: Record<string, string> = {
   а: 'a', б: 'b', в: 'v', г: 'g', ґ: 'g', д: 'd', е: 'e', є: 'e', ж: 'zh',
   з: 'z', и: 'i', і: '', ї: '', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n',
   о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts',
@@ -22,14 +29,31 @@ const TRANSLIT: Record<string, string> = {
   ё: 'e',
 }
 
-/** Cyrillic in, the shape a slug would take out. */
-export function translit(raw: string): string {
+/** The official Ukrainian romanization, which many engines follow instead. */
+const OFFICIAL: Record<string, string> = {
+  ...SIMPLE,
+  и: 'y', і: 'i', ї: 'i', є: 'ie', ю: 'iu', я: 'ia', х: 'kh', ц: 'ts', щ: 'shch',
+}
+
+function apply(raw: string, table: Record<string, string>): string {
   return raw.toLowerCase().split('')
-    .map(ch => ch in TRANSLIT ? TRANSLIT[ch] : /[a-z0-9]/.test(ch) ? ch : ' ')
+    .map(ch => ch in table ? table[ch] : /[a-z0-9]/.test(ch) ? ch : ' ')
     .join('')
     .replace(/\s+/g, ' ')
     .trim()
 }
+
+/** Cyrillic in, the shape a slug would take out. */
+export const translit = (raw: string) => apply(raw, SIMPLE)
+
+/**
+ * The word with its vowels removed.
+ *
+ * Vowels are exactly where transliteration schemes disagree; consonants
+ * survive all of them. `kuryatini` and `kuriatyny` are different strings and
+ * the same skeleton — so this catches what the two tables between them miss.
+ */
+const skeleton = (latin: string) => latin.replace(/[aeiouy\s]/g, '')
 
 /** The slug, as comparable words. */
 function slugWords(url: string): string {
@@ -126,9 +150,21 @@ export async function fetchCatalog(siteUrl: string): Promise<{ urls: string[]; e
 
 /** The pages most likely to be this product, cheapest signal first. */
 export function shortlist(productName: string, urls: string[], take = 5): string[] {
-  const needle = translit(productName).replace(/\s+/g, ' ')
+  const simple = apply(productName, SIMPLE)
+  const official = apply(productName, OFFICIAL)
+  const bones = skeleton(simple)
+
+  // Best of the three readings: a slug only has to look like the product under
+  // one of them to be worth opening, and opening it settles the question with
+  // the real name on the page
+  const score = (slug: string) => Math.max(
+    dice(simple, slug),
+    dice(official, slug),
+    dice(bones, skeleton(slug)),
+  )
+
   return urls
-    .map(url => ({ url, score: dice(needle, slugWords(url)) }))
+    .map(url => ({ url, score: score(slugWords(url)) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, take)
     .filter(c => c.score > 0.14)
