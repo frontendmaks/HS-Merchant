@@ -57,17 +57,22 @@ export function stripControlChars(str: string): string {
  * So a retired product is always sent, always unavailable, always zero. Never
  * dropped, and never — as MauDau was being told until now — advertised as in
  * stock because the offer was built without looking at its status.
+ *
+ * A zero is a real zero. Stock arrives here already split: the sync stores null
+ * for a product WooCommerce does not track and a number for one it does, so a
+ * stored 0 can only mean "none at the warehouse". Treating it as "untracked,
+ * therefore unlimited" put 343 of 886 products on sale with nothing behind
+ * them.
  */
 export interface OfferStock {
   available: boolean
-  /** null means "do not send a number" — see zeroStockMeansUnlimited */
+  /** null means "send no number" — the marketplace should not cap the offer */
   quantity: number | null
 }
 
 export function offerStock(
   productStatus: string | null | undefined,
   stock: number | null | undefined,
-  opts: { zeroStockMeansUnlimited?: boolean } = {},
 ): OfferStock {
   // A withdrawal is not read here. An approved removal switches the product
   // off in the feeds it names, so those stop carrying the offer at all — and
@@ -76,13 +81,12 @@ export function offerStock(
   // Gone from the site: kept in the feed, plainly out of stock
   if (productStatus !== 'active') return { available: false, quantity: 0 }
 
-  const n = Number(stock)
-  if (Number.isFinite(n) && n > 0) return { available: true, quantity: Math.ceil(n) }
+  // Untracked: nothing to count, so the offer stays for sale with no number.
+  if (stock == null) return { available: true, quantity: null }
 
-  // Stock zero is ambiguous: WooCommerce reports it both for "none left" and
-  // for products whose stock it does not track at all. Each marketplace reads
-  // it the way its own feed was set up to.
-  return opts.zeroStockMeansUnlimited
-    ? { available: true, quantity: null }
-    : { available: false, quantity: 0 }
+  const n = Number(stock)
+  if (!Number.isFinite(n) || n <= 0) return { available: false, quantity: 0 }
+
+  // MauDau reads a fractional quantity as 0, so weight goods round up.
+  return { available: true, quantity: Math.ceil(n) }
 }

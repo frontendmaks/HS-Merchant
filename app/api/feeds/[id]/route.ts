@@ -155,7 +155,7 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       const oldPriceLine = oldPriceRaw && oldPriceRaw > price ? `\n      <oldprice>${oldPriceRaw}</oldprice>` : ''
 
       return `
-    <offer id="${p.id}" available="${offerStock(p.status, p.stock, { zeroStockMeansUnlimited: true }).available}">
+    <offer id="${p.id}" available="${offerStock(p.status, p.stock).available}">
       <name>${escapeXml(name)}</name>
       <price>${price}</price>${oldPriceLine}
       <currencyId>${p.currency}</currencyId>
@@ -328,13 +328,7 @@ function generateMaudauYML(
 
       const offerId = sanitizeSku(p.sku || String(p.external_id || p.id))
 
-      // MauDau treats fractional quantity as 0 → integer ceiling. A product
-      // still on the site with stock 0 counts as unlimited, since WooCommerce
-      // reports 0 for anything whose stock it does not track; one retired from
-      // the site is a flat zero.
-      const { available, quantity } = offerStock(p.status, stock, {
-        zeroStockMeansUnlimited: true,
-      })
+      const { available, quantity } = offerStock(p.status, stock)
       const quantityLine = quantity != null ? `\n      <quantity>${quantity}</quantity>` : ''
 
       // Sale price: p.price = current (discounted), p.price_old = original price before discount
