@@ -1,6 +1,7 @@
 export const maxDuration = 300
 
 import { NextRequest, NextResponse } from 'next/server'
+import { createServiceClient } from '@/lib/supabase/service'
 import { runPriceCheck } from '@/lib/price-run'
 
 /**
@@ -27,9 +28,31 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ skipped: true, kyivHour: hour })
   }
 
+  // Recorded the same way a manual pass is, so the page shows when the last
+  // check happened whoever started it
+  const service = createServiceClient()
+  const { data: run } = await service.from('price_runs')
+    .insert({ trigger: 'cron', current_step: 'Щоденна перевірка' })
+    .select('id').single()
+  const runId = run?.id as string | undefined
+
   try {
-    return NextResponse.json({ ok: true, ...(await runPriceCheck()) })
+    const result = await runPriceCheck(service, runId)
+    if (runId) {
+      await service.from('price_runs').update({
+        status: 'done', done: result.matched + result.missed,
+        matched: result.matched, missed: result.missed,
+        current_step: null, finished_at: new Date().toISOString(),
+        error: result.errors.length ? result.errors.join('; ') : null,
+      }).eq('id', runId)
+    }
+    return NextResponse.json({ ok: true, ...result })
   } catch (err) {
+    if (runId) {
+      await service.from('price_runs').update({
+        status: 'failed', error: String(err), finished_at: new Date().toISOString(),
+      }).eq('id', runId)
+    }
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
   }
 }

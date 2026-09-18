@@ -5,7 +5,8 @@
  * never drift into checking different things.
  */
 import { createServiceClient } from '@/lib/supabase/service'
-import { searchCompetitor } from '@/lib/price-scrape'
+import { searchCompetitor, type Found } from '@/lib/price-scrape'
+import { fetchCatalog, shortlist, readProduct } from '@/lib/price-catalog'
 import {
   similarity, extractAmount, scaleToOurPack, MATCH_MODES, isMatchMode,
   type MatchMode,
@@ -26,11 +27,68 @@ export interface RunResult {
   errors: string[]
 }
 
-export async function runPriceCheck(service: Service = createServiceClient()): Promise<RunResult> {
+/** How long a sitemap reading stays good enough to reuse. */
+const CATALOG_TTL_MS = 3 * 864e5
+
+/**
+ * Candidate listings for one product at one competitor.
+ *
+ * Two ways in. A shop with a search gets asked; a shop without one — and there
+ * are many, including whole platforms that render search in script — gets read
+ * from its own sitemap instead. The second path opens only the few pages whose
+ * address looks like the product, so it costs a handful of requests rather
+ * than a crawl.
+ */
+async function candidates(
+  service: Service,
+  rival: { id: string; search_url: string | null; site_url: string
+           catalog_urls: unknown; catalog_synced_at: string | null },
+  productName: string,
+): Promise<{ items: Found[]; error?: string }> {
+  if (rival.search_url) return searchCompetitor(rival.search_url, productName)
+
+  let urls = Array.isArray(rival.catalog_urls) ? rival.catalog_urls as string[] : []
+  const stale = !rival.catalog_synced_at
+    || Date.now() - new Date(rival.catalog_synced_at).getTime() > CATALOG_TTL_MS
+
+  if (!urls.length || stale) {
+    const fresh = await fetchCatalog(rival.site_url)
+    if (fresh.error && !urls.length) return { items: [], error: fresh.error }
+    if (fresh.urls.length) {
+      urls = fresh.urls
+      rival.catalog_urls = urls
+      rival.catalog_synced_at = new Date().toISOString()
+      await service.from('price_competitors')
+        .update({ catalog_urls: urls, catalog_synced_at: rival.catalog_synced_at })
+        .eq('id', rival.id)
+    }
+  }
+
+  if (!urls.length) return { items: [], error: 'Каталог сайту не прочитався' }
+
+  const picked = shortlist(productName, urls, 5)
+  if (!picked.length) return { items: [], error: 'Схожої позиції немає в каталозі' }
+
+  const items: Found[] = []
+  for (const url of picked) {
+    const page = await readProduct(url)
+    await sleep(400)
+    if (page) items.push({ title: page.title, price: page.price, url })
+  }
+  return items.length ? { items } : { items: [], error: 'Сторінки товарів не прочитались' }
+}
+
+export async function runPriceCheck(
+  service: Service = createServiceClient(),
+  runId?: string,
+): Promise<RunResult> {
   const [{ data: watches }, { data: competitors }] = await Promise.all([
     service.from('price_watches').select('product_id, match_mode'),
-    service.from('price_competitors').select('id, name, search_url')
-      .eq('is_active', true).not('search_url', 'is', null),
+    // No search_url filter any more: a site without one is read from its
+    // sitemap instead of being skipped
+    service.from('price_competitors')
+      .select('id, name, site_url, search_url, catalog_urls, catalog_synced_at')
+      .eq('is_active', true),
   ])
 
   const productIds = (watches ?? []).map(w => w.product_id as string)
@@ -45,6 +103,11 @@ export async function runPriceCheck(service: Service = createServiceClient()): P
     products: productIds.length, competitors: rivals.length,
     matched: 0, missed: 0, errors: [],
   }
+  if (runId) {
+    await service.from('price_runs')
+      .update({ total: productIds.length * rivals.length }).eq('id', runId)
+  }
+
   if (!productIds.length || !rivals.length) return result
 
   const { data: products } = await service
@@ -72,7 +135,15 @@ export async function runPriceCheck(service: Service = createServiceClient()): P
       // Rejected by hand: do not keep proposing it every morning
       if (decision?.status === 'rejected') continue
 
-      const { items, error } = await searchCompetitor(rival.search_url, product.name as string)
+      if (runId) {
+        await service.from('price_runs').update({
+          done: result.matched + result.missed,
+          matched: result.matched, missed: result.missed,
+          current_step: `${rival.name}: ${(product.name as string).slice(0, 60)}`,
+        }).eq('id', runId)
+      }
+
+      const { items, error } = await candidates(service, rival, product.name as string)
       await sleep(GAP_MS)
 
       if (error) {

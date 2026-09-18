@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   advise, VERDICT_META, MATCH_MODES, amountLabel,
@@ -53,6 +53,8 @@ export default function PricesClient({ competitors, watches, matches, history }:
   const [tab, setTab] = useState<'overview' | 'settings' | 'competitors'>('overview')
   const [filter, setFilter] = useState<Verdict | 'all'>('all')
   const [adding, setAdding] = useState(false)
+  const [run, setRun] = useState<RunState | null>(null)
+  const polling = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const byProduct = useMemo(() => {
     const map = new Map<string, Match[]>()
@@ -121,6 +123,44 @@ export default function PricesClient({ competitors, watches, matches, history }:
 
   const shown = filter === 'all' ? rows : rows.filter(r => r.advice.verdict === filter)
 
+  /** Follows the pass while it runs, so the button is not a black box. */
+  const poll = useCallback(async () => {
+    try {
+      const res = await fetch('/api/prices/run')
+      const data = await res.json()
+      setRun(data.run ?? null)
+      if (data.run?.status !== 'running' && polling.current) {
+        clearInterval(polling.current)
+        polling.current = null
+        router.refresh()
+      }
+    } catch { /* a missed tick is not worth showing */ }
+  }, [router])
+
+  useEffect(() => {
+    void poll()
+    return () => { if (polling.current) clearInterval(polling.current) }
+  }, [poll])
+
+  async function startRun() {
+    setError('')
+    setRun({ status: 'running', total: 0, done: 0, matched: 0, missed: 0,
+             current_step: 'Запускаємо…', error: null, started_at: new Date().toISOString(),
+             finished_at: null })
+
+    if (!polling.current) polling.current = setInterval(() => void poll(), 2000)
+
+    try {
+      const res = await fetch('/api/prices/run', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok && res.status !== 409) throw new Error(data.error || 'Помилка')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      void poll()
+    }
+  }
+
   async function call(url: string, init: RequestInit, key: string) {
     setBusy(key); setError('')
     try {
@@ -150,12 +190,12 @@ export default function PricesClient({ competitors, watches, matches, history }:
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => call('/api/prices/run', { method: 'POST' }, 'run')}
-            disabled={busy === 'run' || !watches.length || !active}
+            onClick={startRun}
+            disabled={run?.status === 'running' || !watches.length || !competitors.length}
             className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white text-sm
                        font-medium px-4 py-2 rounded-lg transition-colors"
           >
-            {busy === 'run' ? 'Перевіряємо…' : 'Перевірити зараз'}
+            {run?.status === 'running' ? 'Перевіряємо…' : 'Перевірити зараз'}
           </button>
         </div>
       </div>
@@ -165,6 +205,8 @@ export default function PricesClient({ competitors, watches, matches, history }:
           {error}
         </div>
       )}
+
+      {run && <RunStatus run={run} />}
 
       <div className="flex gap-1 border-b border-zinc-800">
         {([
@@ -620,12 +662,13 @@ function CompetitorsTab({ competitors, busy, onAdd, onToggle, onDelete }: {
                   Перевірено: {when(c.last_checked_at)}
                 </div>
                 {!c.search_url && (
-                  <div className="text-amber-400 text-xs mt-1">
-                    ⚠ Пошук на сайті не знайдено — конкурент не перевіряється.
-                    Вкажіть адресу пошуку вручну.
+                  <div className="text-zinc-500 text-xs mt-1">
+                    Пошуку на сайті немає — читаємо каталог через sitemap.
                   </div>
                 )}
-                {c.last_error && (
+                {/* Only a real failure, and only once: "no search" is now a
+                    route we take rather than a problem to report */}
+                {c.last_error && c.search_url && (
                   <div className="text-amber-400 text-xs mt-1">⚠ {c.last_error}</div>
                 )}
               </div>
@@ -765,11 +808,6 @@ function SettingsTab({ rows, busy, onAdd, onMode, onRemove }: {
   onRemove: (id: string) => void
 }) {
   const [picked, setPicked] = useState<Set<string>>(new Set())
-  const [query, setQuery] = useState('')
-
-  const shown = query.trim()
-    ? rows.filter(r => r.product.name.toLowerCase().includes(query.trim().toLowerCase()))
-    : rows
 
   const toggle = (id: string) => setPicked(prev => {
     const next = new Set(prev)
@@ -802,14 +840,10 @@ function SettingsTab({ rows, busy, onAdd, onMode, onRemove }: {
         </p>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        <input
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Фільтр за назвою"
-          className="flex-1 min-w-[200px] bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2
-                     text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-red-500"
-        />
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-zinc-400 text-sm">
+          {rows.length} {rows.length === 1 ? 'позиція' : 'позицій'} під наглядом
+        </span>
         <button
           onClick={onAdd}
           className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium
@@ -849,7 +883,7 @@ function SettingsTab({ rows, busy, onAdd, onMode, onRemove }: {
         />
       ) : (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl divide-y divide-zinc-800">
-          {shown.map(row => {
+          {rows.map(row => {
             const on = picked.has(row.product.id)
             const amount = amountLabel(
               row.all[0]?.our_amount != null ? Number(row.all[0].our_amount) : null)
@@ -896,6 +930,93 @@ function SettingsTab({ rows, busy, onAdd, onMode, onRemove }: {
             )
           })}
         </div>
+      )}
+    </div>
+  )
+}
+
+interface RunState {
+  status: string
+  total: number
+  done: number
+  matched: number
+  missed: number
+  current_step: string | null
+  error: string | null
+  started_at: string
+  finished_at: string | null
+}
+
+/**
+ * What the pass is doing, while it does it.
+ *
+ * A check over a few dozen product-and-competitor pairs takes minutes, most of
+ * it waiting politely between requests to someone else's site. Without this the
+ * button looks broken — which is exactly how it did look.
+ */
+function RunStatus({ run }: { run: RunState }) {
+  const running = run.status === 'running'
+  const pct = run.total > 0 ? Math.min(100, Math.round((run.done / run.total) * 100)) : 0
+
+  if (!running && run.status === 'done' && !run.error) {
+    return (
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3
+                      flex items-center gap-3 flex-wrap">
+        <span className="text-emerald-400 text-sm">✓ Перевірку завершено</span>
+        <span className="text-zinc-500 text-xs">
+          знайдено {run.matched} · без збігу {run.missed} · {when(run.finished_at)}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`border rounded-xl px-4 py-3 ${
+      run.status === 'failed'
+        ? 'bg-red-950/40 border-red-900'
+        : 'bg-zinc-900 border-zinc-800'
+    }`}>
+      <div className="flex items-center gap-3 flex-wrap">
+        {running && (
+          <span className="w-3 h-3 rounded-full border-2 border-red-500 border-t-transparent
+                           animate-spin shrink-0" />
+        )}
+        <span className="text-white text-sm">
+          {run.status === 'failed' ? 'Перевірка не завершилась' : 'Перевіряємо ціни'}
+        </span>
+        {run.total > 0 && (
+          <span className="text-zinc-500 text-xs tabular-nums">
+            {run.done} з {run.total}
+          </span>
+        )}
+        {run.matched + run.missed > 0 && (
+          <span className="text-zinc-600 text-xs">
+            знайдено {run.matched} · без збігу {run.missed}
+          </span>
+        )}
+      </div>
+
+      {run.total > 0 && running && (
+        <div className="h-1 bg-zinc-800 rounded-full mt-2.5 overflow-hidden">
+          <div className="h-full bg-red-500 transition-all duration-500"
+            style={{ width: `${pct}%` }} />
+        </div>
+      )}
+
+      {run.current_step && running && (
+        <div className="text-zinc-500 text-xs mt-2 truncate">{run.current_step}</div>
+      )}
+
+      {run.error && (
+        <div className="text-amber-400 text-xs mt-2">{run.error}</div>
+      )}
+
+      {running && (
+        <p className="text-zinc-600 text-xs mt-2 leading-relaxed">
+          Між запитами до чужого сайту витримується пауза, тож перевірка кількох
+          десятків позицій триває хвилини. Сторінку можна закрити — перевірка
+          не переривається.
+        </p>
       )}
     </div>
   )

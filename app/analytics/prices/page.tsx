@@ -13,7 +13,8 @@ export default async function PriceMonitorPage() {
 
   const [{ data: competitors }, { data: watches }, { data: matches }] = await Promise.all([
     service.from('price_competitors')
-      .select('id, name, site_url, search_url, is_active, last_checked_at, last_error')
+      .select(`id, name, site_url, search_url, is_active, last_checked_at,
+               last_error, catalog_synced_at`)
       .order('created_at'),
     service.from('price_watches')
       .select('product_id, added_at, match_mode, product:products(id, name, price, category_name, stock, status)')

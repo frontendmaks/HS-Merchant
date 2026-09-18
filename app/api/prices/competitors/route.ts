@@ -62,7 +62,9 @@ export async function POST(req: NextRequest) {
     const found = await discoverSearchUrl(site_url, sample?.name as string ?? 'молоко')
     searchUrl = found.searchUrl ?? ''
     platform = found.platform
-    note = found.error ?? null
+    // No search is not a failure any more — the sitemap route handles it, and
+    // saying otherwise made a working competitor look broken
+    note = null
   }
 
   const { data, error } = await service
