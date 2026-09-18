@@ -26,7 +26,8 @@ export async function buildReport(service: Service): Promise<Report> {
     service.from('price_settings').select('*').eq('id', true).single(),
     service.from('price_watches').select('product_id, match_mode, product:products(name, price)'),
     service.from('price_matches')
-      .select('product_id, competitor_id, price, normalized_price, similarity, status, is_chosen'),
+      .select(`product_id, competitor_id, price, normalized_price, similarity,
+               status, is_chosen, price_per_kg, our_price_per_kg`),
   ])
 
   const t: Thresholds = settings ? {
@@ -57,8 +58,16 @@ export async function buildReport(service: Service): Promise<Report> {
       }
     }
 
-    const prices = [...perCompetitor.values()].map(m => Number(m.normalized_price ?? m.price))
-    const a = advise(Number(product.price ?? 0), prices, t)
+    // Per kilogram wherever both sides carry it, exactly as the page does
+    const chosen = [...perCompetitor.values()]
+    const ourPerKg = chosen.map(m => m.our_price_per_kg).find(v => v != null)
+    const perKg = chosen.map(m => m.price_per_kg).filter(v => v != null).map(Number)
+
+    const a = ourPerKg != null && perKg.length === chosen.length
+      ? advise(Number(ourPerKg), perKg, t)
+      : advise(
+          Number(product.price ?? 0),
+          chosen.map(m => Number(m.normalized_price ?? m.price)), t)
 
     if (a.verdict === 'expensive') report.expensive++
     else if (a.verdict === 'cheap') report.cheap++

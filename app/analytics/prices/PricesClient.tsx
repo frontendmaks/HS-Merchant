@@ -30,6 +30,9 @@ interface Match {
   price: number | null; similarity: number | null
   status: string; checked_at: string | null; error: string | null
   is_chosen: boolean
+  price_per_kg: number | null
+  our_price_per_kg: number | null
+  unit_label: string | null
   our_amount: number | null; competitor_amount: number | null
   /** Their price at our pack size; null when either size is unknown */
   normalized_price: number | null
@@ -114,16 +117,28 @@ export default function PricesClient({
         if (better) perCompetitor.set(m.competitor_id, m)
       }
       const found = [...perCompetitor.values()]
-      // The scaled figure where sizes are known, the printed one otherwise —
-      // comparing 1 кг against our 500 г by its tag would invert the answer
-      const advice = advise(
-        Number(product.price ?? 0),
-        found.map(m => Number(m.normalized_price ?? m.price)),
-        thresholds,
-      )
+      // Per kilogram wherever both sides have it. A tray at 60 ₴/200 г against
+      // our kilogram is 300 against ours, not 60 — the printed numbers say the
+      // opposite of the truth, so they are the last resort, not the first.
+      const ourPerKg = found.map(m => m.our_price_per_kg).find(v => v != null)
+      const perKg = found
+        .map(m => m.price_per_kg)
+        .filter((v): v is number => v != null)
+        .map(Number)
+
+      const byKilo = ourPerKg != null && perKg.length === found.length
+      const advice = byKilo
+        ? advise(Number(ourPerKg), perKg, thresholds)
+        : advise(
+            Number(product.price ?? 0),
+            found.map(m => Number(m.normalized_price ?? m.price)),
+            thresholds,
+          )
       return {
         product,
         mode,
+        byKilo,
+        ourShown: byKilo ? Number(ourPerKg) : Number(product.price ?? 0),
         all: byProduct.get(product.id) ?? [],
         used: found,
         advice,
@@ -557,6 +572,9 @@ function Verdicts({ summary, filter, onFilter }: {
 interface Row {
   product: Product
   mode: MatchMode
+  /** Whether the numbers on this row are per kilogram */
+  byKilo: boolean
+  ourShown: number
   all: Match[]
   used: Match[]
   unsure: Match[]
@@ -581,7 +599,7 @@ function ProductCard({
   const awaiting = row.advice.verdict === 'no_data' && row.unsure.length > 0
   const [open, setOpen] = useState(awaiting)
   const meta = VERDICT_META[row.advice.verdict]
-  const our = Number(row.product.price ?? 0)
+  const our = row.ourShown
   const nameOf = (id: string) => competitors.find(c => c.id === id)?.name ?? '—'
 
   return (
@@ -611,7 +629,9 @@ function ProductCard({
 
         <div className="flex items-center gap-5 shrink-0">
           <div className="text-right">
-            <div className="text-zinc-500 text-xs">Наша</div>
+            <div className="text-zinc-500 text-xs">
+              Наша{row.byKilo && <span className="text-zinc-600"> ₴/кг</span>}
+            </div>
             <div className="text-white text-sm font-semibold tabular-nums">{money(our)}</div>
           </div>
           <div className="text-right">
@@ -703,8 +723,21 @@ function ProductCard({
 
                     <div className="text-right shrink-0">
                       <div className="text-white text-sm tabular-nums">
-                        {money(m.normalized_price != null ? Number(m.normalized_price) : m.price)}
+                        {money(m.price_per_kg != null ? Number(m.price_per_kg)
+                          : m.normalized_price != null ? Number(m.normalized_price) : m.price)}
+                        {m.price_per_kg != null && (
+                          <span className="text-zinc-600 text-xs"> /кг</span>
+                        )}
                       </div>
+                      {/* The working, so a converted figure is never mistaken
+                          for the shop's own price tag */}
+                      {m.price_per_kg != null && m.price != null
+                        && Math.round(Number(m.price_per_kg)) !== Math.round(Number(m.price)) && (
+                        <div className="text-zinc-600 text-xs">
+                          з {money(m.price)}
+                          {m.competitor_amount ? ` за ${amountLabel(Number(m.competitor_amount))}` : ''}
+                        </div>
+                      )}
                       {/* Both numbers, because the scaled one is not their
                           price tag and should never be mistaken for it */}
                       {m.normalized_price != null && m.competitor_amount != null

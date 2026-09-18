@@ -8,8 +8,8 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { searchCompetitor, siteChrome, type Found } from '@/lib/price-scrape'
 import { fetchCatalog, shortlist, readProduct, withCity } from '@/lib/price-catalog'
 import {
-  similarity, extractAmount, scaleToOurPack, queryVariants,
-  MATCH_MODES, isMatchMode, type MatchMode,
+  similarity, extractAmount, scaleToOurPack, queryVariants, sameKind,
+  pricePerKg, ourPricePerKg, unitGrams, MATCH_MODES, isMatchMode, type MatchMode,
 } from '@/lib/price-monitor'
 
 type Service = ReturnType<typeof createServiceClient>
@@ -180,7 +180,11 @@ export async function runPriceCheck(
       const ourAmount = extractAmount(product.name as string)
 
       // A confirmed match is re-priced from the same listing, not re-matched
+      // The kind has to match before the score matters. Searching «куряче»
+      // returns everything a poultry shop sells, and a score alone let kebabs
+      // and sausage sit in the details of a chicken thigh.
       const scored = items
+        .filter(i => sameKind(product.name as string, i.title))
         .map(i => ({ ...i, score: similarity(product.name as string, i.title, mode) }))
         .sort((a, b) => b.score - a.score)
 
@@ -201,6 +205,7 @@ export async function runPriceCheck(
       // same sausage twice — «Дрогобицька» and «Дрогобицька ТЕР в/с» — and
       // storing one of them hides a price the buyer can plainly see.
       const keep = scored.filter(i => i.score >= MATCH_MODES[mode].floor).slice(0, 5)
+      const ourPerKg = ourPricePerKg(Number(product.price ?? 0), ourAmount)
 
       for (const offer of keep) {
         const theirs = extractAmount(offer.title)
@@ -208,8 +213,18 @@ export async function runPriceCheck(
           ? scaleToOurPack(offer.price, theirs, ourAmount)
           : null
 
+        // Per kilogram: from the unit the shop printed if it gave one,
+        // otherwise from the weight in the name
+        const basis = unitGrams(offer.unitLabel ?? '') ?? theirs
+        // No unit printed and no weight in the name means a weight good priced
+        // by the kilogram — the same rule we apply to our own prices, so both
+        // sides of the comparison are read the same way
+        const perKg = basis ? pricePerKg(offer.price, basis) : offer.price
+
         await service.from('price_matches').upsert({
           product_id: product.id, competitor_id: rival.id,
+          price_per_kg: perKg, our_price_per_kg: ourPerKg,
+          unit_label: offer.unitLabel ?? null,
           competitor_title: offer.title,
           // A shop that answers in JSON may give no link, and every offer then
           // shares one key and overwrites the last. The title is what

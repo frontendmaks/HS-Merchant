@@ -13,6 +13,8 @@ export interface Found {
   title: string
   price: number
   url: string | null
+  /** The text printed beside the price — «грн./кг», «грн /100г» — if any */
+  unitLabel?: string
 }
 
 /** Paths that look like a product page rather than a section or an article. */
@@ -108,7 +110,12 @@ export function fromJson(raw: string, baseUrl: string): Found[] {
         const href = [o.url, o.link, o.slug].find(v => typeof v === 'string')
         let url: string | null = null
         try { url = href ? new URL(String(href), baseUrl).toString() : null } catch { /* keep null */ }
-        out.push({ title, price, url })
+
+        // «unit: kg» means the price already is per kilogram, whatever weight
+        // the title mentions. Dividing by the title's «4кг» turned 148 ₴/кг
+        // into 37 — a shop four times cheaper than it is.
+        const unit = typeof o.unit === 'string' ? o.unit : undefined
+        out.push({ title, price, url, unitLabel: unit ? `/${unit}` : undefined })
       }
     }
     Object.values(o).forEach(v => visit(v, depth + 1))
@@ -176,6 +183,24 @@ export function fromCards(
     const price = Number(priceMatch[1].replace(/[\s\u00a0]/g, '').replace(',', '.'))
     if (!Number.isFinite(price) || price <= 0) continue
 
+    // What the card says the price is per — «грн./кг», «грн /100г». Without it
+    // a tray price and a kilogram price look like the same kind of number.
+    const after = window.slice(
+      (priceMatch.index ?? 0) + priceMatch[0].length,
+      (priceMatch.index ?? 0) + priceMatch[0].length + 120)
+    let unitLabel = (priceMatch[0] + ' ' + after.replace(/<[^>]*>/g, ' '))
+      .replace(/\s+/g, ' ').slice(0, 60)
+
+    // Shops that print no unit beside the price often put the pack weight in
+    // its own element — «<div class="price__val">0.2</div>» is 200 г, and
+    // without it 60 ₴ looks like a kilogram price instead of 300 ₴/кг
+    const kilos = window.match(
+      /class=["'][^"']*(?:val|weight|vaha|vaga)[^"']*["'][^>]*>\s*(\d+(?:[.,]\d+)?)\s*</i)
+    if (!/кг|\/\s*\d|грн\s*\.?\s*\//i.test(unitLabel) && kilos) {
+      const kg = Number(kilos[1].replace(',', '.'))
+      if (kg > 0.02 && kg <= 30) unitLabel = `/${Math.round(kg * 1000)}г`
+    }
+
     // The link's own text, then the image alt, then the title attribute —
     // whichever the card used to name the thing.
     //
@@ -196,7 +221,7 @@ export function fromCards(
       || named(/alt=["']([^"']{4,140})["']/g)
       || named(/title=["']([^"']{4,140})["']/g)
 
-    if (title.length > 3) out.push({ title, price, url: link })
+    if (title.length > 3) out.push({ title, price, url: link, unitLabel })
   }
 
   const seen = new Set<string>()

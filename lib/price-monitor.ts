@@ -199,6 +199,53 @@ export function scaleToOurPack(
   return Math.round(theirPrice * (ourAmount / theirAmount) * 100) / 100
 }
 
+/**
+ * Everything in hryvnia per kilogram.
+ *
+ * The only basis on which two shops can be compared. One prints 60 ₴ for a
+ * 200 g tray, another 260 ₴ for a kilogram, and the printed numbers say the
+ * first is four times cheaper when it is in fact more expensive:
+ * 60 / 0.2 = 300 ₴/кг.
+ *
+ * Returns null when the weight is unknown — a guessed one would move the
+ * answer without saying so, and a missing comparison is safer than a wrong one.
+ */
+export function pricePerKg(price: number, grams: number | null): number | null {
+  if (!price || !grams || grams <= 0) return null
+  return Math.round((price * 1000 / grams) * 100) / 100
+}
+
+/**
+ * Our own price per kilogram.
+ *
+ * A name that states a weight — «Ковбаса, 430 г» — is a pack, and the price
+ * belongs to that pack. A name that states none — «Філе куряче» — is sold by
+ * weight, and the price already is per kilogram. Treating the second case as
+ * "unknown" left every weight line without a comparable figure.
+ */
+export function ourPricePerKg(price: number, grams: number | null): number | null {
+  if (!price) return null
+  return grams ? pricePerKg(price, grams) : price
+}
+
+/**
+ * What the printed price is per.
+ *
+ * `210.00 грн./кг` is already per kilogram; `371 грн /100г` is per hundred
+ * grams; a plain price belongs to whatever weight the name states.
+ */
+export function unitGrams(text: string): number | null {
+  const t = text.toLowerCase().replace(/\u00a0/g, ' ')
+  // «/kg» as an API writes it, «грн./кг» as a page prints it
+  if (/\/\s*кг|\/\s*kg\b|за\s+кг|грн\s*\.?\s*\/\s*кг/.test(t)) return 1000
+  // A lookahead, not \b — the boundary is ASCII-only and never fires after a
+  // Cyrillic «г», so «371 грн /100г» read as no unit at all
+  const per = t.match(/\/\s*(\d{1,4})\s*(?:г|гр|мл)(?![\p{L}\d])/u)
+  if (per) return Number(per[1])
+  if (/\/\s*(?:г|гр)(?![\p{L}\d])/u.test(t)) return 1
+  return null
+}
+
 /** «за 500 г» — how a scaled figure is labelled so nobody reads it as a price tag. */
 export function amountLabel(grams: number | null): string | null {
   if (!grams) return null
@@ -314,10 +361,42 @@ export function queryVariants(productName: string): string[] {
     .map(w => w.replace(/[.,]+$/, ''))
     .filter(w => w.length > 2 && !NOISE.has(w) && !/\d/.test(w))
 
+  if (!words.length) return []
+
+  // The head noun says what kind of thing it is — «ковбаса», «стегно». Every
+  // shop has hundreds of those, so asking for it first returns a category.
+  const head = words[0]
+  // The distinctive word is what names this one: «Дрогобицька». Asking for it
+  // first returns the few offers that can actually be the same product.
+  const distinctive = words.slice(1).sort((a, b) => b.length - a.length)[0]
+
   const out = [
+    distinctive,
+    distinctive ? `${head} ${distinctive}` : '',
     normalizeTitle(productName).replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim(),
     words.slice(0, 2).join(' '),
-    words[0] ?? '',
+    head,
   ]
   return [...new Set(out.filter(q => q.length > 2))]
+}
+
+/**
+ * Is this offer the same kind of thing at all?
+ *
+ * A gate, not a score. Searching «куряче» returns everything a poultry shop
+ * sells, and a soft penalty still let «Чевапчічі курячі» sit in the details of
+ * «Стегно куряче» looking like a comparison. What a product *is* has to match
+ * before anything else is worth weighing.
+ */
+export function sameKind(ours: string, theirs: string): boolean {
+  const a = tokens(ours), b = tokens(theirs)
+  if (!a.length || !b.length) return false
+
+  // Each side's head noun must appear on the other. Accepting any shared word
+  // is not enough: «Стегно куряче» and «Чевапчічі курячі» share «куряч-» and
+  // are not the same thing — the shared word is the bird, not the product.
+  const inOther = (word: string, other: string[]) =>
+    other.slice(0, 3).some(o => sameWord(word, o))
+
+  return inOther(a[0], b) && inOther(b[0], a)
 }
