@@ -173,7 +173,13 @@ export function fromCards(
 ): Found[] {
   const out: Found[] = []
 
-  for (const link of links.slice(0, 12)) {
+  // Уся сторінка, а не перший десяток.
+  //
+  // Сорок дві картки «кролика» в Сільпо починаються з печінки, язичків і корму
+  // для котів, а потрібні лапки лежать нижче. Обмеження в дванадцять карток
+  // означало, що ми дивимось на початок списку й кажемо «нічого схожого».
+  // Це розбір готового HTML, він не коштує жодного запиту.
+  for (const link of links.slice(0, 60)) {
     let path: string
     try { path = new URL(link).pathname } catch { continue }
 
