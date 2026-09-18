@@ -25,15 +25,17 @@ export async function enqueueRender(
 ) {
   if (!urls.length) return
 
-  // Не ставимо в чергу те, що там уже є або що збирач щойно опрацював. Без
-  // цього кожен прогін додавав ті самі дванадцять сторінок, і за три запуски
-  // черга виростала до тридцяти трьох завдань, з яких тридцять — повтори.
+  // Не ставимо в чергу те, що там уже стоїть або що збирач щойно успішно
+  // опрацював. Невдалі спроби до цього не належать: сторінка могла не
+  // відповісти, і пропускати її пів доби означало б, що одна випадкова
+  // помилка мовчки викреслює товар до завтра.
   const since = new Date(Date.now() - 12 * 3600_000).toISOString()
   const { data: recent } = await service
     .from('price_render_tasks')
-    .select('url')
+    .select('url, status')
     .eq('competitor_id', competitorId)
     .eq('product_id', productId)
+    .in('status', ['pending', 'taken', 'done'])
     .gte('created_at', since)
 
   const known = new Set((recent ?? []).map(r => r.url as string))
