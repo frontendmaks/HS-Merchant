@@ -34,6 +34,7 @@ export function productLinks(html: string, pageUrl: string, chrome?: Set<string>
   try { origin = new URL(pageUrl).origin } catch { return [] }
 
   const out: string[] = []
+  const strong: string[] = []
   const seen = new Set<string>()
 
   for (const m of html.matchAll(/href=["']([^"'#]+)["']/gi)) {
@@ -42,16 +43,23 @@ export function productLinks(html: string, pageUrl: string, chrome?: Set<string>
     if (abs.origin !== origin) continue
     if (NOT_PRODUCT.test(abs.pathname)) continue
 
+    const marked = PRODUCT_PATH.test(abs.pathname)
     const deep = abs.pathname.split('/').filter(Boolean).length >= 2
-    if (!PRODUCT_PATH.test(abs.pathname) && !deep) continue
+    if (!marked && !deep) continue
     if (chrome?.has(abs.pathname)) continue
 
     const clean = abs.origin + abs.pathname
     if (seen.has(clean)) continue
     seen.add(clean)
     out.push(clean)
+    if (marked) strong.push(clean)
   }
-  return out
+
+  // When a site marks its product URLs, those are the answer and the rest is
+  // navigation. Silpo's search page carries three hundred links, of which the
+  // first dozen are categories — taking them in document order read the menu
+  // and concluded the page had no products.
+  return strong.length ? strong : out
 }
 
 /**
