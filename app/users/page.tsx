@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { createServiceClient } from '@/lib/supabase/service'
-import { canManageUsers } from '@/lib/roles'
+import { canAccess } from '@/lib/roles'
 import UsersManager from './UsersManager'
 
 export default async function UsersPage() {
@@ -28,13 +28,15 @@ export default async function UsersPage() {
   const service = createServiceClient()
   const { data: profile } = await service.from('profiles').select('*').eq('id', user.id).single()
 
-  if (!profile || !canManageUsers(profile.role)) {
+  // Opening the list and acting on it are different rights: the page checks
+  // the first, and UsersManager checks the second for every button it draws
+  if (!profile || !canAccess('users', profile.role)) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
           <div className="text-4xl mb-4">🔒</div>
           <h1 className="text-white text-xl font-semibold mb-2">Доступ заборонено</h1>
-          <p className="text-zinc-400 text-sm">Тільки адміністратори можуть керувати користувачами</p>
+          <p className="text-zinc-400 text-sm">Ця сторінка недоступна для вашої ролі</p>
         </div>
       </div>
     )

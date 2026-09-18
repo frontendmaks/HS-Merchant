@@ -69,12 +69,17 @@ export const PAGE_ROLES = {
   feeds:     ['super_admin', 'admin', 'viewer'],
   syncs:     ['super_admin', 'admin', 'manager'],
   analytics: ['super_admin', 'admin', 'manager', 'analyst'],
+  // Our margin against named rivals, and the rivals we watch. Commercial
+  // strategy rather than trade figures, so it stays outside the analyst's view.
+  priceMonitor: ['super_admin', 'admin', 'manager'],
   orders:    ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
   requests:  ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
   /** Everyone has a newsfeed; which pieces land in it is decided per piece
    *  by its audience — see lib/news.ts */
   news:      ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
-  users:     ['super_admin', 'admin', 'manager'],
+  // An analyst opens this to see who is who; acting on a user needs a role
+  // that can grant one, which is checked per action rather than per page
+  users:     ['super_admin', 'admin', 'manager', 'analyst'],
   /** Operators plan their own week here; management approves it */
   schedule:  ['super_admin', 'admin', 'manager', 'operator'],
   /** The change journal exposes who did what — management only */

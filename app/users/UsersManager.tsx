@@ -22,6 +22,7 @@ const ROLE_LABELS: Record<string, { label: string; color: string }> = {
   admin:       { label: 'Адміністратор', color: 'bg-red-900/60 text-red-300' },
   manager:     { label: 'Керівник',      color: 'bg-purple-900/60 text-purple-300' },
   operator:    { label: 'Оператор',      color: 'bg-blue-900/60 text-blue-300' },
+  analyst:     { label: 'Аналітик',      color: 'bg-cyan-900/60 text-cyan-300' },
   viewer:      { label: 'Глядач',        color: 'bg-zinc-700 text-zinc-300' },
 }
 
@@ -44,6 +45,7 @@ const ROLE_HINTS: Record<string, string> = {
   admin:       '— управління командою та налаштування',
   manager:     '— замовлення, синки, запрошення до рівня Оператора',
   operator:    '— робота із замовленнями та синками',
+  analyst:     '— лише Аналітика: продажі, клієнти, географія. Без моніторингу цін, скасувань і показників операторів',
   viewer:      '— тільки перегляд',
 }
 
@@ -134,14 +136,20 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">Користувачі</h1>
-          <p className="text-zinc-400 text-sm mt-0.5">Управління доступом команди</p>
+          <p className="text-zinc-400 text-sm mt-0.5">
+            {grantable.length > 0 ? 'Управління доступом команди' : 'Склад команди та ролі'}
+          </p>
         </div>
-        <button
-          onClick={() => { setShowInvite(true); setInviteError(''); setInviteSuccess('') }}
-          className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors"
-        >
-          + Запросити користувача
-        </button>
+        {/* Nothing to grant means nothing to invite — a role that can only
+            read the list should not be offered a button that will be refused */}
+        {grantable.length > 0 && (
+          <button
+            onClick={() => { setShowInvite(true); setInviteError(''); setInviteSuccess('') }}
+            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            + Запросити користувача
+          </button>
+        )}
       </div>
 
       {/* Success banner */}

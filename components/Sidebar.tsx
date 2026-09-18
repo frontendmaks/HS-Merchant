@@ -13,7 +13,15 @@ const nav = [
   { href: '/',         label: 'Дашборд',       icon: '▦', roles: PAGE_ROLES.dashboard },
   { href: '/products', label: 'Товари',         icon: '◈', roles: PAGE_ROLES.products },
   { href: '/feeds',    label: 'Фіди',           icon: '⊞', roles: PAGE_ROLES.feeds },
-  { href: '/analytics', label: 'Аналітика',     icon: '◑', roles: PAGE_ROLES.analytics },
+  {
+    href: '/analytics', label: 'Аналітика', icon: '◑', roles: PAGE_ROLES.analytics,
+    // Folded away until it is wanted: Аналітика is a page people open on its
+    // own, and a permanent sub-item under it is one more line to read past
+    collapsible: true,
+    children: [
+      { href: '/analytics/prices', label: 'Моніторинг цін', roles: PAGE_ROLES.priceMonitor },
+    ],
+  },
   { href: '/syncs',    label: 'Синхронізації',  icon: '↻', roles: PAGE_ROLES.syncs },
   { href: '/orders',   label: 'Замовлення',     icon: '◷', roles: PAGE_ROLES.orders },
   { href: '/news',     label: 'Новини',         icon: '◫', roles: PAGE_ROLES.news },
@@ -160,6 +168,7 @@ export default function Sidebar() {
   const [userId, setUserId] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [open, setOpen] = useState(false)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [counts, setCounts] = useState<NavCounts | null>(null)
 
   // Marks this user online on every page for as long as the tab is open
@@ -288,7 +297,7 @@ export default function Sidebar() {
 
       {/* Nav — scrolls on short screens (e.g. phone in landscape) */}
       <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1">
-        {visibleNav.map(({ href, label, icon, children }) => {
+        {visibleNav.map(({ href, label, icon, children, collapsible }) => {
           const active = path === href
           const badges = href === '/requests'
             ? [
@@ -304,6 +313,13 @@ export default function Sidebar() {
           const subPages = (children ?? [])
             .filter(c => !role || (c.roles as readonly string[]).includes(role))
 
+          // A folded section opens itself when you are already inside it —
+          // otherwise the menu would hide the page you are looking at
+          const inside = subPages.some(
+            c => path === c.href || path.startsWith(c.href + '/'))
+          const showSubs = subPages.length > 0
+            && (!collapsible || inside || expanded.has(href))
+
           return (
             <div key={href}>
             <Link
@@ -318,6 +334,28 @@ export default function Sidebar() {
             >
               <span className="text-base">{icon}</span>
               <span className="flex-1 min-w-0 truncate">{label}</span>
+              {collapsible && subPages.length > 0 && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={showSubs ? 'Згорнути' : 'Розгорнути'}
+                  onClick={e => {
+                    // The row is a link to the page; only the arrow folds it
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setExpanded(prev => {
+                      const next = new Set(prev)
+                      if (next.has(href)) next.delete(href); else next.add(href)
+                      return next
+                    })
+                  }}
+                  className={`shrink-0 px-1 text-xs transition-transform ${
+                    showSubs ? 'rotate-90' : ''
+                  }`}
+                >
+                  ›
+                </span>
+              )}
               {badges.length > 0 && (
                 <span className="flex items-center gap-1 shrink-0">
                   {badges.map(b => (
@@ -327,7 +365,7 @@ export default function Sidebar() {
               )}
             </Link>
 
-            {subPages.length > 0 && (
+            {showSubs && (
               <div className="mt-1 ml-4 pl-3 border-l border-zinc-800 space-y-1">
                 {subPages.map(sub => (
                   <Link
