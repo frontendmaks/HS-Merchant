@@ -8,6 +8,8 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { searchCompetitor, siteChrome, type Found } from '@/lib/price-scrape'
 import { fetchCatalog, shortlist, readProduct, withCity } from '@/lib/price-catalog'
 import { contextLabel, contextMatches } from '@/lib/meat-context'
+import { enqueueRender } from '@/lib/price-render'
+import { buildSearchUrl } from '@/lib/price-scrape'
 import {
   similarity, extractAmount, scaleToOurPack, queryVariants, sameKind,
   pricePerKg, ourPricePerKg, unitGrams, MATCH_MODES, isMatchMode, type MatchMode,
@@ -102,9 +104,9 @@ export async function runPriceCheck(
     // No search_url filter any more: a site without one is read from its
     // sitemap instead of being skipped
     service.from('price_competitors')
-      .select(`id, name, site_url, search_url, city_path,
+      .select(`id, name, site_url, search_url, city_path, readable,
                catalog_urls, catalog_synced_at`)
-      .eq('is_active', true).eq('readable', true),
+      .eq('is_active', true),
   ])
 
   const productIds = (watches ?? [])
@@ -144,6 +146,22 @@ export async function runPriceCheck(
   const now = new Date().toISOString()
 
   for (const rival of rivals) {
+    // A site that refuses our server is not skipped — the pages it would have
+    // been asked for are written down for the collector to open in a browser
+    if (!rival.readable) {
+      if (rival.search_url) {
+        for (const product of products ?? []) {
+          const queries = queryVariants(product.name as string).slice(0, 2)
+          await enqueueRender(service, rival.id as string, product.id as string,
+            queries.map(query => ({
+              url: buildSearchUrl(rival.search_url as string, query),
+              query,
+            })))
+        }
+      }
+      continue
+    }
+
     let siteError: string | null = null
     // Read once per competitor, not per product: it is the same menu every time
     const chrome = await siteChrome(rival.site_url as string)

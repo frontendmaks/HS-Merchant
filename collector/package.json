@@ -1,0 +1,14 @@
+{
+  "name": "hs-price-collector",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Відкриває сторінки конкурентів у справжньому браузері й віддає їх панелі",
+  "scripts": {
+    "start": "node index.js",
+    "setup": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}
