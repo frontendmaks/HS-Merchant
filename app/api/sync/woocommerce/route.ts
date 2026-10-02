@@ -3,6 +3,7 @@ export const maxDuration = 300
 import { createServiceClient } from '@/lib/supabase/service'
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
+import { requireWrite } from '@/lib/api-guard'
 import { cookies } from 'next/headers'
 import { syncWoocommerce } from '@/lib/sync-woocommerce'
 
@@ -23,6 +24,9 @@ async function getTriggeredBy(): Promise<string | null> {
 }
 
 export async function POST() {
+  const denied = await requireWrite('syncs')
+  if (denied) return denied
+
   const triggeredBy = await getTriggeredBy()
 
   // Захист від дублювання — якщо синкали менше 2 хв тому, пропускаємо

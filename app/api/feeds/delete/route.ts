@@ -1,7 +1,11 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import { NextRequest, NextResponse } from 'next/server'
+import { requireWrite } from '@/lib/api-guard'
 
 export async function DELETE(request: NextRequest) {
+  const denied = await requireWrite('feeds')
+  if (denied) return denied
+
   const { id } = await request.json()
   if (!id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 })
 

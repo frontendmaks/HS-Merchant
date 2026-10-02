@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
-export default function MarketplaceSyncTrigger() {
+export default function MarketplaceSyncTrigger({ readOnly = false }: { readOnly?: boolean }) {
   const router = useRouter()
   const [syncing, setSyncing] = useState(false)
   const [last, setLast] = useState<{ maudau: number; rozetka: number } | null>(null)
@@ -35,7 +35,8 @@ export default function MarketplaceSyncTrigger() {
       )}
       <button
         onClick={handleSync}
-        disabled={syncing}
+        disabled={syncing || readOnly}
+        title={readOnly ? 'Ваша роль — лише перегляд' : undefined}
         className="flex items-center gap-2 px-4 py-2 bg-purple-700 hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
       >
         <span className={syncing ? 'animate-spin inline-block' : ''}>🔄</span>

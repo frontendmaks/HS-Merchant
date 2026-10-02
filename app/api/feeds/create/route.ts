@@ -1,7 +1,11 @@
 import { createServiceClient } from '@/lib/supabase/service'
 import { NextResponse } from 'next/server'
+import { requireWrite } from '@/lib/api-guard'
 
 export async function POST(request: Request) {
+  const denied = await requireWrite('feeds')
+  if (denied) return denied
+
   const supabase = createServiceClient()
   try {
     const { name, slug, marketplace_id, custom_marketplace_name } = await request.json()

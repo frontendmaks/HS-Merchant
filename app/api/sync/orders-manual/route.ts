@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireWrite } from '@/lib/api-guard'
 import { createServiceClient } from '@/lib/supabase/service'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
@@ -22,6 +23,9 @@ async function getTriggeredBy(): Promise<string | null> {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await requireWrite('syncs')
+  if (denied) return denied
+
   const start = Date.now()
   const supabase = createServiceClient()
   const triggeredBy = await getTriggeredBy()

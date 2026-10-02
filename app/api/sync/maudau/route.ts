@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
+import { requireWrite } from '@/lib/api-guard'
 import { syncMaudau } from '@/lib/sync-maudau'
 
 export async function POST() {
+  const denied = await requireWrite('syncs')
+  if (denied) return denied
+
   try {
     const { synced } = await syncMaudau()
     return NextResponse.json({ success: true, synced })

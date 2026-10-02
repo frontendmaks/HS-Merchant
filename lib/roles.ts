@@ -63,23 +63,31 @@ export const canManageUser = (
 // --- Page access ---------------------------------------------------------
 
 /** Roles that may open each section. Keep in sync with components/Sidebar.tsx. */
+/**
+ * Глядач дивиться на роботу, але не бере в ній участі.
+ *
+ * Чотири сторінки, і всі лише на перегляд: товари, синхронізації, замовлення,
+ * користувачі. Жодної дії — ні запустити синк, ні змінити статус, ні
+ * відредагувати товар. Заборони стоять і в інтерфейсі, і на сервері: кнопка,
+ * якої не видно, не заважає звернутись до адреси напряму.
+ */
 export const PAGE_ROLES = {
-  dashboard: ['super_admin', 'admin', 'viewer'],
+  dashboard: ['super_admin', 'admin'],
   products:  ['super_admin', 'admin', 'viewer'],
-  feeds:     ['super_admin', 'admin', 'viewer'],
-  syncs:     ['super_admin', 'admin', 'manager'],
+  feeds:     ['super_admin', 'admin'],
+  syncs:     ['super_admin', 'admin', 'manager', 'viewer'],
   analytics: ['super_admin', 'admin', 'manager', 'analyst'],
   // Our margin against named rivals, and the rivals we watch. Commercial
   // strategy rather than trade figures, so it stays outside the analyst's view.
   priceMonitor: ['super_admin', 'admin', 'manager'],
   orders:    ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
-  requests:  ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
+  requests:  ['super_admin', 'admin', 'manager', 'operator'],
   /** Everyone has a newsfeed; which pieces land in it is decided per piece
    *  by its audience — see lib/news.ts */
-  news:      ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
+  news:      ['super_admin', 'admin', 'manager', 'operator'],
   // An analyst opens this to see who is who; acting on a user needs a role
   // that can grant one, which is checked per action rather than per page
-  users:     ['super_admin', 'admin', 'manager', 'analyst'],
+  users:     ['super_admin', 'admin', 'manager', 'analyst', 'viewer'],
   /** Operators plan their own week here; management approves it */
   schedule:  ['super_admin', 'admin', 'manager', 'operator'],
   /** The change journal exposes who did what — management only */
@@ -87,7 +95,7 @@ export const PAGE_ROLES = {
   /** Anyone may ask for a product to be taken out of sale — an operator on the
    *  phone hears "it is off the shelf" before anyone else does. Who decides is
    *  a separate question, and a narrower one: see canDecideRemoval. */
-  productRemovals: ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
+  productRemovals: ['super_admin', 'admin', 'manager', 'operator'],
 } as const
 
 export const canAccess = (

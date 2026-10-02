@@ -35,6 +35,8 @@ export default async function SyncsPage() {
   const { redirect } = await import('next/navigation')
   const role = await getCurrentRole()
   if (!canAccess('syncs', role)) redirect('/orders')
+  // Глядач дивиться на історію синхронізацій, але не запускає їх
+  const readOnly = role === 'viewer'
 
   const supabase = createServiceClient()
 
@@ -83,7 +85,7 @@ export default async function SyncsPage() {
             <h1 className="text-xl sm:text-2xl font-semibold text-white">Синхронізації товарів</h1>
             <p className="text-zinc-500 text-sm mt-1">Журнал синків з WooCommerce</p>
           </div>
-          <SyncTrigger />
+          <SyncTrigger readOnly={readOnly} />
         </div>
 
         {/* WC schedule */}
@@ -197,7 +199,7 @@ export default async function SyncsPage() {
             <h2 className="text-xl sm:text-2xl font-semibold text-white">Синхронізації замовлень</h2>
             <p className="text-zinc-500 text-sm mt-1">MauDau + Rozetka → база даних</p>
           </div>
-          <MarketplaceSyncTrigger />
+          <MarketplaceSyncTrigger readOnly={readOnly} />
         </div>
 
         {/* Orders schedule */}
