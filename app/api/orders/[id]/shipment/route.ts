@@ -24,7 +24,8 @@ export async function GET(
 
   const [{ data: order }, { data: items }, { data: settings }] = await Promise.all([
     service.from('orders')
-      .select('external_id, customer_name, customer_phone, branch, address, total, weight, seats_amount, ttn, np_ttn_ref, status, raw')
+      .select(`external_id, customer_name, customer_phone, branch, address, total,
+               weight, seats_amount, ttn, np_ttn_ref, status, raw, is_paid`)
       .eq('id', id).single(),
     service.from('order_items').select('*').eq('order_id', id).order('position'),
     service.from('np_settings').select('*').eq('id', true).maybeSingle(),
@@ -103,7 +104,9 @@ export async function GET(
     cityNote,
     // Without these a waybill cannot be created, so the UI can say which is missing
     // Agreed and not yet shipped: the point at which the contents are settled
-    readyToShip: canCreateWaybill(order.status as string, order.ttn as string),
+    readyToShip: canCreateWaybill(order.status as string, order.ttn as string)
+      && !!order.is_paid,
+    isPaid: !!order.is_paid,
     status: order.status,
     ready: {
       apiKey: hasNpKey(),
@@ -161,7 +164,8 @@ export async function POST(
   const service = createServiceClient()
   const [{ data: order }, { data: settings }, { data: items }] = await Promise.all([
     service.from('orders')
-      .select('customer_name, customer_phone, total, ttn, np_ttn_ref, raw, platform, external_id, status')
+      .select(`customer_name, customer_phone, total, ttn, np_ttn_ref, raw,
+               platform, external_id, status, is_paid`)
       .eq('id', id).single(),
     service.from('np_settings').select('*').eq('id', true).maybeSingle(),
     service.from('order_items').select('*').eq('order_id', id),
@@ -180,6 +184,12 @@ export async function POST(
       { error: `ТТН створюється лише з погодженого замовлення — зараз «${order.status}»` },
       { status: 409 },
     )
+  }
+  // ТТН — це і є передача кур'єру, хай би яким був статус. Перевіряти оплату
+  // лише на статусі означало б лишити відкритими двері поруч.
+  if (!order.is_paid) {
+    return NextResponse.json(
+      { error: 'Замовлення не оплачене — ТТН не створюється' }, { status: 409 })
   }
   if (!hasNpKey()) return NextResponse.json({ error: 'NOVA_POSHTA_API_KEY не налаштовано' }, { status: 400 })
   if (!settings?.sender_ref) {

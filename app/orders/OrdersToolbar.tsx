@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useTransition } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { useOrderUpdates } from '@/lib/use-order-updates'
 
@@ -30,12 +30,16 @@ export default function OrdersToolbar() {
   const status = searchParams.get('status') || ''
   const search = searchParams.get('search') || ''
 
+  // Перемикання фільтра — це перехід на сервер. Без transition сторінка
+  // просто завмирала на секунду, і виглядало це як «не спрацювало».
+  const [pending, startTransition] = useTransition()
+
   const setParam = useCallback((key: string, value: string) => {
     const params = new URLSearchParams(searchParams.toString())
     if (value) params.set(key, value)
     else params.delete(key)
     params.delete('page')
-    router.push(`${pathname}?${params.toString()}`)
+    startTransition(() => router.push(`${pathname}?${params.toString()}`))
   }, [searchParams, pathname, router])
 
   // Omitting `platform` syncs every marketplace; the route already handles
@@ -83,7 +87,13 @@ export default function OrdersToolbar() {
   ]
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <div className={`flex flex-wrap items-center gap-3 transition-opacity ${
+      pending ? 'opacity-60' : ''
+    }`}>
+      {pending && (
+        <span className="w-3 h-3 rounded-full border-2 border-red-500 border-t-transparent
+                         animate-spin shrink-0" />
+      )}
       {/* Search */}
       <input
         type="text"

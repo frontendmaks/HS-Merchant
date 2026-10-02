@@ -5,11 +5,12 @@ import { createServiceClient } from '@/lib/supabase/service'
 type Service = ReturnType<typeof createServiceClient>
 
 export type OrderEventType =
-  | 'status' | 'ttn' | 'cancel' | 'cancel_reason' | 'sync_status' | 'created' | 'items' | 'marketplace_push' | 'shipment' | 'operator_comment'
+  | 'status' | 'ttn' | 'cancel' | 'cancel_reason' | 'sync_status' | 'created' | 'items' | 'marketplace_push' | 'shipment' | 'operator_comment' | 'payment'
 
 export const EVENT_META: Record<OrderEventType, { label: string; icon: string }> = {
   created:       { label: 'замовлення надійшло',   icon: '✚' },
   status:        { label: 'змінив статус',          icon: '↻' },
+  payment:       { label: 'позначив оплату',        icon: '₴' },
   ttn:           { label: 'вказав ТТН',             icon: '▤' },
   cancel:        { label: 'скасував замовлення',    icon: '✕' },
   cancel_reason: { label: 'вказав причину',         icon: '✎' },

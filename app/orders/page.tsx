@@ -1,11 +1,11 @@
 export const dynamic = 'force-dynamic'
 
 import { Suspense } from 'react'
-import Link from 'next/link'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
 import { IN_PROGRESS_STATUSES, SHIPPING_STATUSES, isInProgress, isShipping } from '@/lib/order-statuses'
 import OrdersToolbar from './OrdersToolbar'
+import MonthTabs from './MonthTabs'
 import OrderRow from './OrderRow'
 import WideScroll from './WideScroll'
 import { arrivalTime } from '@/lib/order-arrival'
@@ -80,21 +80,11 @@ export default async function OrdersPage({
 
   const supabase = createServiceClient()
 
-  const { data: allOrders } = await supabase
+  const statsQuery = supabase
     .from('orders')
     .select('platform,status,total,commission')
     .gte('order_date', from)
     .lte('order_date', to)
-
-  const allOrders2 = allOrders || []
-  // Stats cards respect the platform filter
-  const orders = platform ? allOrders2.filter(o => o.platform === platform) : allOrders2
-  const total = orders.length
-  const delivered = orders.filter(o => o.status === 'Доставлено')
-  const canceled = orders.filter(o => o.status === 'Скасовано')
-  const inProgress = orders.filter(o => isInProgress(o.status))
-  const shipping = orders.filter(o => isShipping(o.status))
-
 
   let query = supabase
     .from('orders')
@@ -122,7 +112,23 @@ export default async function OrdersPage({
     )
   }
 
-  const { data: tableOrders } = await query
+  // Два запити, одна затримка.
+  //
+  // Раніше картки чекали на свій запит, і лише потім починався запит таблиці —
+  // виходило дві повні подорожі до бази поспіль на кожне перемикання місяця.
+  const [{ data: allOrders }, { data: tableOrders }] = await Promise.all([
+    statsQuery,
+    query,
+  ])
+
+  const allOrders2 = allOrders || []
+  // Stats cards respect the platform filter
+  const orders = platform ? allOrders2.filter(o => o.platform === platform) : allOrders2
+  const total = orders.length
+  const delivered = orders.filter(o => o.status === 'Доставлено')
+  const canceled = orders.filter(o => o.status === 'Скасовано')
+  const inProgress = orders.filter(o => isInProgress(o.status))
+  const shipping = orders.filter(o => isShipping(o.status))
 
   function buildTabHref(month: string) {
     const params = new URLSearchParams()
@@ -132,6 +138,9 @@ export default async function OrdersPage({
     if (search) params.set('search', search)
     return `?${params.toString()}`
   }
+
+  // Адреси рахуємо тут: функцію через межу сервер–клієнт не передати
+  const tabsWithHref = tabs.map(t => ({ ...t, href: buildTabHref(t.value) }))
 
   return (
     <div className="bg-zinc-950 text-white space-y-4">
@@ -146,24 +155,7 @@ export default async function OrdersPage({
         <OrdersToolbar />
       </Suspense>
 
-      {/* Month tabs */}
-      <div className="overflow-x-auto">
-        <div className="flex gap-1 min-w-max">
-          {tabs.map(tab => (
-            <Link
-              key={tab.value}
-              href={buildTabHref(tab.value)}
-              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors whitespace-nowrap ${
-                tab.value === selectedMonth
-                  ? 'bg-red-600 text-white'
-                  : 'bg-zinc-800/50 text-zinc-400 hover:text-white hover:bg-zinc-800'
-              }`}
-            >
-              {tab.label}
-            </Link>
-          ))}
-        </div>
-      </div>
+      <MonthTabs tabs={tabsWithHref} selected={selectedMonth} />
 
       {/* Analytics cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -241,6 +233,7 @@ export default async function OrdersPage({
                     total={order.total}
                     commission={order.commission}
                     status={order.status}
+                    is_paid={order.is_paid}
                     ttn={order.ttn}
                     cancel_reason={order.cancel_reason}
                     customer_comment={order.customer_comment}

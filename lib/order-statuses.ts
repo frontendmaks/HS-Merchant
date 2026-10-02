@@ -94,3 +94,36 @@ export const canCreateWaybill = (
 ): boolean => READY_TO_SHIP_STATUSES.includes(status ?? '') && !(ttn ?? '').trim()
 
 // hasWaybill is declared below, next to the rule that uses it
+
+/**
+ * Оплата.
+ *
+ * Замовлення з маркетплейсів ідуть передоплатою на картку. Гроші приходять
+ * повз маркетплейс, тож його статуси нічого про них не кажуть — звідси окремий
+ * прапорець і окреме правило: без оплати замовлення не їде.
+ */
+
+/** Склад замовлення вже узгоджено — саме тут чекають на гроші. */
+export const PAYMENT_STAGE_STATUSES = [
+  'Узгоджено',        // MauDau
+  'Комплектується',   // Rozetka
+  'Очікує оплату',    // Rozetka називає цей стан прямо
+]
+
+/**
+ * Перемикач оплати відкривається на стадії узгодження.
+ *
+ * Раніше — нема за що платити, склад ще змінюється. Пізніше — замовлення вже
+ * поїхало, і позначити його неоплаченим означало б переписати минуле.
+ */
+export const canTogglePaid = (status: string | null | undefined): boolean =>
+  PAYMENT_STAGE_STATUSES.includes(status ?? '')
+
+/**
+ * Статуси, які означають «віддано кур'єру».
+ *
+ * Їх не можна проставити без оплати: посилка поїде, а гроші лишаться
+ * ненадісланими — і дізнаємось ми про це тоді, коли повертати вже нема як.
+ */
+export const requiresPayment = (status: string | null | undefined): boolean =>
+  isShipping(status ?? null) || status === 'Доставлено'

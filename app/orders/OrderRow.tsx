@@ -5,7 +5,9 @@ import OrderJournal from './OrderJournal'
 import OrderItemsEditor from './OrderItemsEditor'
 import ShipmentDialog from './ShipmentDialog'
 import { useRouter } from 'next/navigation'
-import { canCreateWaybill, canEditItems, isHandedOver } from '@/lib/order-statuses'
+import {
+  canCreateWaybill, canEditItems, isHandedOver, canTogglePaid, requiresPayment,
+} from '@/lib/order-statuses'
 
 const MAUDAU_STATUSES = ['Нове', 'Прийнято', 'Узгоджено', 'На доставці', 'Прибуло', 'Доставлено', 'Скасовано']
 const ROZETKA_STATUSES = ['Нове', 'Опрацьовується', 'Комплектується', 'Передано в доставку', 'Доставляється', 'Чекає в пункті', 'Доставлено', 'Скасовано']
@@ -86,6 +88,7 @@ interface OrderRowProps {
   total: number | null
   commission: number | null
   status: string | null
+  is_paid?: boolean | null
   ttn: string | null
   cancel_reason: string | null
   /** What the buyer wrote when ordering — delivery notes, corrected addresses */
@@ -108,12 +111,13 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
 
   useEffect(() => {
     setStatus(props.status || '')
+    setPaid(!!props.is_paid)
     setTtn(props.ttn || '')
     setTtnDraft(props.ttn || '')
     setCancelReason(props.cancel_reason || '')
     setNote(props.operator_comment || '')
     setNoteDraft(props.operator_comment || '')
-  }, [props.status, props.ttn, props.cancel_reason, props.operator_comment])
+  }, [props.status, props.ttn, props.cancel_reason, props.operator_comment, props.is_paid])
 
   // A row holds its own copy of status and TTN so typing feels immediate, and
   // that copy goes stale when someone else touches the same order. Refreshing
@@ -123,6 +127,8 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
 
   const [journalOpen, setJournalOpen] = useState(false)
   const [statusLoading, setStatusLoading] = useState(false)
+  const [paid, setPaid] = useState(!!props.is_paid)
+  const [paidLoading, setPaidLoading] = useState(false)
   const [ttnLoading, setTtnLoading] = useState(false)
   const [cancelLoading, setCancelLoading] = useState(false)
   const [noteLoading, setNoteLoading] = useState(false)
@@ -155,6 +161,27 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
   }, [props.platform])
 
   const statuses = props.platform === 'rozetka' ? ROZETKA_STATUSES : MAUDAU_STATUSES
+
+  async function togglePaid() {
+    const next = !paid
+    setPaid(next)            // одразу, щоб натискання відчувалось
+    setPaidLoading(true)
+    setStatusError('')
+    try {
+      const res = await fetch(`/api/orders/${props.id}/paid`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paid: next }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Не вдалося зберегти')
+    } catch (e) {
+      setPaid(!next)         // не зберіглось — повертаємо як було
+      setStatusError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPaidLoading(false)
+    }
+  }
   const cancelReasonOptions: { id: number; name: string }[] =
     props.platform === 'rozetka'
       ? ROZETKA_CANCEL_REASONS
@@ -357,10 +384,12 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
                   value={s}
                   // Greyed out until a reason is picked, so the rule is visible
                   // before the click rather than explained after it
-                  disabled={s === 'Скасовано' && !cancelReason.trim()}
+                  disabled={(s === 'Скасовано' && !cancelReason.trim())
+                    || (requiresPayment(s) && !paid)}
                 >
                   {s}
                   {s === 'Скасовано' && !cancelReason.trim() ? ' — оберіть причину' : ''}
+                  {requiresPayment(s) && !paid ? ' — спершу оплата' : ''}
                 </option>
               ))}
             </select>
@@ -368,6 +397,29 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
             {statusError && <div className="text-red-400 text-xs mt-0.5">{statusError}</div>}
           </>
         )}
+
+        {/* Передоплата. Маркетплейс про неї не знає — гроші приходять повз
+            нього, тож це окремий перемикач, а не ще один статус. */}
+        <button
+          type="button"
+          disabled={readOnly || paidLoading || !canTogglePaid(status) || locked}
+          onClick={() => togglePaid()}
+          title={
+            canTogglePaid(status)
+              ? (paid ? 'Знято оплату' : 'Позначити як оплачене')
+              : 'Оплату позначають на статусі «Узгоджено»'
+          }
+          className={`mt-1.5 w-full px-2 py-1 rounded text-xs font-medium transition-colors
+                      disabled:cursor-default ${
+            paid
+              ? 'bg-emerald-900/60 text-emerald-300 enabled:hover:bg-emerald-900'
+              : canTogglePaid(status)
+                ? 'bg-amber-900/60 text-amber-300 enabled:hover:bg-amber-900'
+                : 'bg-zinc-800 text-zinc-500'
+          }`}
+        >
+          {paidLoading ? '…' : paid ? '₴ Оплачено' : '₴ Не оплачено'}
+        </button>
       </td>
 
       {/* TTN */}

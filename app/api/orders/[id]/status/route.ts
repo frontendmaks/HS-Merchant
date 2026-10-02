@@ -4,7 +4,7 @@ import { getMaudauJwt, patchMaudauStatus } from '@/lib/maudau'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { rozetkaToken } from '@/lib/rozetka-auth'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
-import { isHandedOver } from '@/lib/order-statuses'
+import { isHandedOver, requiresPayment } from '@/lib/order-statuses'
 
 const MAUDAU_STATUS_MAP: Record<string, string> = {
   'Нове': 'new_order',
@@ -31,7 +31,7 @@ export async function PATCH(
 
   // A parcel already with the courier is driven by the marketplace from here
   const { data: current } = await supabase
-    .from('orders').select('status, ttn, cancel_reason').eq('id', id).single()
+    .from('orders').select('status, ttn, cancel_reason, is_paid').eq('id', id).single()
 
   // Cancelling is the one move that ends an order, and a cancellation with no
   // reason answers nothing later — not for the marketplace, which asks for one,
@@ -46,6 +46,19 @@ export async function PATCH(
       { status: 400 },
     )
   }
+  // Передоплата на картку приходить повз маркетплейс, тож його статуси її не
+  // показують. Віддати посилку кур'єру без грошей означає дізнатись про це
+  // тоді, коли повертати вже нема як.
+  if (requiresPayment(status) && !current?.is_paid) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Замовлення не оплачене — спершу позначте оплату',
+      },
+      { status: 409 },
+    )
+  }
+
   if (isHandedOver(current?.status as string, current?.ttn as string)) {
     return NextResponse.json(
       { success: false, error: 'Замовлення вже в доставці — статус не змінюється' },
