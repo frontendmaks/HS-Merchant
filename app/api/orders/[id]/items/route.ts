@@ -7,6 +7,7 @@ import {
 } from '@/lib/order-items'
 import { canPushToMaudau, pushOrderItems, type PushResult } from '@/lib/maudau-order-sync'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { canEditItems } from '@/lib/order-statuses'
 
 type Service = ReturnType<typeof createServiceClient>
@@ -220,6 +221,7 @@ export async function PATCH(
   )
 
   await broadcastOrderChange(id, 'items')
+  await notifyIntegrations(id, 'order.items_changed')
 
   return NextResponse.json({
     lines: lines.map(l => ({ ...l, corrected_total: correctedTotal(l) })),

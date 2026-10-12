@@ -4,6 +4,7 @@ import { getMaudauJwt, patchMaudauStatus } from '@/lib/maudau'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { rozetkaToken } from '@/lib/rozetka-auth'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { isHandedOver, requiresPayment } from '@/lib/order-statuses'
 
 const MAUDAU_STATUS_MAP: Record<string, string> = {
@@ -90,6 +91,7 @@ export async function PATCH(
       // Cancellation must go through the cancel route (needs a reason)
       if (apiStatus === 'canceled') {
         await broadcastOrderChange(id, 'status')
+        await notifyIntegrations(id, 'order.status_changed')
   return NextResponse.json({ success: true })
       }
 
@@ -146,5 +148,6 @@ export async function PATCH(
   }
 
   await broadcastOrderChange(id, 'status')
+  await notifyIntegrations(id, 'order.status_changed')
   return NextResponse.json({ success: true })
 }

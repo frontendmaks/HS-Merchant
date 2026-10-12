@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { pushTtnToMarketplace } from '@/lib/marketplace-ttn'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { isHandedOver } from '@/lib/order-statuses'
 import { readDestination } from '@/lib/order-delivery'
 
@@ -50,6 +51,7 @@ export async function PATCH(
 
   if (byMerchant) {
     await broadcastOrderChange(id, 'ttn')
+    await notifyIntegrations(id, 'order.updated')
     return NextResponse.json({
       success: true,
       note: 'Доставка продавця — маркетплейс не приймає ТТН, номер збережено лише в нас.',
@@ -73,5 +75,6 @@ export async function PATCH(
   }
 
   await broadcastOrderChange(id, 'ttn')
+  await notifyIntegrations(id, 'order.updated')
   return NextResponse.json({ success: true, status: pushed.status })
 }

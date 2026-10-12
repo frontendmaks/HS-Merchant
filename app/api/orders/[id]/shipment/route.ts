@@ -8,6 +8,7 @@ import {
 } from '@/lib/nova-poshta'
 import { pushTtnNumber } from '@/lib/marketplace-ttn'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { canCreateWaybill, isHandedOver } from '@/lib/order-statuses'
 import { readDestination } from '@/lib/order-delivery'
 
@@ -263,6 +264,7 @@ export async function POST(
     : await pushTtnNumber(order.platform as string, order.external_id as string, result.ttn!)
 
   await broadcastOrderChange(id, 'ttn')
+  await notifyIntegrations(id, 'order.updated')
 
   return NextResponse.json({
     ...result,

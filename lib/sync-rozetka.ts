@@ -3,6 +3,7 @@ import { notifyNewOrders } from '@/lib/order-notifications'
 import { changedRows } from '@/lib/sync-hash'
 import { rozetkaToken, invalidateRozetkaToken, isTokenError } from '@/lib/rozetka-auth'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { notifyIntegrations } from '@/lib/integration-webhooks'
 
 const BASE = process.env.ROZETKA_BASE!
 
@@ -317,6 +318,7 @@ export async function syncRozetka(mode: SyncMode = 'full'): Promise<{ synced: nu
     await notifyNewOrders(supabase, 'rozetka', freshOrders)
     // A new order should appear on every open list at once, not at the next poll
     await broadcastOrderChange('*', 'sync')
+    await notifyIntegrations('*', 'order.created')
   }
 
   return { synced: rows.length }

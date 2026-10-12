@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { notifyIntegrations } from '@/lib/integration-webhooks'
 
 export async function PATCH(
   req: NextRequest,
@@ -42,6 +43,7 @@ export async function PATCH(
   // the answer
   await logOrderEvent(supabase, id, 'operator_comment', { old: prev, new: next }, actor)
   await broadcastOrderChange(id, 'operator_comment')
+  await notifyIntegrations(id, 'order.note_added')
 
   return NextResponse.json({ success: true, comment: next })
 }

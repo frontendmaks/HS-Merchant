@@ -14,6 +14,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { markShippedAtMarketplace } from '@/lib/marketplace-ttn'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { hasWaybill, isShipping } from '@/lib/order-statuses'
 
 export async function POST(
@@ -51,6 +52,7 @@ export async function POST(
     await logOrderEvent(service, id, 'status',
       { old: (order.status as string) ?? null, new: status, details: 'після створення ТТН' }, actor)
     await broadcastOrderChange(id, 'status')
+    await notifyIntegrations(id, 'order.updated')
   }
 
   return NextResponse.json({ ok: true, status })

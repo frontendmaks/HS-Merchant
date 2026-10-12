@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { canTogglePaid, isHandedOver } from '@/lib/order-statuses'
 
 /**
@@ -60,5 +61,6 @@ export async function PATCH(
     actor)
 
   await broadcastOrderChange(id, 'status')
+  await notifyIntegrations(id, 'order.updated')
   return NextResponse.json({ success: true, is_paid: next })
 }

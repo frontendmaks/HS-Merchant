@@ -119,6 +119,12 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   const unitMatch = rawUnit.match(/\[:uk\]([^\[]+)/)
   const unitBase = unitMatch ? unitMatch[1].trim() : rawUnit.trim()
 
+  // Ідентифікатори 1С. Сайт тримає їх у мета-полях «uid» і «code», і це
+  // єдине, за чим 1С та Бітрікс упізнають наш товар: назва на маркетплейсі й
+  // назва в номенклатурі — різні тексти.
+  const uid1c = (getMetaVal('uid') as string | null)?.trim() || null
+  const code1c = (getMetaVal('code') as string | null)?.trim() || null
+
   if (stepVal && stepVal > 0) attributes['Крок'] = String(stepVal)
   if (minVal && minVal > 0)   attributes['Мін']  = String(minVal)
   if (unitBase)               attributes['Одиниця'] = unitBase
@@ -159,6 +165,8 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
     slug: p.slug,
     description: p.description?.replace(/<[^>]*>/g, '').trim() || p.short_description?.replace(/<[^>]*>/g, '').trim() || null,
     sku: p.sku || null,
+    uid_1c: uid1c,
+    code_1c: code1c,
     price,
     price_old,
     currency: 'UAH' as const,

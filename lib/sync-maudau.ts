@@ -3,6 +3,7 @@ import { getMaudauJwt } from '@/lib/maudau'
 import { notifyNewOrders } from '@/lib/order-notifications'
 import { changedRows } from '@/lib/sync-hash'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { hasWaybill } from '@/lib/order-statuses'
 import { patchMaudauStatus } from '@/lib/maudau'
 
@@ -286,6 +287,7 @@ export async function syncMaudau(mode: SyncMode = 'full'): Promise<{ synced: num
     await notifyNewOrders(supabase, 'maudau', freshOrders)
     // A new order should appear on every open list at once, not at the next poll
     await broadcastOrderChange('*', 'sync')
+    await notifyIntegrations('*', 'order.created')
   }
 
   return { synced: rows.length }
