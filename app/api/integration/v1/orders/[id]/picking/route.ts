@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { authorize, isDenied, logRequest, replayed, remember } from '@/lib/integration-auth'
 import { buildOrders, ORDER_FIELDS } from '@/lib/integration-order'
 import { logOrderEvent } from '@/lib/order-events'
-import { orderTotals, shipmentWeight, type OrderLine } from '@/lib/order-items'
+import { orderTotals, shipmentWeight, foldSku, type OrderLine } from '@/lib/order-items'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { canRecordPicking } from '@/lib/order-statuses'
@@ -79,23 +79,48 @@ export async function POST(
   const { data: lines } = await service.from('order_items')
     .select('*').eq('order_id', order.id).order('position')
 
-  const externalIds = (lines ?? []).map(l => l.product_external_id).filter(Boolean) as string[]
-  const { data: products } = externalIds.length
-    ? await service.from('products')
-        .select('external_id, uid_1c, code_1c, sku').in('external_id', externalIds)
-    : { data: [] }
+  // Те саме трискладове зіставлення, що й при читанні: у рядку може стояти
+  // ідентифікатор сайту, артикул або справжній зв'язок із каталогом
+  const productIds = (lines ?? []).map(l => l.product_id).filter(Boolean) as string[]
+  const refs = (lines ?? []).map(l => l.product_external_id).filter(Boolean) as string[]
 
-  const byExternal = new Map((products ?? []).map(p => [p.external_id as string, p]))
+  const [{ data: byId }, { data: byRef }] = await Promise.all([
+    productIds.length
+      ? service.from('products').select('id, external_id, sku, uid_1c, code_1c').in('id', productIds)
+      : Promise.resolve({ data: [] as never[] }),
+    refs.length
+      ? service.from('products').select('id, external_id, sku, uid_1c, code_1c')
+          .or(`external_id.in.(${refs.join(',')}),sku.in.(${refs.join(',')})`)
+      : Promise.resolve({ data: [] as never[] }),
+  ])
+
+  type Row = { id: string; external_id: string | null; sku: string | null
+               uid_1c: string | null; code_1c: string | null }
+
+  const byUuid = new Map<string, Row>()
+  const byRefKey = new Map<string, Row>()
+  for (const p of [...(byId ?? []), ...(byRef ?? [])] as Row[]) {
+    byUuid.set(p.id, p)
+    if (p.external_id) byRefKey.set(p.external_id, p)
+    if (p.sku) byRefKey.set(foldSku(p.sku), p)
+  }
+
+  const nomenclature = (l: { product_id?: string | null; product_external_id?: string | null }) =>
+    (l.product_id ? byUuid.get(l.product_id) : null)
+    ?? (l.product_external_id
+        ? byRefKey.get(l.product_external_id) ?? byRefKey.get(foldSku(l.product_external_id))
+        : null)
+    ?? null
 
   /** Знаходить наш рядок за тим, чим його назвала зовнішня система. */
   const locate = (want: { uid_1c?: string; code_1c?: string; sku?: string; line_id?: string }) =>
     (lines ?? []).find(l => {
       if (want.line_id && l.id === want.line_id) return true
-      const p = l.product_external_id ? byExternal.get(l.product_external_id) : null
+      const p = nomenclature(l)
       if (!p) return false
       if (want.uid_1c && p.uid_1c === want.uid_1c) return true
       if (want.code_1c && p.code_1c === want.code_1c) return true
-      if (want.sku && p.sku === want.sku) return true
+      if (want.sku && foldSku(p.sku) === foldSku(want.sku)) return true
       return false
     })
 

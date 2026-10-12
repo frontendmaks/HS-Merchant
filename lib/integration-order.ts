@@ -9,7 +9,7 @@
  * саме з цією сумою мають збігатись і комісія, і оголошена цінність накладної.
  */
 import { createServiceClient } from '@/lib/supabase/service'
-import { effectiveQty } from '@/lib/order-items'
+import { effectiveQty, foldSku } from '@/lib/order-items'
 import { ensureLines, loadCatalog } from '@/lib/order-lines'
 
 type Service = ReturnType<typeof createServiceClient>
@@ -103,16 +103,49 @@ export async function buildOrders(
   const { data: items } = await service
     .from('order_items').select(ITEM_FIELDS).in('order_id', ids).order('position')
 
-  const externalIds = [...new Set(
+  /**
+   * Товар у рядку впізнається трьома способами, і всі три потрібні.
+   *
+   * `product_id` — справжній зв'язок, але він є не скрізь. У
+   * `product_external_id` лежить то ідентифікатор сайту («883215»), то
+   * артикул («K0209») — залежно від того, що прислав маркетплейс. Зіставлення
+   * лише за одним із них залишало чотири рядки з шести без номенклатури 1С,
+   * тобто невидимими для Бітрікса.
+   */
+  const productIds = [...new Set(
+    (items ?? []).map(i => i.product_id).filter(Boolean) as string[])]
+  const refs = [...new Set(
     (items ?? []).map(i => i.product_external_id).filter(Boolean) as string[])]
 
-  const { data: products } = externalIds.length
-    ? await service.from('products')
-        .select('external_id, name, sku, uid_1c, code_1c')
-        .in('external_id', externalIds)
-    : { data: [] }
+  const [{ data: byId }, { data: byRef }] = await Promise.all([
+    productIds.length
+      ? service.from('products')
+          .select('id, external_id, sku, name, uid_1c, code_1c').in('id', productIds)
+      : Promise.resolve({ data: [] as never[] }),
+    refs.length
+      ? service.from('products')
+          .select('id, external_id, sku, name, uid_1c, code_1c')
+          .or(`external_id.in.(${refs.join(',')}),sku.in.(${refs.join(',')})`)
+      : Promise.resolve({ data: [] as never[] }),
+  ])
 
-  const catalog = new Map((products ?? []).map(p => [p.external_id as string, p]))
+  type Row = { id: string; external_id: string | null; sku: string | null
+               name: string | null; uid_1c: string | null; code_1c: string | null }
+
+  const byUuid = new Map<string, Row>()
+  const byRefKey = new Map<string, Row>()
+  for (const p of [...(byId ?? []), ...(byRef ?? [])] as Row[]) {
+    byUuid.set(p.id, p)
+    if (p.external_id) byRefKey.set(p.external_id, p)
+    if (p.sku) byRefKey.set(foldSku(p.sku), p)
+  }
+
+  const resolve = (item: { product_id?: string | null; product_external_id?: string | null }) =>
+    (item.product_id ? byUuid.get(item.product_id) : null)
+    ?? (item.product_external_id
+        ? byRefKey.get(item.product_external_id) ?? byRefKey.get(foldSku(item.product_external_id))
+        : null)
+    ?? null
   const byOrder = new Map<string, typeof items>()
   for (const i of items ?? []) {
     const key = (i as unknown as { order_id: string }).order_id
@@ -121,7 +154,7 @@ export async function buildOrders(
 
   return orders.map(o => {
     const lines = (byOrder.get(o.id) ?? []).map(i => {
-      const p = i.product_external_id ? catalog.get(i.product_external_id) : null
+      const p = resolve(i)
       const qty = effectiveQty(i as never)
       return {
         id: i.id as string,
