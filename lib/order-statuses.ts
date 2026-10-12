@@ -127,3 +127,26 @@ export const canTogglePaid = (status: string | null | undefined): boolean =>
  */
 export const requiresPayment = (status: string | null | undefined): boolean =>
   isShipping(status ?? null) || status === 'Доставлено'
+
+/**
+ * Комплектація — це не редагування складу.
+ *
+ * Редагувати склад після «Узгоджено» не можна: замовлення вже пообіцяли
+ * покупцю. Але комплектація саме тоді й починається — склад бере узгоджене
+ * замовлення й збирає його. Це різні дії: перша змінює, що замовлено, друга
+ * записує, що зібрано.
+ *
+ * Поки вони були одним правилом, маршрут комплектації відмовляв рівно в тому
+ * стані, заради якого існує.
+ *
+ * Межа — передача кур'єру: після неї накладна вже несе вагу й цінність, і
+ * міняти зібране означає розійтися з тим, що поїхало.
+ */
+/** Замовлення, яке вже нікуди не їде: збирати в ньому нічого. */
+const CLOSED_STATUSES = ['Доставлено', 'Скасовано', 'Повернуто']
+
+export const canRecordPicking = (
+  status: string | null | undefined,
+  ttn: string | null | undefined,
+): boolean =>
+  !isHandedOver(status, ttn) && !CLOSED_STATUSES.includes(status ?? '')

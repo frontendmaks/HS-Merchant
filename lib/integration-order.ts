@@ -10,7 +10,7 @@
  */
 import { createServiceClient } from '@/lib/supabase/service'
 import { effectiveQty } from '@/lib/order-items'
-import { ensureLines } from '@/lib/order-lines'
+import { ensureLines, loadCatalog } from '@/lib/order-lines'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -93,8 +93,11 @@ export async function buildOrders(
     .from('order_items').select('order_id').in('order_id', ids)
   const haveLines = new Set((have ?? []).map(r => r.order_id as string))
 
-  for (const id of ids) {
-    if (!haveLines.has(id)) await ensureLines(service, id)
+  const missing = ids.filter(id => !haveLines.has(id))
+  if (missing.length) {
+    // Довідник один на всю вибірку
+    const catalog = await loadCatalog(service)
+    for (const id of missing) await ensureLines(service, id, catalog)
   }
 
   const { data: items } = await service

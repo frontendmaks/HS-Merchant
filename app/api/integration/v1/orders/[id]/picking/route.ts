@@ -5,7 +5,7 @@ import { logOrderEvent } from '@/lib/order-events'
 import { orderTotals, shipmentWeight, type OrderLine } from '@/lib/order-items'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { notifyIntegrations } from '@/lib/integration-webhooks'
-import { canEditItems } from '@/lib/order-statuses'
+import { canRecordPicking } from '@/lib/order-statuses'
 
 /**
  * POST /api/integration/v1/orders/{id}/picking
@@ -62,12 +62,18 @@ export async function POST(
     return NextResponse.json({ error: 'Замовлення не знайдено' }, { status: 404 })
   }
 
-  // Те саме правило, що й для операторів: склад зачинено, коли замовлення
-  // вже їде. Інакше накладна несла б одну вагу, а коробка — іншу.
-  if (!canEditItems(order.status as string)) {
-    await logRequest(service, client.id, req, 409, started, 'items locked')
-    return NextResponse.json(
-      { error: `Склад замовлення вже закрито — статус «${order.status}»` }, { status: 409 })
+  // Межа — передача кур'єру, а не узгодження.
+  //
+  // Спершу тут стояло правило редагування складу, яке зачиняється на
+  // «Узгоджено». Але комплектація саме тоді й починається — маршрут відмовляв
+  // би в єдиному стані, заради якого існує.
+  if (!canRecordPicking(order.status as string, order.ttn as string)) {
+    await logRequest(service, client.id, req, 409, started, 'picking closed')
+    return NextResponse.json({
+      error: order.status === 'Скасовано'
+        ? 'Замовлення скасовано'
+        : 'Замовлення вже передано кур\'єру — комплектація закрита',
+    }, { status: 409 })
   }
 
   const { data: lines } = await service.from('order_items')

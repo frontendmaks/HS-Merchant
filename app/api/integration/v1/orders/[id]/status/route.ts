@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authorize, isDenied, logRequest, replayed, remember } from '@/lib/integration-auth'
 import { isHandedOver, requiresPayment } from '@/lib/order-statuses'
-import { logOrderEvent } from '@/lib/order-events'
-import { broadcastOrderChange } from '@/lib/order-broadcast'
-import { notifyIntegrations } from '@/lib/integration-webhooks'
+import { changeOrderStatus } from '@/lib/order-status-change'
 
 /**
  * PATCH /api/integration/v1/orders/{id}/status
@@ -69,34 +67,24 @@ export async function PATCH(
       { status: 409 })
   }
 
-  // Статус у маркетплейс штовхає наш внутрішній маршрут: він знає відмінності
-  // MauDau і Rozetka, і дублювати це знання тут означало б мати дві правди
-  const origin = new URL(req.url).origin
-  const push = await fetch(`${origin}/api/orders/${order.id}/status`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Integration-Client': client.id,
-    },
-    body: JSON.stringify({
-      status, platform: order.platform, external_id: order.external_id,
-    }),
-  }).catch(() => null)
+  // Та сама функція, що й в інтерфейсу: правила, журнал і штовхання в
+  // маркетплейс там усередині. Раніше тут був запит по HTTP до власного ж
+  // маршруту — зайвий стрибок, який до того ж ламався, щойно той маршрут
+  // почав вимагати автентифікації.
+  const result = await changeOrderStatus({
+    id: order.id as string,
+    status,
+    platform: order.platform as string,
+    external_id: order.external_id as string,
+    actor: { id: client.id, name: `${client.name} (інтеграція)` },
+  })
 
-  const result = await push?.json().catch(() => null) as { success?: boolean; error?: string } | null
-
-  if (!push?.ok || !result?.success) {
-    const message = result?.error ?? 'Маркетплейс не прийняв статус'
-    await logRequest(service, client.id, req, 502, started, message)
-    return NextResponse.json({ error: message }, { status: 502 })
+  if (!result.ok) {
+    const payload = await result.json().catch(() => ({})) as { error?: string }
+    await logRequest(service, client.id, req, result.status, started, payload.error)
+    return NextResponse.json(
+      { error: payload.error ?? 'Не вдалося змінити статус' }, { status: result.status })
   }
-
-  await logOrderEvent(service, order.id as string, 'status',
-    { old: order.status as string, new: status },
-    { id: client.id, name: `${client.name} (інтеграція)` })
-
-  await broadcastOrderChange(order.id as string, 'status')
-  await notifyIntegrations(order.id as string, 'order.status_changed', service)
 
   const response = { ok: true, status }
   await remember(service, client.id, idemKey, response)

@@ -54,14 +54,52 @@ export async function authorize(
   const header = req.headers.get('authorization') ?? ''
   const key = header.replace(/^Bearer\s+/i, '').trim()
 
-  const fail = (status: number, error: string, extra?: Record<string, unknown>) =>
-    ({ response: NextResponse.json({ error }, { status, headers: extra as never }) })
+  const service = createServiceClient()
+
+  /**
+   * Відмова теж потрапляє в журнал.
+   *
+   * Інакше підбір ключа не обмежувався нічим: лічильник частоти рахує рядки
+   * журналу, а невдалі спроби туди не лягали — тисяча спроб за хвилину
+   * виглядала як нуль запитів.
+   */
+  const fail = async (status: number, error: string, headers?: Record<string, string>) => {
+    await service.from('integration_requests').insert({
+      client_id: null,
+      method: req.method,
+      path: new URL(req.url).pathname,
+      status, ip,
+      error: error.slice(0, 200),
+    })
+    return { response: NextResponse.json({ error }, { status, headers }) }
+  }
+
+  /**
+   * Невдалі спроби з однієї адреси — окремий лічильник.
+   *
+   * Ліміт клієнта тут не допомагає: поки ключ не вгадано, клієнта немає, і
+   * прив'язувати лічильник нема до чого. Рахуємо за адресою.
+   */
+  const since401 = new Date(Date.now() - 60_000).toISOString()
+  const { count: denied } = await service
+    .from('integration_requests')
+    .select('id', { count: 'exact', head: true })
+    .is('client_id', null)
+    .eq('ip', ip)
+    .gte('created_at', since401)
+
+  if ((denied ?? 0) >= 20) {
+    return {
+      response: NextResponse.json(
+        { error: 'Забагато невдалих спроб' },
+        { status: 429, headers: { 'Retry-After': '60' } }),
+    }
+  }
 
   if (!key || key.length < 20) {
     return fail(401, 'Потрібен ключ: заголовок Authorization: Bearer <ключ>')
   }
 
-  const service = createServiceClient()
   const { data: rows } = await service
     .from('integration_clients')
     .select('id, name, scopes, rate_limit_per_min, webhook_url, key_hash, is_active')

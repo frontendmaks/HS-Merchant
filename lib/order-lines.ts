@@ -58,7 +58,18 @@ export function marketplaceLines(order: any): MarketplaceLine[] {
 }
 
 /** Materialises the lines on first open; afterwards the stored copy wins. */
-export async function ensureLines(service: Service, orderId: string): Promise<OrderLine[]> {
+export async function ensureLines(
+  service: Service,
+  orderId: string,
+  /**
+   * Готовий каталог, якщо викликач уже його має.
+   *
+   * Без цього сторінка на двісті замовлень вантажила довідник двісті разів —
+   * по п'ять тисяч товарів щоразу. Для одного замовлення різниці немає, для
+   * вибірки вона вирішальна.
+   */
+  prepared?: Awaited<ReturnType<typeof loadCatalog>>,
+): Promise<OrderLine[]> {
   const { data: stored } = await service
     .from('order_items').select('*').eq('order_id', orderId).order('position')
 
@@ -68,7 +79,7 @@ export async function ensureLines(service: Service, orderId: string): Promise<Or
     .from('orders').select('id, platform, raw').eq('id', orderId).single()
   if (!order) return []
 
-  const catalog = await loadCatalog(service)
+  const catalog = prepared ?? await loadCatalog(service)
   const lines = marketplaceLines(order).map((l, i) => buildLine(l, catalog, i))
   if (!lines.length) return []
 
