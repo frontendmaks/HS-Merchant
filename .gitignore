@@ -45,3 +45,4 @@ HS-Merchant
 .claude/launch.json
 collector/node_modules
 collector/.env
+bitrix-credentials.txt
