@@ -9,8 +9,10 @@
  * саме з цією сумою мають збігатись і комісія, і оголошена цінність накладної.
  */
 import { createServiceClient } from '@/lib/supabase/service'
-import { effectiveQty, foldSku, skuVariants } from '@/lib/order-items'
+import { effectiveQty, orderTotals, type OrderLine } from '@/lib/order-items'
 import { ensureLines, loadCatalog } from '@/lib/order-lines'
+import { buildResolver, type MatchBy } from '@/lib/integration-nomenclature'
+import { canRecordPicking, canTogglePaid, requiresPayment } from '@/lib/order-statuses'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -20,30 +22,20 @@ export const ORDER_FIELDS = `
   total, commission, weight, seats_amount,
   ttn, np_ttn_ref, ttn_created_at,
   cancel_reason, customer_comment, operator_comment,
-  is_paid, paid_at, created_at, updated_at
+  is_paid, paid_at, created_at, updated_at, raw
 `
 
 const ITEM_FIELDS = `
   id, order_id, position, title, unit, unit_weight,
   product_external_id, product_id,
-  marketplace_unit_price, marketplace_qty,
-  price_per_unit, ordered_qty, actual_qty, removed,
-  updated_at
+  marketplace_item_id, marketplace_unit_price, marketplace_qty, ordered_total,
+  price_per_unit, ordered_qty, actual_qty, removed, source,
+  created_at, updated_at
 `
 
-export interface ApiOrder {
-  id: string
-  external_id: string
-  platform: string
-  order_date: string | null
-  status: string | null
-  is_paid: boolean
-  customer: { name: string | null; phone: string | null }
-  delivery: { address: string | null; branch: string | null; ttn: string | null }
-  money: { total: number; commission: number; currency: 'UAH' }
-  comments: { customer: string | null; operator: string | null }
-  items: ApiOrderItem[]
-  updated_at: string | null
+const MARKETPLACE_NAMES: Record<string, string> = {
+  maudau: 'MauDau',
+  rozetka: 'Rozetka',
 }
 
 export interface ApiOrderItem {
@@ -51,13 +43,17 @@ export interface ApiOrderItem {
   position: number
   /** Назва так, як її бачить покупець на маркетплейсі */
   title: string
-  /** Номенклатура 1С — за цим зіставляє Бітрікс */
   nomenclature: {
     uid_1c: string | null
     code_1c: string | null
     sku: string | null
-    /** Назва з нашого каталогу, ближча до 1С за назву маркетплейсу */
+    /** Назва з нашого каталогу — ближча до 1С, ніж назва маркетплейсу */
     catalog_name: string | null
+    merchant_product_id: string | null
+    /** Як знайдено товар: product_id | external_id | sku | sku+title | null */
+    match_by: MatchBy
+    /** Артикул спільний на кілька позицій 1С — варто звірити */
+    ambiguous: boolean
   }
   unit: string
   unit_weight: number
@@ -66,17 +62,78 @@ export interface ApiOrderItem {
   /** Скільки зібрано фактично. null — ще не комплектували. */
   actual_qty: number | null
   removed: boolean
-  /** Сума за цією позицією з урахуванням фактичної кількості */
   line_total: number
+  /** Як позицію прислав маркетплейс — до будь-яких наших правок */
+  marketplace: {
+    item_id: string | null
+    unit_price: number | null
+    quantity: number | null
+    total: number | null
+  }
+  /** marketplace — рядок із замовлення; manual — доданий оператором */
+  source: string
+  updated_at: string | null
 }
 
-/**
- * Збирає замовлення у зовнішню форму.
- *
- * Номенклатура підтягується з каталогу: у рядку замовлення зберігається назва
- * маркетплейсу, а 1С знає товар за uid і кодом. Без цього зіставлення лягло б
- * на зіставлення назв — тобто на здогад.
- */
+export interface ApiOrder {
+  id: string
+  /** Номер маркетплейсу: MD-… або RZ-… */
+  external_id: string
+  source: {
+    platform: string
+    marketplace: string
+    /** Номер у самого маркетплейсу, без нашого префікса */
+    marketplace_order_id: string
+    /** Статус словами маркетплейсу, до нашого перекладу */
+    status_raw: string | null
+  }
+  order_date: string | null
+  status: string | null
+  /** Що з цим замовленням можна робити просто зараз */
+  can: {
+    record_picking: boolean
+    change_payment: boolean
+  }
+  payment: {
+    is_paid: boolean
+    paid_at: string | null
+    /** Статуси доставки вимагають оплати */
+    required_for_shipping: boolean
+  }
+  customer: { name: string | null; phone: string | null }
+  delivery: {
+    /** branch — відділення, courier — адреса, unknown — не вказано */
+    method: 'branch' | 'courier' | 'unknown'
+    branch: string | null
+    address: string | null
+    ttn: string | null
+    ttn_created_at: string | null
+    weight_kg: number | null
+    seats: number
+  }
+  money: {
+    /** Поточна сума: з фактичними кількостями, якщо комплектація вже була */
+    total: number
+    /** Сума, на яку оформив замовлення покупець */
+    ordered_total: number
+    /** Різниця після комплектації; від'ємна — зібрали менше */
+    diff: number
+    commission: number
+    currency: 'UAH'
+  }
+  comments: {
+    customer: string | null
+    operator: string | null
+    cancel_reason: string | null
+  }
+  items: ApiOrderItem[]
+  created_at: string | null
+  updated_at: string | null
+}
+
+/** Номер у маркетплейсу без нашого префікса — саме його знає їхня підтримка. */
+const stripPrefix = (externalId: string) => externalId.replace(/^(MD|RZ)-/, '')
+
 export async function buildOrders(
   service: Service,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,14 +145,13 @@ export async function buildOrders(
 
   // Створюємо рядки тим замовленням, яких ще ніхто не відкривав: інакше
   // зовнішня система побачила б замовлення без товарів і вирішила, що воно
-  // порожнє
+  // порожнє. Довідник вантажиться один на всю вибірку.
   const { data: have } = await service
     .from('order_items').select('order_id').in('order_id', ids)
   const haveLines = new Set((have ?? []).map(r => r.order_id as string))
-
   const missing = ids.filter(id => !haveLines.has(id))
+
   if (missing.length) {
-    // Довідник один на всю вибірку
     const catalog = await loadCatalog(service)
     for (const id of missing) await ensureLines(service, id, catalog)
   }
@@ -103,51 +159,8 @@ export async function buildOrders(
   const { data: items } = await service
     .from('order_items').select(ITEM_FIELDS).in('order_id', ids).order('position')
 
-  /**
-   * Товар у рядку впізнається трьома способами, і всі три потрібні.
-   *
-   * `product_id` — справжній зв'язок, але він є не скрізь. У
-   * `product_external_id` лежить то ідентифікатор сайту («883215»), то
-   * артикул («K0209») — залежно від того, що прислав маркетплейс. Зіставлення
-   * лише за одним із них залишало чотири рядки з шести без номенклатури 1С,
-   * тобто невидимими для Бітрікса.
-   */
-  const productIds = [...new Set(
-    (items ?? []).map(i => i.product_id).filter(Boolean) as string[])]
-  // Шукаємо обидва написання артикула: у базі кирилична «К», у замовленні
-  // латинська «K», і база їх не ототожнює
-  const refs = [...new Set(
-    (items ?? []).flatMap(i => skuVariants(i.product_external_id)))]
+  const resolver = await buildResolver(service, (items ?? []) as never)
 
-  const [{ data: byId }, { data: byRef }] = await Promise.all([
-    productIds.length
-      ? service.from('products')
-          .select('id, external_id, sku, name, uid_1c, code_1c').in('id', productIds)
-      : Promise.resolve({ data: [] as never[] }),
-    refs.length
-      ? service.from('products')
-          .select('id, external_id, sku, name, uid_1c, code_1c')
-          .or(`external_id.in.(${refs.join(',')}),sku.in.(${refs.join(',')})`)
-      : Promise.resolve({ data: [] as never[] }),
-  ])
-
-  type Row = { id: string; external_id: string | null; sku: string | null
-               name: string | null; uid_1c: string | null; code_1c: string | null }
-
-  const byUuid = new Map<string, Row>()
-  const byRefKey = new Map<string, Row>()
-  for (const p of [...(byId ?? []), ...(byRef ?? [])] as Row[]) {
-    byUuid.set(p.id, p)
-    if (p.external_id) byRefKey.set(p.external_id, p)
-    if (p.sku) byRefKey.set(foldSku(p.sku), p)
-  }
-
-  const resolve = (item: { product_id?: string | null; product_external_id?: string | null }) =>
-    (item.product_id ? byUuid.get(item.product_id) : null)
-    ?? (item.product_external_id
-        ? byRefKey.get(item.product_external_id) ?? byRefKey.get(foldSku(item.product_external_id))
-        : null)
-    ?? null
   const byOrder = new Map<string, typeof items>()
   for (const i of items ?? []) {
     const key = (i as unknown as { order_id: string }).order_id
@@ -155,18 +168,25 @@ export async function buildOrders(
   }
 
   return orders.map(o => {
-    const lines = (byOrder.get(o.id) ?? []).map(i => {
-      const p = resolve(i)
+    const raw = (byOrder.get(o.id) ?? [])
+    const totals = orderTotals(raw as unknown as OrderLine[])
+
+    const lines: ApiOrderItem[] = raw.map(i => {
+      const found = resolver.resolve(i as never)
+      const p = found.product
       const qty = effectiveQty(i as never)
       return {
         id: i.id as string,
         position: i.position as number,
         title: i.title as string,
         nomenclature: {
-          uid_1c: (p?.uid_1c as string) ?? null,
-          code_1c: (p?.code_1c as string) ?? null,
-          sku: (p?.sku as string) ?? null,
-          catalog_name: (p?.name as string) ?? null,
+          uid_1c: p?.uid_1c ?? null,
+          code_1c: p?.code_1c ?? null,
+          sku: p?.sku ?? null,
+          catalog_name: p?.name ?? null,
+          merchant_product_id: p?.id ?? null,
+          match_by: found.match_by,
+          ambiguous: found.ambiguous,
         },
         unit: i.unit as string,
         unit_weight: Number(i.unit_weight ?? 0),
@@ -175,26 +195,65 @@ export async function buildOrders(
         actual_qty: i.actual_qty == null ? null : Number(i.actual_qty),
         removed: !!i.removed,
         line_total: i.removed ? 0 : Math.round(qty * Number(i.price_per_unit ?? 0) * 100) / 100,
+        marketplace: {
+          item_id: (i.marketplace_item_id as string) ?? null,
+          unit_price: i.marketplace_unit_price == null ? null : Number(i.marketplace_unit_price),
+          quantity: i.marketplace_qty == null ? null : Number(i.marketplace_qty),
+          total: i.ordered_total == null ? null : Number(i.ordered_total),
+        },
+        source: i.source as string,
+        updated_at: i.updated_at as string,
       }
     })
 
     return {
       id: o.id,
       external_id: o.external_id,
-      platform: o.platform,
+      source: {
+        platform: o.platform,
+        marketplace: MARKETPLACE_NAMES[o.platform] ?? o.platform,
+        marketplace_order_id: stripPrefix(o.external_id),
+        status_raw: o.status_raw ?? null,
+      },
       order_date: o.order_date,
       status: o.status,
-      is_paid: !!o.is_paid,
+      can: {
+        record_picking: canRecordPicking(o.status, o.ttn),
+        change_payment: canTogglePaid(o.status),
+      },
+      payment: {
+        is_paid: !!o.is_paid,
+        paid_at: o.paid_at ?? null,
+        required_for_shipping: true,
+      },
       customer: { name: o.customer_name, phone: o.customer_phone },
-      delivery: { address: o.address, branch: o.branch, ttn: o.ttn },
+      delivery: {
+        method: o.branch ? 'branch' : o.address ? 'courier' : 'unknown',
+        branch: o.branch,
+        address: o.address,
+        ttn: o.ttn,
+        ttn_created_at: o.ttn_created_at ?? null,
+        weight_kg: o.weight == null ? null : Number(o.weight),
+        seats: Number(o.seats_amount ?? 1),
+      },
       money: {
         total: Number(o.total ?? 0),
+        ordered_total: totals.ordered,
+        diff: totals.diff,
         commission: Number(o.commission ?? 0),
         currency: 'UAH' as const,
       },
-      comments: { customer: o.customer_comment, operator: o.operator_comment },
+      comments: {
+        customer: o.customer_comment,
+        operator: o.operator_comment,
+        cancel_reason: o.cancel_reason,
+      },
       items: lines,
+      created_at: o.created_at,
       updated_at: o.updated_at,
     }
   })
 }
+
+/** Чи вимагає цей статус оплати — для довідки у відповіді. */
+export { requiresPayment }
