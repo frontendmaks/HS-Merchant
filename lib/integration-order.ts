@@ -9,7 +9,7 @@
  * саме з цією сумою мають збігатись і комісія, і оголошена цінність накладної.
  */
 import { createServiceClient } from '@/lib/supabase/service'
-import { effectiveQty, foldSku } from '@/lib/order-items'
+import { effectiveQty, foldSku, skuVariants } from '@/lib/order-items'
 import { ensureLines, loadCatalog } from '@/lib/order-lines'
 
 type Service = ReturnType<typeof createServiceClient>
@@ -114,8 +114,10 @@ export async function buildOrders(
    */
   const productIds = [...new Set(
     (items ?? []).map(i => i.product_id).filter(Boolean) as string[])]
+  // Шукаємо обидва написання артикула: у базі кирилична «К», у замовленні
+  // латинська «K», і база їх не ототожнює
   const refs = [...new Set(
-    (items ?? []).map(i => i.product_external_id).filter(Boolean) as string[])]
+    (items ?? []).flatMap(i => skuVariants(i.product_external_id)))]
 
   const [{ data: byId }, { data: byRef }] = await Promise.all([
     productIds.length

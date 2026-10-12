@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { authorize, isDenied, logRequest, replayed, remember } from '@/lib/integration-auth'
 import { buildOrders, ORDER_FIELDS } from '@/lib/integration-order'
 import { logOrderEvent } from '@/lib/order-events'
-import { orderTotals, shipmentWeight, foldSku, type OrderLine } from '@/lib/order-items'
+import {
+  orderTotals, shipmentWeight, foldSku, skuVariants, type OrderLine,
+} from '@/lib/order-items'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { canRecordPicking } from '@/lib/order-statuses'
@@ -82,7 +84,7 @@ export async function POST(
   // Те саме трискладове зіставлення, що й при читанні: у рядку може стояти
   // ідентифікатор сайту, артикул або справжній зв'язок із каталогом
   const productIds = (lines ?? []).map(l => l.product_id).filter(Boolean) as string[]
-  const refs = (lines ?? []).map(l => l.product_external_id).filter(Boolean) as string[]
+  const refs = [...new Set((lines ?? []).flatMap(l => skuVariants(l.product_external_id)))]
 
   const [{ data: byId }, { data: byRef }] = await Promise.all([
     productIds.length

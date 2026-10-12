@@ -263,3 +263,23 @@ export function shipmentWeight(lines: OrderLine[]): WeightBreakdown {
 
   return { kg: round3(kg), assumed }
 }
+
+/**
+ * Обидва написання артикула — кирилицею і латиницею.
+ *
+ * Наші артикули набрані кириличною «К», маркетплейс повертає латинську «K».
+ * Символи різні, рядки не рівні, і пошук у базі за одним написанням не
+ * знаходить інше — foldSku рятує лише те, що вже вибране з бази.
+ */
+const BACK: Record<string, string> = {
+  A: 'А', B: 'В', E: 'Е', I: 'І', K: 'К', M: 'М',
+  H: 'Н', O: 'О', P: 'Р', C: 'С', T: 'Т', X: 'Х',
+}
+
+export function skuVariants(raw: string | null | undefined): string[] {
+  const s = (raw ?? '').trim()
+  if (!s) return []
+  const latin = foldSku(s)
+  const cyrillic = latin.replace(/[ABEIKMHOPCTX]/g, c => BACK[c] ?? c)
+  return [...new Set([s, latin, cyrillic])]
+}
