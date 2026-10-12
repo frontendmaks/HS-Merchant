@@ -59,7 +59,10 @@ export interface ApiOrderItem {
   unit_weight: number
   price_per_unit: number
   ordered_qty: number
-  /** Скільки зібрано фактично. null — ще не комплектували. */
+  /**
+   * Скільки зібрано фактично, в одиниці рядка — кілограми для вагового
+   * товару, штуки для штучного. null — ще не комплектували.
+   */
   actual_qty: number | null
   removed: boolean
   line_total: number
@@ -192,7 +195,8 @@ export async function buildOrders(
         unit_weight: Number(i.unit_weight ?? 0),
         price_per_unit: Number(i.price_per_unit ?? 0),
         ordered_qty: Number(i.ordered_qty ?? 0),
-        actual_qty: i.actual_qty == null ? null : Number(i.actual_qty),
+        // У базі це пачки; назовні — одиниця товару, як і ordered_qty
+        actual_qty: i.actual_qty == null ? null : qty,
         removed: !!i.removed,
         line_total: i.removed ? 0 : Math.round(qty * Number(i.price_per_unit ?? 0) * 100) / 100,
         marketplace: {

@@ -109,13 +109,30 @@ export async function POST(
       continue
     }
 
+    /**
+     * Зовні рахуємо в одиницях товару, всередині — у пачках.
+     *
+     * Ваги показують кілограми, і саме їх природно передати. Але в базі
+     * actual_qty зберігається в пачках: ковбаса на 0,4 кг — це одна пачка, а
+     * не 0,4. Без переводу 0,4 читалось як чотири десятих пачки, тобто 160
+     * грамів, і сума падала втричі.
+     */
+    const weight = Number(line.unit_weight ?? 0)
+    const packs = line.unit === 'кг' && weight > 0
+      ? Math.round((qty / weight) * 1000) / 1000
+      : qty
+
     await service.from('order_items').update({
-      actual_qty: want.removed ? null : qty,
+      actual_qty: want.removed ? null : packs,
       removed: !!want.removed,
       updated_at: now,
     }).eq('id', line.id)
 
-    applied.push({ line_id: line.id, title: line.title, actual_qty: qty, removed: !!want.removed })
+    applied.push({
+      line_id: line.id, title: line.title,
+      actual_qty: qty, unit: line.unit, packs,
+      removed: !!want.removed,
+    })
   }
 
   // Перечитуємо й перераховуємо — щоб суми рахувались з того, що лягло в базу,
