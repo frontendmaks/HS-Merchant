@@ -10,6 +10,7 @@
  */
 import { createServiceClient } from '@/lib/supabase/service'
 import { effectiveQty } from '@/lib/order-items'
+import { ensureLines } from '@/lib/order-lines'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -23,7 +24,7 @@ export const ORDER_FIELDS = `
 `
 
 const ITEM_FIELDS = `
-  id, position, title, unit, unit_weight,
+  id, order_id, position, title, unit, unit_weight,
   product_external_id, product_id,
   marketplace_unit_price, marketplace_qty,
   price_per_unit, ordered_qty, actual_qty, removed,
@@ -84,6 +85,18 @@ export async function buildOrders(
   if (!orders.length) return []
 
   const ids = orders.map(o => o.id as string)
+
+  // Створюємо рядки тим замовленням, яких ще ніхто не відкривав: інакше
+  // зовнішня система побачила б замовлення без товарів і вирішила, що воно
+  // порожнє
+  const { data: have } = await service
+    .from('order_items').select('order_id').in('order_id', ids)
+  const haveLines = new Set((have ?? []).map(r => r.order_id as string))
+
+  for (const id of ids) {
+    if (!haveLines.has(id)) await ensureLines(service, id)
+  }
+
   const { data: items } = await service
     .from('order_items').select(ITEM_FIELDS).in('order_id', ids).order('position')
 
