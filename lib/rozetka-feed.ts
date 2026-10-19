@@ -1,3 +1,4 @@
+import { promoFor, oldPriceFor } from '@/lib/price-promo'
 import {
   calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock,
 } from '@/lib/feed-xml'
@@ -107,9 +108,10 @@ export function generateRozetkaYML(feed: any, ctx: RozetkaFeedContext): {
       continue
     }
 
-    const oldRaw = p.price_old && Number(p.price_old) > Number(p.price)
+    const realOld = p.price_old && Number(p.price_old) > Number(p.price)
       ? (calcMarketplacePrice(Number(p.price_old), attrs) ?? Number(p.price_old))
       : null
+    const oldRaw = oldPriceFor(price, realOld, promoFor(feed.promos ?? [], p))
 
     // Characteristics, named and numbered the way Rozetka knows them. Where the
     // attribute takes values from its own list, send the id too — matching on

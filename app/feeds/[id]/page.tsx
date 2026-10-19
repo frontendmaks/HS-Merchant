@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { notFound } from 'next/navigation'
 import FeedEditor from './FeedEditor'
+import PricePromos from './PricePromos'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,12 +48,21 @@ export default async function FeedPage({ params }: { params: Promise<{ id: strin
   const categories = [...new Set(products.map(p => p.category_name).filter(Boolean))] as string[]
 
   return (
-    <FeedEditor
-      feed={feed}
-      feedProducts={feedProducts ?? []}
-      allProducts={products}
-      categories={categories.sort()}
-      marketplaces={marketplaces ?? []}
-    />
+    <>
+      <div className="mb-3">
+        <PricePromos
+          feedId={feed.id as string}
+          categories={categories.sort()}
+          products={products.map(p => ({ id: p.id as string, name: p.name as string }))}
+        />
+      </div>
+      <FeedEditor
+        feed={feed}
+        feedProducts={feedProducts ?? []}
+        allProducts={products}
+        categories={categories.sort()}
+        marketplaces={marketplaces ?? []}
+      />
+    </>
   )
 }

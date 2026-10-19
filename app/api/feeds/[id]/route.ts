@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { sanitizeSku } from '@/lib/transliterate'
 import { NextRequest, NextResponse } from 'next/server'
+import { loadPromos, promoFor, oldPriceFor } from '@/lib/price-promo'
 import {
   calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock,
 } from '@/lib/feed-xml'
@@ -96,6 +97,9 @@ export async function GET(
     }
   }
 
+  // Штучні акції — один запит на весь фід, не на кожен товар
+  feed.promos = await loadPromos(supabase, feed.id)
+
   const { xml, offersCount, errorsCount, errors } = isMaudau
     ? generateMaudauYML(feed, slugToPortalId, catAttrsMap)
     : isRozetka
@@ -149,9 +153,10 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       const attrsXml = Object.entries(mergedAttrs)
         .map(([k, v]) => `<param name="${k}">${v}</param>`)
         .join('\n        ')
-      const oldPriceRaw = p.price_old && Number(p.price_old) > Number(p.price)
+      const realOld = p.price_old && Number(p.price_old) > Number(p.price)
         ? (calcMarketplacePrice(Number(p.price_old), attrs) ?? Number(p.price_old))
         : null
+      const oldPriceRaw = oldPriceFor(price, realOld, promoFor(feed.promos ?? [], p))
       const oldPriceLine = oldPriceRaw && oldPriceRaw > price ? `\n      <oldprice>${oldPriceRaw}</oldprice>` : ''
 
       return `
@@ -333,9 +338,13 @@ function generateMaudauYML(
 
       // Sale price: p.price = current (discounted), p.price_old = original price before discount
       // Only include if price_old > price (genuine sale) and no manual marketplace price override
-      const oldPriceM = !customParamPrice && p.price_old && Number(p.price_old) > Number(p.price)
+      const realOldM = !customParamPrice && p.price_old && Number(p.price_old) > Number(p.price)
         ? (calcMarketplacePrice(Number(p.price_old), p.attributes as Record<string, string> | null) ?? Number(p.price_old))
         : null
+      // Намальована акція діє й там, де справжньої знижки немає
+      const oldPriceM = customParamPrice
+        ? realOldM
+        : oldPriceFor(unitPrice, realOldM, promoFor(feed.promos ?? [], p))
       const oldPriceLine = oldPriceM && oldPriceM > unitPrice ? `\n      <price_old>${oldPriceM}</price_old>` : ''
 
       return `    <offer id="${offerId}" available="${available}">
