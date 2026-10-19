@@ -34,6 +34,7 @@ const nav = [
       { href: '/orders/site', label: 'Сайт', roles: PAGE_ROLES.orders },
     ],
   },
+  { href: '/customers', label: 'Клієнти',       icon: '☻', roles: PAGE_ROLES.customers },
   { href: '/news',     label: 'Новини',         icon: '◫', roles: PAGE_ROLES.news },
   {
     href: '/requests', label: 'Запити', icon: '✉', roles: PAGE_ROLES.requests,

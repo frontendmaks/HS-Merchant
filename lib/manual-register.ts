@@ -11,7 +11,7 @@
  */
 import { createServiceClient } from '@/lib/supabase/service'
 import { readRange, writeCell, sheetsConfigured } from '@/lib/google-sheets'
-import { nextManualNumber } from '@/lib/manual-orders'
+import { MANUAL_PLATFORM, nextManualNumber } from '@/lib/manual-orders'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -39,12 +39,30 @@ export interface ReservedNumber {
   note: string | null
 }
 
+/** Номери, які ми вже видали на цю дату — хай навіть у таблиці їх стерли. */
+async function takenNumbers(service: Service, date: string): Promise<Set<number>> {
+  const { data } = await service
+    .from('orders')
+    .select('manual_number')
+    .eq('platform', MANUAL_PLATFORM)
+    .eq('delivery_date', date)
+    .not('manual_number', 'is', null)
+
+  return new Set((data ?? []).map(o => Number(o.manual_number)))
+}
+
 /**
  * Перший вільний номер і запис імені навпроти нього.
  *
- * Вільний — це перший рядок, де колонка «ПІБ» порожня. Колір комірки до уваги
- * не береться: червоним там позначають щось своє, але ім'я в такому рядку
- * стоїть, тобто номер зайнятий.
+ * Вільний — це рядок, де колонка «ПІБ» порожня **і** номер якого ми ще не
+ * видавали. Друга умова важить не менше за першу: рядок могли очистити вже
+ * після того, як номер пішов у роботу — скасували замовлення, перенесли,
+ * просто прибрали зайве, — і тоді порожня комірка означає не «номер вільний»,
+ * а «про нього забули». Видати його вдруге означало б два замовлення під
+ * одним номером у складському журналі.
+ *
+ * Колір комірки до уваги не береться: червоним там позначають щось своє, але
+ * ім'я в такому рядку стоїть, тобто номер зайнятий.
  *
  * Між читанням і записом хтось міг зайняти рядок руками, тому перед записом
  * комірка перечитується. Вікно лишається крихітним, і для журналу телефонних
@@ -71,24 +89,36 @@ export async function reserveNumber(
   }
 
   const tab = tabNameFor(date)
+  const taken = await takenNumbers(service, date)
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const rows = await readRange(spreadsheetId, `'${tab}'!A1:B300`)
     if (!rows) return fallback('Таблиця не відповіла')
 
-    // Рядок 1 — заголовки; шукаємо перший із номером і порожнім ПІБ
+    // Рядок 1 — заголовки; шукаємо перший із номером, порожнім ПІБ і таким
+    // номером, якого ми ще не видавали
     let targetRow = -1
     let number = 0
+    let skipped = 0
     for (let i = 1; i < rows.length; i++) {
       const n = Number((rows[i]?.[0] ?? '').toString().trim())
       const name = (rows[i]?.[1] ?? '').toString().trim()
       if (!Number.isFinite(n) || n <= 0) continue
-      if (!name) { targetRow = i + 1; number = n; break }
+      if (name) continue
+      if (taken.has(n)) { skipped++; continue }
+      targetRow = i + 1; number = n; break
     }
 
     if (targetRow < 0) {
       return fallback(`У вкладці ${tab} не лишилось вільних номерів`)
     }
+
+    // Якщо дорогою трапились стерті рядки з уже виданими номерами — кажемо
+    // про це: у журналі вони виглядають вільними, і людина має знати, чому
+    // її замовлення отримало не той номер, який вона бачить на екрані
+    const note = skipped > 0
+      ? `Рядків із уже виданими номерами пропущено: ${skipped}`
+      : null
 
     // Перечитуємо саме цю комірку — раптом її щойно зайняли
     const fresh = await readRange(spreadsheetId, `'${tab}'!B${targetRow}`)
@@ -97,7 +127,7 @@ export async function reserveNumber(
     const written = await writeCell(spreadsheetId, `'${tab}'!B${targetRow}`, customerName)
     if (!written) return fallback('Не вдалося записати в таблицю')
 
-    return { number, source: 'sheet', note: null }
+    return { number, source: 'sheet', note }
   }
 
   return fallback('Номер зайняли під час запису — спробуйте ще раз')

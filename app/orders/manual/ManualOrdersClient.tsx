@@ -571,12 +571,23 @@ function Overlay({ children, onClose }: { children: React.ReactNode; onClose: ()
  * поле можна спокійно очистити й почати спочатку, а кому вважаємо точкою —
  * на цифровій клавіатурі вона під рукою.
  */
-function NumField({ value, onChange, className }: {
+function NumField({ value, onChange, className, autoFocus }: {
   value: number
   onChange: (v: number) => void
   className?: string
+  autoFocus?: boolean
 }) {
   const [draft, setDraft] = useState(value ? String(value) : '')
+  const box = useRef<HTMLInputElement>(null)
+
+  // Щойно доданий рядок сам підставляє курсор під кількість: оператор
+  // називає її вголос наступним словом після назви товару
+  useEffect(() => {
+    if (!autoFocus || !box.current) return
+    box.current.focus()
+    box.current.select()
+    box.current.scrollIntoView({ block: 'nearest' })
+  }, [autoFocus])
 
   // Значення змінили зовні (новий рядок, перерахунок) — підхоплюємо
   useEffect(() => {
@@ -586,6 +597,7 @@ function NumField({ value, onChange, className }: {
 
   return (
     <input
+      ref={box}
       type="text"
       inputMode="decimal"
       value={draft}
@@ -607,6 +619,7 @@ function ProductPicker({ lines, onChange, total }: {
   total: number
 }) {
   const [query, setQuery] = useState('')
+  const [added, setAdded] = useState<string | null>(null)
   const [catalogue, setCatalogue] = useState<Product[] | null>(null)
 
   /**
@@ -647,8 +660,10 @@ function ProductPicker({ lines, onChange, total }: {
     // саме так його й замовляють уголос
     const pack = p.pack ?? 0
     const qty = p.unit === 'кг' && pack > 0 ? pack : 1
+    const key = `${p.id}-${Date.now()}`
+    setAdded(key)
     onChange([...lines, {
-      key: `${p.id}-${Date.now()}`,
+      key,
       product_id: p.id,
       title: p.name,
       unit: p.unit,
@@ -721,6 +736,7 @@ function ProductPicker({ lines, onChange, total }: {
                 <div className="flex items-center gap-1.5 mt-1.5">
                   <NumField
                     value={l.qty}
+                    autoFocus={l.key === added}
                     onChange={v => patch(l.key, { qty: v })}
                     className="w-20 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
                                text-white text-xs focus:outline-none focus:border-red-500"
