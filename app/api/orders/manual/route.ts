@@ -13,6 +13,7 @@ import { reserveNumber } from '@/lib/manual-register'
 import { withDelivery } from '@/lib/delivery-fee'
 import { pushOrderToBitrix } from '@/lib/bitrix-deal'
 import { bitrixConfigured } from '@/lib/bitrix'
+import { sendOrderSheet, telegramConfigured } from '@/lib/telegram'
 
 /**
  * POST /api/orders/manual — прийняти замовлення по телефону.
@@ -172,11 +173,22 @@ export async function POST(req: NextRequest) {
     ? await pushOrderToBitrix(service, created.id)
     : { error: 'Бітрікс не налаштовано' }
 
+  /**
+   * Бланк — у чат складу.
+   *
+   * Склад уже вирахувано з адреси, а в кожного складу свій чат: посилання
+   * доїжджає туди, де замовлення збиратимуть, без пересилань руками.
+   */
+  const chat = telegramConfigured()
+    ? await sendOrderSheet(service, created.id)
+    : { error: 'Телеграм не налаштовано' }
+
   return NextResponse.json({
     ok: true,
     id: created.id,
     deal_id: 'dealId' in crm ? crm.dealId : null,
     crm_error: 'error' in crm ? crm.error : null,
+    chat_error: 'error' in chat ? chat.error : null,
     number: created.manual_number,
     number_source: reserved.source,
     number_note: reserved.note,

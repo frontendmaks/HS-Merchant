@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { isPhoneComplete, phoneKey } from '@/lib/phone'
 import { deliveryFeeFor } from '@/lib/delivery-fee'
 import Overlay, { ProductPicker, field, money, type Line } from '@/components/OrderLinesPicker'
+import TelegramChats from './TelegramChats'
 
 interface Recent {
   id: string; external_id: string; manual_number: number | null
@@ -20,10 +21,11 @@ interface Customer {
 }
 
 
-export default function ManualOrdersClient({ recent, warehouses, initial }: {
+export default function ManualOrdersClient({ recent, warehouses, initial, canSetChats }: {
   recent: Recent[]
   warehouses: string[]
   initial: { date: string; slot: string; slots: SlotOption[] }
+  canSetChats?: boolean
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -45,6 +47,8 @@ export default function ManualOrdersClient({ recent, warehouses, initial }: {
           + Нове замовлення
         </button>
       </div>
+
+      {canSetChats && <TelegramChats />}
 
       {recent.length === 0 ? (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-6 py-12 text-center">
@@ -138,6 +142,7 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
     note?: string | null
     deal_id?: number | null
     crm_error?: string | null
+    chat_error?: string | null
   } | null>(null)
 
   // Клієнти з минулих замовлень.
@@ -146,29 +151,48 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
   // але постійний клієнт іноді називається раніше, ніж диктує номер.
   const [byPhone, setByPhone] = useState<Customer[]>([])
   const [byName, setByName] = useState<Customer[]>([])
+  const [byAddress, setByAddress] = useState<Customer[]>([])
   const [picked, setPicked] = useState<Customer | null>(null)
 
+  /**
+   * Підказка з'являється з другого символа — і в полі телефону, і в полі ПІБ.
+   *
+   * Пошук один на обидва поля: він шукає по імені, телефону й адресі разом,
+   * бо оператор набирає те, що почув, а не те, що підходить під назву поля.
+   */
   const phoneTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (phoneTimer.current) clearTimeout(phoneTimer.current)
-    if (phoneKey(phone).length < 4 || picked) { setByPhone([]); return }
+    if (phone.trim().length < 2 || picked?.phone === phone) { setByPhone([]); return }
     phoneTimer.current = setTimeout(async () => {
       const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(phone)}`)
       const d = await r.json().catch(() => ({}))
       setByPhone(d.customers ?? [])
-    }, 250)
+    }, 200)
   }, [phone, picked])
 
   const nameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (nameTimer.current) clearTimeout(nameTimer.current)
-    if (name.trim().length < 3 || picked) { setByName([]); return }
+    if (name.trim().length < 2 || picked?.names?.[0] === name) { setByName([]); return }
     nameTimer.current = setTimeout(async () => {
       const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(name)}`)
       const d = await r.json().catch(() => ({}))
       setByName(d.customers ?? [])
-    }, 300)
+    }, 200)
   }, [name, picked])
+
+  // Адреса теж шукає: постійному клієнту її диктують рідко — її впізнають
+  const addrSearch = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (addrSearch.current) clearTimeout(addrSearch.current)
+    if (address.trim().length < 4 || picked) { setByAddress([]); return }
+    addrSearch.current = setTimeout(async () => {
+      const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(address)}`)
+      const d = await r.json().catch(() => ({}))
+      setByAddress(d.customers ?? [])
+    }, 300)
+  }, [address, picked])
 
   /** Що саме підставила база — щоб відрізнити це від набраного руками. */
   const [filled, setFilled] = useState<{ name: string; address: string } | null>(null)
@@ -182,7 +206,7 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
     if (pickedName) setName(pickedName)
     if (pickedAddress) setAddress(pickedAddress)
     setFilled({ name: pickedName, address: pickedAddress })
-    setByPhone([]); setByName([])
+    setByPhone([]); setByName([]); setByAddress([])
   }
 
   /**
@@ -287,6 +311,7 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
         number: d.number,
         source: d.number_source, note: d.number_note,
         deal_id: d.deal_id ?? null, crm_error: d.crm_error ?? null,
+        chat_error: d.chat_error ?? null,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -322,6 +347,14 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
               У Бітрікс не потрапило{done.crm_error ? `: ${done.crm_error}` : ''}.
               Замовлення прийняте — передайте його в CRM вручну.
             </div>
+          )}
+          {done.chat_error ? (
+            <div className="mt-2 bg-amber-950/40 border border-amber-900 rounded-lg
+                            px-3 py-2 text-amber-400 text-xs">
+              Бланк у чат складу не пішов: {done.chat_error}
+            </div>
+          ) : (
+            <div className="mt-2 text-emerald-500 text-xs">Бланк надіслано в чат складу</div>
           )}
           <button onClick={onCreated}
             className="mt-5 bg-red-600 hover:bg-red-500 text-white text-sm px-4 py-2 rounded-lg">
@@ -407,12 +440,26 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
             )}
           </div>
 
-          <div>
+          <div className="relative">
             <label className="text-zinc-400 text-xs block mb-1">
               Адреса <span className="text-red-500">*</span>
             </label>
             <input value={address} onChange={e => setAddress(e.target.value)}
               placeholder="Львів, вул. Городоцька, 120, кв. 5" className={field} />
+            {byAddress.length > 0 && (
+              <div className="absolute z-20 left-0 right-0 mt-1 bg-zinc-800 border border-zinc-700
+                              rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                {byAddress.map(c => (
+                  <button key={c.key} onClick={() => pick(c)}
+                    className="w-full text-left px-3 py-2 hover:bg-zinc-700 transition-colors">
+                    <div className="text-white text-sm truncate">{c.addresses[0] ?? c.phone}</div>
+                    <div className="text-zinc-500 text-xs truncate">
+                      {c.names[0] ?? 'без імені'} · {c.phone}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
             {picked && picked.addresses.length > 1 && (
               <div className="flex gap-1.5 mt-1.5 flex-wrap">
                 {picked.addresses.slice(0, 4).map(a => (

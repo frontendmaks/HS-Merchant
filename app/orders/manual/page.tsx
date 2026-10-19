@@ -32,6 +32,9 @@ export default async function ManualOrdersPage() {
       recent={recent ?? []}
       warehouses={warehouses}
       initial={{ ...start, slots: slotsForDate(start.date) }}
+      // Прив'язка чатів — разове налаштування, і міняти його має той, хто
+      // відповідає за налаштування, а не кожен, хто приймає замовлення
+      canSetChats={role === 'super_admin' || role === 'admin'}
     />
   )
 }
