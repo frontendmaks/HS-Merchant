@@ -12,6 +12,10 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/favicon') ||
     pathname.match(/\.(svg|png|ico|jpg|jpeg|webp)$/) ||
     pathname.startsWith('/api/auth') ||
+    // Бланк замовлення для складу: комірник не має акаунта в Мерчанті, а
+    // замовлення отримати мусить. Захищає довгий випадковий токен у самій
+    // адресі — сторінка перевіряє його й без нього нічого не показує.
+    pathname.startsWith('/zamovlennya/') ||
     // These use the service-role key and check the caller themselves
     pathname.startsWith('/api/')
   ) {
