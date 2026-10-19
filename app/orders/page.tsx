@@ -1,193 +1,119 @@
 export const dynamic = 'force-dynamic'
 
-import { Suspense } from 'react'
+import Link from 'next/link'
 import { createServiceClient } from '@/lib/supabase/service'
-import { getCurrentRole, canAccess } from '@/lib/getRole'
-import { IN_PROGRESS_STATUSES, SHIPPING_STATUSES, isInProgress, isShipping } from '@/lib/order-statuses'
-import OrdersToolbar from './OrdersToolbar'
-import MonthTabs from './MonthTabs'
-import OrderRow from './OrderRow'
+import { getCurrentRole } from '@/lib/getRole'
+import { isInProgress, isNew } from '@/lib/order-statuses'
+import { orderSource, platformLabel, processingHref } from '@/lib/order-source'
+import StatusSelect from './StatusSelect'
 import WideScroll from './WideScroll'
-import { arrivalTime } from '@/lib/order-arrival'
 
-const UA_MONTHS = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень']
+/**
+ * Оглядова вкладка: що прийшло і звідки.
+ *
+ * Опрацьовують замовлення не тут — маркетплейсне потребує ТТН і комісії,
+ * замовлення з сайту — складу й періоду доставки, і зводити обидва набори
+ * полів в один рядок означало б показувати оператору половину порожніх
+ * клітинок. Тут видно потік і можна перевести статус; решта — за посиланням
+ * у своїй вкладці.
+ */
 
-function getMonthTabs(currentMonth: string) {
-  const tabs: { value: string; label: string }[] = []
-  const [curYear, curMonthNum] = currentMonth.split('-').map(Number)
-  for (let y = 2026; y <= curYear; y++) {
-    const maxM = y === curYear ? curMonthNum : 12
-    for (let m = 1; m <= maxM; m++) {
-      const value = `${y}-${String(m).padStart(2, '0')}`
-      tabs.push({ value, label: `${UA_MONTHS[m - 1]} ${y}` })
-    }
-  }
-  return tabs
+const UA_MONTHS = ['Січня', 'Лютого', 'Березня', 'Квітня', 'Травня', 'Червня',
+  'Липня', 'Серпня', 'Вересня', 'Жовтня', 'Листопада', 'Грудня']
+
+function shortDate(date: string | null) {
+  if (!date) return '—'
+  const [, m, d] = date.split('-')
+  return `${Number(d)} ${UA_MONTHS[Number(m) - 1] ?? ''}`
 }
 
-function monthDateRange(month: string): { from: string; to: string } {
-  const [y, m] = month.split('-').map(Number)
-  const from = `${month}-01`
-  const lastDay = new Date(y, m, 0).getDate()
-  const to = `${month}-${String(lastDay).padStart(2, '0')}`
-  return { from, to }
-}
+const money = (n: number | null) =>
+  (n ?? 0).toLocaleString('uk-UA', { maximumFractionDigits: 0 }) + ' ₴'
 
-function platformBadge(platform: string | null) {
-  const p = platform || ''
-  const cls = p === 'maudau'
-    ? 'bg-purple-900 text-purple-300'
-    : p === 'rozetka'
-    ? 'bg-pink-900 text-pink-300'
-    : 'bg-zinc-700 text-zinc-300'
+function SourceCard({ title, href, orders }: {
+  title: string
+  href: string
+  orders: { status: string | null; total: number | null }[]
+}) {
+  const fresh = orders.filter(o => isNew(o.status)).length
+  const working = orders.filter(o => isInProgress(o.status) && !isNew(o.status)).length
+  const sum = orders.reduce((s, o) => s + (o.total ?? 0), 0)
+
   return (
-    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
-      {p === 'maudau' ? 'MauDau' : p === 'rozetka' ? 'Rozetka' : p}
-    </span>
+    <Link
+      href={href}
+      className="bg-zinc-900 rounded-xl p-4 border border-zinc-800 hover:border-zinc-700
+                 transition-colors block"
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-zinc-300 text-sm font-semibold">{title}</span>
+        <span className="text-zinc-500 text-xs">Опрацювати →</span>
+      </div>
+      <div className="flex items-end gap-4 mt-2">
+        <div>
+          <div className="text-3xl font-bold text-white">{orders.length}</div>
+          <div className="text-zinc-500 text-xs">за місяць · {money(sum)}</div>
+        </div>
+        <div className="ml-auto text-right">
+          <div className="text-zinc-400 text-xs">
+            нових <span className="text-white font-semibold">{fresh}</span>
+          </div>
+          <div className="text-zinc-400 text-xs">
+            у роботі <span className="text-white font-semibold">{working}</span>
+          </div>
+        </div>
+      </div>
+    </Link>
   )
 }
 
-function pct(part: number, total: number) {
-  if (!total) return '0%'
-  return (part / total * 100).toFixed(1) + '%'
-}
-
-interface SearchParams {
-  platform?: string
-  status?: string
-  search?: string
-  month?: string
-}
-
-export default async function OrdersPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>
-}) {
-  const sp = await searchParams
-  const platform = sp.platform || ''
-  const statusFilter = sp.status || ''
-  const search = sp.search || ''
-  const currentMonth = new Date().toISOString().slice(0, 7)
-  const selectedMonth = sp.month || currentMonth
-
-  const { from, to } = monthDateRange(selectedMonth)
-  const tabs = getMonthTabs(currentMonth)
+export default async function OrdersOverviewPage() {
+  const month = new Date().toISOString().slice(0, 7)
+  const [year, m] = month.split('-').map(Number)
+  const from = `${month}-01`
+  const to = `${month}-${String(new Date(year, m, 0).getDate()).padStart(2, '0')}`
 
   const role = await getCurrentRole()
   const readOnly = role === 'viewer'
-  const canSeeJournal = canAccess('orderJournal', role)
 
   const supabase = createServiceClient()
-
-  const statsQuery = supabase
+  const { data } = await supabase
     .from('orders')
-    .select('platform,status,total,commission')
-    .gte('order_date', from)
-    .lte('order_date', to)
-
-  let query = supabase
-    .from('orders')
-    .select('*')
+    .select('id, external_id, manual_number, platform, order_date, customer_name, total, status, delivery_date, delivery_slot')
     .gte('order_date', from)
     .lte('order_date', to)
     .order('order_date', { ascending: false })
     .order('created_at', { ascending: false })
 
-  if (platform) query = query.eq('platform', platform)
-  if (statusFilter === 'other') {
-    query = query.in('status', IN_PROGRESS_STATUSES)
-  } else if (statusFilter === 'shipping') {
-    query = query.in('status', SHIPPING_STATUSES)
-  } else if (statusFilter) {
-    query = query.eq('status', statusFilter)
-  }
-  if (search) {
-    // Comments carry addresses and phone numbers the other fields do not, so
-    // they are worth searching too
-    query = query.or(
-      `customer_name.ilike.%${search}%,external_id.ilike.%${search}%,` +
-      `customer_phone.ilike.%${search}%,customer_comment.ilike.%${search}%,` +
-      `operator_comment.ilike.%${search}%`,
-    )
-  }
+  const orders = data ?? []
+  const marketplace = orders.filter(o => orderSource(o.platform) === 'marketplace')
+  const site = orders.filter(o => orderSource(o.platform) === 'site')
 
-  // Два запити, одна затримка.
-  //
-  // Раніше картки чекали на свій запит, і лише потім починався запит таблиці —
-  // виходило дві повні подорожі до бази поспіль на кожне перемикання місяця.
-  const [{ data: allOrders }, { data: tableOrders }] = await Promise.all([
-    statsQuery,
-    query,
-  ])
-
-  const allOrders2 = allOrders || []
-  // Stats cards respect the platform filter
-  const orders = platform ? allOrders2.filter(o => o.platform === platform) : allOrders2
-  const total = orders.length
-  const delivered = orders.filter(o => o.status === 'Доставлено')
-  const canceled = orders.filter(o => o.status === 'Скасовано')
-  const inProgress = orders.filter(o => isInProgress(o.status))
-  const shipping = orders.filter(o => isShipping(o.status))
-
-  function buildTabHref(month: string) {
-    const params = new URLSearchParams()
-    params.set('month', month)
-    if (platform) params.set('platform', platform)
-    if (statusFilter) params.set('status', statusFilter)
-    if (search) params.set('search', search)
-    return `?${params.toString()}`
-  }
-
-  // Адреси рахуємо тут: функцію через межу сервер–клієнт не передати
-  const tabsWithHref = tabs.map(t => ({ ...t, href: buildTabHref(t.value) }))
+  // Увага оператора — на тому, що ще не закрите; решта місяця нижче, повним списком
+  const active = orders.filter(o => isInProgress(o.status))
 
   return (
     <div className="bg-zinc-950 text-white space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-white">Замовлення</h1>
-          <p className="text-zinc-400 text-sm mt-0.5">Всі замовлення з MauDau та Rozetka</p>
-        </div>
+      <div>
+        <h1 className="text-xl sm:text-2xl font-bold text-white">Замовлення</h1>
+        <p className="text-zinc-400 text-sm mt-0.5">
+          Що прийшло і звідки. Опрацювання — у вкладці джерела
+        </p>
       </div>
 
-      <Suspense fallback={null}>
-        <OrdersToolbar />
-      </Suspense>
-
-      <MonthTabs tabs={tabsWithHref} selected={selectedMonth} />
-
-      {/* Analytics cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
-          <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Всього замовлень</div>
-          <div className="text-3xl font-bold text-white">{total}</div>
-        </div>
-        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
-          <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Доставлено</div>
-          <div className="text-3xl font-bold text-emerald-400">{delivered.length}</div>
-          <div className="text-zinc-500 text-sm mt-0.5">{pct(delivered.length, total)}</div>
-        </div>
-        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
-          <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Скасовано</div>
-          <div className="text-3xl font-bold text-red-400">{canceled.length}</div>
-          <div className="text-zinc-500 text-sm mt-0.5">{pct(canceled.length, total)}</div>
-        </div>
-        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
-          <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">В процесі</div>
-          <div className="text-3xl font-bold text-cyan-400">{inProgress.length}</div>
-          {shipping.length > 0 && (
-            <div className="text-zinc-500 text-sm mt-0.5">+{shipping.length} у доставці</div>
-          )}
-        </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <SourceCard title="Маркетплейси" href="/orders/marketplaces" orders={marketplace} />
+        <SourceCard title="Сайт і телефон" href="/orders/site" orders={site} />
       </div>
 
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-800">
+        <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-zinc-300">
-            Замовлення
-            {tableOrders && <span className="ml-2 text-zinc-500">({tableOrders.length})</span>}
+            У роботі <span className="ml-1 text-zinc-500">({active.length})</span>
           </h2>
+          <span className="text-zinc-600 text-xs">
+            {orders.length} за {UA_MONTHS[m - 1]?.toLowerCase()} {year}
+          </span>
         </div>
         <WideScroll>
           <table className="w-full text-sm">
@@ -195,54 +121,63 @@ export default async function OrdersPage({
               <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
                 <th className="text-left px-3 py-2 whitespace-nowrap">Дата</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Номер</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">Коментар оператора</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">Платформа</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">ПІБ</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">Телефон</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">Адреса</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">Відділення</th>
-                <th className="text-left px-3 py-2">Товари</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">Джерело</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">Клієнт</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">Доставка</th>
                 <th className="text-right px-3 py-2 whitespace-nowrap">Сума</th>
-                <th className="text-right px-3 py-2 whitespace-nowrap">Комісія</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Статус</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">ТТН</th>
-                <th className="text-left px-3 py-2 whitespace-nowrap">Причина скасування</th>
+                <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
-              {!tableOrders?.length ? (
+              {active.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="text-center py-12 text-zinc-500">
-                    Немає замовлень
+                  <td colSpan={8} className="text-center py-12 text-zinc-500">
+                    Усе опрацьовано
                   </td>
                 </tr>
-              ) : (
-                tableOrders.map(order => (
-                  <OrderRow
-                    key={order.id}
-                    id={order.id}
-                    external_id={order.external_id}
-                    platform={order.platform}
-                    order_date={order.order_date}
-                    arrival={arrivalTime(order.platform, order.raw)}
-                    customer_name={order.customer_name}
-                    customer_phone={order.customer_phone}
-                    address={order.address}
-                    branch={order.branch}
-                    items={order.items}
-                    total={order.total}
-                    commission={order.commission}
-                    status={order.status}
-                    is_paid={order.is_paid}
-                    ttn={order.ttn}
-                    cancel_reason={order.cancel_reason}
-                    customer_comment={order.customer_comment}
-                    operator_comment={order.operator_comment}
-                    readOnly={readOnly}
-                    canSeeJournal={canSeeJournal}
-                  />
-                ))
-              )}
+              ) : active.map(o => (
+                <tr key={o.id} className="border-b border-zinc-800/60 last:border-0">
+                  <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
+                    {shortDate(o.order_date)}
+                  </td>
+                  <td className="px-3 py-2 text-white whitespace-nowrap">
+                    {o.manual_number ? `№${o.manual_number}` : o.external_id || '—'}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <span className="inline-block px-2 py-0.5 rounded text-xs font-medium
+                                     bg-zinc-800 text-zinc-300">
+                      {platformLabel(o.platform)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-zinc-300">{o.customer_name || '—'}</td>
+                  <td className="px-3 py-2 text-zinc-400 whitespace-nowrap text-xs">
+                    {o.delivery_date
+                      ? `${shortDate(o.delivery_date)}${o.delivery_slot ? `, ${o.delivery_slot}` : ''}`
+                      : '—'}
+                  </td>
+                  <td className="px-3 py-2 text-right text-white tabular-nums whitespace-nowrap">
+                    {money(o.total)}
+                  </td>
+                  <td className="px-3 py-2">
+                    <StatusSelect
+                      id={o.id}
+                      platform={o.platform}
+                      externalId={o.external_id}
+                      status={o.status}
+                      disabled={readOnly}
+                    />
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <Link
+                      href={processingHref(o.platform)}
+                      className="text-zinc-400 hover:text-white text-xs transition-colors"
+                    >
+                      Опрацювати →
+                    </Link>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </WideScroll>

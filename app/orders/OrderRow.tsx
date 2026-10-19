@@ -8,9 +8,8 @@ import { useRouter } from 'next/navigation'
 import {
   canCreateWaybill, canEditItems, isHandedOver, canTogglePaid, requiresPayment,
 } from '@/lib/order-statuses'
+import { statusOptions } from '@/lib/order-status-options'
 
-const MAUDAU_STATUSES = ['Нове', 'Прийнято', 'Узгоджено', 'На доставці', 'Прибуло', 'Доставлено', 'Скасовано']
-const ROZETKA_STATUSES = ['Нове', 'Опрацьовується', 'Комплектується', 'Передано в доставку', 'Доставляється', 'Чекає в пункті', 'Доставлено', 'Скасовано']
 
 // Exact names from MauDau API /v1/merchant_public_api/orders/cancellation_reasons
 // Used as fallback if API call fails
@@ -160,7 +159,7 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
       .finally(() => setMaudauReasonsLoading(false))
   }, [props.platform])
 
-  const statuses = props.platform === 'rozetka' ? ROZETKA_STATUSES : MAUDAU_STATUSES
+  const statuses = statusOptions(props.platform)
 
   async function togglePaid() {
     const next = !paid

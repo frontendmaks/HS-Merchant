@@ -17,6 +17,7 @@ import { rozetkaToken } from '@/lib/rozetka-auth'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { isHandedOver, requiresPayment } from '@/lib/order-statuses'
+import { orderSource } from '@/lib/order-source'
 
 const MAUDAU_STATUS_MAP: Record<string, string> = {
   'Нове': 'new_order',
@@ -62,7 +63,11 @@ export async function changeOrderStatus(
   // Передоплата на картку приходить повз маркетплейс, тож його статуси її не
   // показують. Віддати посилку кур'єру без грошей означає дізнатись про це
   // тоді, коли повертати вже нема як.
-  if (requiresPayment(status) && !current?.is_paid) {
+  //
+  // Правило маркетплейсне: там замовлення йдуть передоплатою. Замовлення з
+  // сайту й телефону везуть з оплатою на місці, і вимагати позначки «оплачено»
+  // перед доставкою означало б просити оператора збрехати.
+  if (orderSource(platform) === 'marketplace' && requiresPayment(status) && !current?.is_paid) {
     return NextResponse.json(
       {
         success: false,

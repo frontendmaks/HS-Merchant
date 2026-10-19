@@ -74,20 +74,35 @@ export async function refreshZones(service: Service): Promise<{ updated: number;
  * Коли точка потрапляє в кілька, береться перша за порядком: він відповідає
  * порядку в налаштуваннях сайту, тож вибір збігається з тим, що зробив би сайт.
  */
+interface ZoneRow { code: string; warehouse: string; polygon: Point[] }
+
+/** Зони з бази — вісім полігонів, які перевіряються по кілька разів на адресу,
+ *  тож читаються один раз і далі перебираються в пам'яті. */
+export async function loadZones(service: Service): Promise<ZoneRow[]> {
+  const { data } = await service
+    .from('delivery_zones').select('code, warehouse, polygon').order('code')
+
+  return (data ?? []).map(z => ({
+    code: z.code as string,
+    warehouse: z.warehouse as string,
+    polygon: (z.polygon as Point[]) ?? [],
+  }))
+}
+
+export function zoneAt(point: Point, zones: ZoneRow[]): ZoneHit | null {
+  for (const z of zones) {
+    if (z.polygon.length >= 3 && insidePolygon(point, z.polygon)) {
+      return { zone: z.code, warehouse: z.warehouse }
+    }
+  }
+  return null
+}
+
 export async function zoneForPoint(
   service: Service,
   point: Point,
 ): Promise<ZoneHit | null> {
-  const { data: zones } = await service
-    .from('delivery_zones').select('code, warehouse, polygon').order('code')
-
-  for (const z of zones ?? []) {
-    const poly = (z.polygon as Point[]) ?? []
-    if (poly.length >= 3 && insidePolygon(point, poly)) {
-      return { zone: z.code as string, warehouse: z.warehouse as string }
-    }
-  }
-  return null
+  return zoneAt(point, await loadZones(service))
 }
 
 const GEOCODER_UA =
@@ -102,6 +117,43 @@ export interface Geocoded extends Point { display_name: string | null }
  * ручних замовлень цього вдосталь. Результат кешується: та сама адреса
  * питається один раз, і повторне відкриття форми нікого не турбує.
  */
+async function ask(query: string): Promise<Geocoded | null> {
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search'
+      + '?format=json&limit=1&countrycodes=ua&accept-language=uk&q=' + encodeURIComponent(query)
+    const res = await fetch(url, {
+      headers: { 'User-Agent': GEOCODER_UA },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) return null
+    const hits = await res.json() as { lat: string; lon: string; display_name: string }[]
+    const first = hits[0]
+    return first
+      ? { lat: Number(first.lat), lng: Number(first.lon), display_name: first.display_name }
+      : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Як саме питати геокодер про цю адресу.
+ *
+ * «Петлюри 14» без міста спершу уточнювалось як «Львівська область» — і
+ * знаходило Дрогобич, бо вулиця Петлюри є і там. Місто важливіше за область:
+ * ми возимо по Львову й околицях, тож питаємо спершу про Львів.
+ */
+function queryVariants(address: string): string[] {
+  const a = address.trim().replace(/\s+/g, ' ')
+  const mentionsCity = /львів|брюховичі|винники|сокільники|зимна вода|рудно|малехів|солонка|пустомити|сихів/i.test(a)
+
+  return [...new Set([
+    mentionsCity ? a : `Львів, ${a}`,
+    a,
+    `Львівська область, ${a}`,
+  ])]
+}
+
 export async function geocode(
   service: Service,
   address: string,
@@ -112,44 +164,46 @@ export async function geocode(
   const { data: cached } = await service
     .from('geocode_cache').select('lat, lng, display_name').eq('query', query).maybeSingle()
 
-  if (cached?.lat != null) {
-    return {
+  if (cached) {
+    return cached.lat == null ? null : {
       lat: Number(cached.lat), lng: Number(cached.lng),
       display_name: cached.display_name as string,
     }
   }
 
-  try {
-    // Львівщина — підказка геокодеру, бо «Городоцька» є не лише у Львові
-    const url = 'https://nominatim.openstreetmap.org/search'
-      + '?format=json&limit=1&countrycodes=ua&accept-language=uk&q='
-      + encodeURIComponent(query.includes('Львів') ? query : `Львівська область, ${query}`)
+  /**
+   * Беремо перший варіант, що потрапляє в зону доставки.
+   *
+   * Сама по собі «знайдена точка» ще нічого не означає — геокодер майже
+   * завжди щось знаходить. Значення має точка, куди ми реально возимо, тож
+   * саме це й перевіряємо, перш ніж спинитись.
+   */
+  let firstHit: Geocoded | null = null
+  const zones = await loadZones(service)
 
-    const res = await fetch(url, {
-      headers: { 'User-Agent': GEOCODER_UA },
-      signal: AbortSignal.timeout(15_000),
-    })
-    if (!res.ok) return null
+  for (const variant of queryVariants(query)) {
+    const point = await ask(variant)
+    if (!point) continue
+    firstHit ??= point
 
-    const hits = await res.json() as { lat: string; lon: string; display_name: string }[]
-    const first = hits[0]
-    if (!first) {
-      // Негативний результат теж кешуємо: та сама незнайома адреса не має
-      // ганяти нас до геокодера щоразу, як оператор перечитує форму
-      await service.from('geocode_cache')
-        .upsert({ query, lat: null, lng: null, display_name: null }, { onConflict: 'query' })
-      return null
+    if (zoneAt(point, zones)) {
+      await service.from('geocode_cache').upsert({ query, ...point }, { onConflict: 'query' })
+      return point
     }
-
-    const point = {
-      lat: Number(first.lat), lng: Number(first.lon),
-      display_name: first.display_name as string,
-    }
-    await service.from('geocode_cache').upsert({ query, ...point }, { onConflict: 'query' })
-    return point
-  } catch {
-    return null
+    // Чужий сервіс просить не частіше разу на секунду
+    await new Promise(r => setTimeout(r, 1100))
   }
+
+  // Жоден варіант не потрапив у зону — лишаємо перший знайдений, щоб
+  // оператор бачив, що саме розпізналось, і міг виправити адресу
+  if (firstHit) {
+    await service.from('geocode_cache').upsert({ query, ...firstHit }, { onConflict: 'query' })
+    return firstHit
+  }
+
+  await service.from('geocode_cache')
+    .upsert({ query, lat: null, lng: null, display_name: null }, { onConflict: 'query' })
+  return null
 }
 
 export interface AddressResolution {

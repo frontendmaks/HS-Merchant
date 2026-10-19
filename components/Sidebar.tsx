@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { useEffect, useState } from 'react'
+import { isChromeless } from '@/lib/chromeless'
 import { PAGE_ROLES, ROLE_LABELS } from '@/lib/roles'
 import { usePresence } from '@/lib/presence'
 import { useTheme } from '@/lib/use-theme'
@@ -25,8 +26,12 @@ const nav = [
   { href: '/syncs',    label: 'Синхронізації',  icon: '↻', roles: PAGE_ROLES.syncs },
   {
     href: '/orders', label: 'Замовлення', icon: '◷', roles: PAGE_ROLES.orders,
+    // Сама вкладка показує потік, працюють у під'вкладках: у маркетплейсних і
+    // замовлень із сайту майже нічого спільного в полях, і один список на двох
+    // був би наполовину порожній у кожному рядку
     children: [
-      { href: '/orders/manual', label: 'Ручні замовлення', roles: PAGE_ROLES.manualOrders },
+      { href: '/orders/marketplaces', label: 'Маркетплейси', roles: PAGE_ROLES.orders },
+      { href: '/orders/site', label: 'Сайт', roles: PAGE_ROLES.orders },
     ],
   },
   { href: '/news',     label: 'Новини',         icon: '◫', roles: PAGE_ROLES.news },
@@ -234,7 +239,7 @@ export default function Sidebar() {
     router.refresh()
   }
 
-  if (path === '/login' || path === '/set-password') return null
+  if (isChromeless(path)) return null
 
   const role = profile?.role
   const visibleNav = loaded && role

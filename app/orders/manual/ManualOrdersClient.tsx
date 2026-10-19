@@ -443,6 +443,45 @@ function Overlay({ children, onClose }: { children: React.ReactNode; onClose: ()
  * Зібране замовлення стоїть поруч із пошуком, а не під ним: його читають
  * уголос клієнту, і для цього воно має бути на очах увесь час.
  */
+/**
+ * Поле для кількості й ціни.
+ *
+ * Звичайний `type="number"` зі значенням-числом не дає стерти останню цифру:
+ * щойно поле пустіє, стан перетворює його на 0, і оператор щоразу мусить
+ * видаляти нуль перед тим, як вписати «1.6». Тут набране лежить рядком, тож
+ * поле можна спокійно очистити й почати спочатку, а кому вважаємо точкою —
+ * на цифровій клавіатурі вона під рукою.
+ */
+function NumField({ value, onChange, className }: {
+  value: number
+  onChange: (v: number) => void
+  className?: string
+}) {
+  const [draft, setDraft] = useState(value ? String(value) : '')
+
+  // Значення змінили зовні (новий рядок, перерахунок) — підхоплюємо
+  useEffect(() => {
+    if (Number(draft || 0) !== value) setDraft(value ? String(value) : '')
+     
+  }, [value])
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      placeholder="0"
+      onChange={e => {
+        const next = e.target.value.replace(',', '.')
+        if (next !== '' && !/^\d*\.?\d*$/.test(next)) return
+        setDraft(next)
+        onChange(next === '' || next === '.' ? 0 : Number(next))
+      }}
+      className={className}
+    />
+  )
+}
+
 function ProductPicker({ lines, onChange, total }: {
   lines: Line[]
   onChange: (lines: Line[]) => void
@@ -545,17 +584,17 @@ function ProductPicker({ lines, onChange, total }: {
               <div className="min-w-0 flex-1">
                 <div className="text-white text-xs leading-snug">{l.title}</div>
                 <div className="flex items-center gap-1.5 mt-1.5">
-                  <input
-                    type="number" step="0.01" min="0" value={l.qty}
-                    onChange={e => patch(l.key, { qty: Number(e.target.value) })}
+                  <NumField
+                    value={l.qty}
+                    onChange={v => patch(l.key, { qty: v })}
                     className="w-20 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
                                text-white text-xs focus:outline-none focus:border-red-500"
                   />
                   <span className="text-zinc-500 text-xs w-7">{l.unit}</span>
                   <span className="text-zinc-600 text-xs">×</span>
-                  <input
-                    type="number" step="0.01" min="0" value={l.price_per_unit}
-                    onChange={e => patch(l.key, { price_per_unit: Number(e.target.value) })}
+                  <NumField
+                    value={l.price_per_unit}
+                    onChange={v => patch(l.key, { price_per_unit: v })}
                     className="w-20 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
                                text-white text-xs focus:outline-none focus:border-red-500"
                   />

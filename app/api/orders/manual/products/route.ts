@@ -33,14 +33,22 @@ export async function GET(req: NextRequest) {
 
   const products = (data ?? []).map(p => {
     const attrs = (p.attributes as Record<string, string> | null) ?? {}
-    const pack = Number(attrs['Мін'] ?? 0)
+    const pack = Number(attrs['Мін'] ?? attrs['Крок'] ?? 0)
     return {
       id: p.id,
       name: p.name,
       sku: p.sku,
       code_1c: p.code_1c,
       price: Number(p.price ?? 0),
-      unit: p.unit || 'шт',
+      /**
+       * Одиниця — з атрибутів картки, не з колонки.
+       *
+       * У колонці `unit` в усіх товарів стоїть «шт», бо так їх рахує
+       * WooCommerce. Справжня одиниця продажу — в атрибуті «Одиниця»:
+       * філе продається кілограмами, консерви штуками, і замовлення на
+       * «16 шт філе» замість «1.6 кг» це зовсім інша кількість.
+       */
+      unit: attrs['Одиниця'] || p.unit || 'шт',
       /** Крок продажу вагового товару: «0.4» означає фасування по 400 г */
       pack: pack > 0 ? pack : null,
       stock: p.stock == null ? null : Number(p.stock),
