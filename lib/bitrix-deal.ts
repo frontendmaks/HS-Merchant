@@ -76,6 +76,7 @@ interface ItemRow {
   price_per_unit: number
   ordered_qty: number
   product_id: string | null
+  bitrix_product_id: number | null
 }
 
 /**
@@ -168,7 +169,7 @@ export async function pushOrderToBitrix(
 
     const { data: items } = await service
       .from('order_items')
-      .select('position, title, unit, price_per_unit, ordered_qty, product_id')
+      .select('position, title, unit, price_per_unit, ordered_qty, product_id, bitrix_product_id')
       .eq('order_id', orderId).eq('removed', false).order('position')
 
     const lines = (items ?? []) as ItemRow[]
@@ -187,7 +188,11 @@ export async function pushOrderToBitrix(
     const rows = lines.map(l => {
       const uid = l.product_id ? uidByOurId.get(l.product_id) : undefined
       const known = uid ? bitrixByUid.get(uid) : undefined
-      const id = isDeliveryLine(l) ? BITRIX_DELIVERY_PRODUCT_ID : known
+      // Позиція, що прийшла з Бітрікса, вже знає свій товар там — і це
+      // точніше за будь-яке зіставлення, бо то його власне число
+      const id = isDeliveryLine(l)
+        ? BITRIX_DELIVERY_PRODUCT_ID
+        : (l.bitrix_product_id ?? known)
 
       return {
         // Товар без пари в каталозі йде рядком із назвою — замовлення від

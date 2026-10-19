@@ -45,6 +45,8 @@ export function manualExternalId(deliveryDate: string, number: number): string {
 export interface ManualLine {
   /** Товар із каталогу; порожньо — рядок, вписаний вручну */
   product_id?: string | null
+  /** Товар у каталозі Бітрікса — у позицій, що приїхали звідти */
+  bitrix_product_id?: number | null
   title: string
   unit: string
   unit_weight: number

@@ -18,6 +18,8 @@ import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { isHandedOver, requiresPayment } from '@/lib/order-statuses'
 import { orderSource } from '@/lib/order-source'
+import { bitrix } from '@/lib/bitrix'
+import { stageId } from '@/lib/bitrix-stages'
 
 const MAUDAU_STATUS_MAP: Record<string, string> = {
   'Нове': 'new_order',
@@ -45,7 +47,7 @@ export async function changeOrderStatus(
 
   // A parcel already with the courier is driven by the marketplace from here
   const { data: current } = await supabase
-    .from('orders').select('status, ttn, cancel_reason, is_paid').eq('id', id).single()
+    .from('orders').select('status, ttn, cancel_reason, is_paid, bitrix_deal_id').eq('id', id).single()
 
   // Cancelling is the one move that ends an order, and a cancellation with no
   // reason answers nothing later — not for the marketplace, which asks for one,
@@ -77,7 +79,12 @@ export async function changeOrderStatus(
     )
   }
 
-  if (isHandedOver(current?.status as string, current?.ttn as string)) {
+  // Замок «уже в доставці» — маркетплейсний: там замовлення веде майданчик,
+  // і наші зміни після передачі кур'єру нікуди б не поїхали. Замовлення з
+  // сайту ми ведемо самі від початку до кінця, і «В дорозі» для нього не
+  // кінець, а передостанній крок.
+  if (orderSource(platform) === 'marketplace'
+    && isHandedOver(current?.status as string, current?.ttn as string)) {
     return NextResponse.json(
       { success: false, error: 'Замовлення вже в доставці — статус не змінюється' },
       { status: 409 },
@@ -121,6 +128,17 @@ export async function changeOrderStatus(
       }
 
       await patchMaudauStatus(numericId, apiStatus, undefined, jwt)
+    } else if (orderSource(platform) === 'site') {
+      // Статус замовлення з сайту — це стадія угоди. Якщо угоди немає,
+      // міняти нічого: замовлення живе лише в нас
+      const dealId = current?.bitrix_deal_id as number | null
+      const stage = stageId(status)
+
+      if (dealId && stage) {
+        await bitrix('crm.deal.update', { id: dealId, fields: { STAGE_ID: stage } })
+      } else if (dealId && !stage) {
+        throw new Error(`Статус «${status}» не має стадії в Бітріксі`)
+      }
     } else if (platform === 'rozetka') {
       const numericId = external_id.replace(/^RZ-/, '')
 

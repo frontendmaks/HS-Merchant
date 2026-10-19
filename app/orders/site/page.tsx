@@ -7,6 +7,8 @@ import { isInProgress } from '@/lib/order-statuses'
 import { SITE_PLATFORMS, platformLabel } from '@/lib/order-source'
 import StatusSelect from '../StatusSelect'
 import WideScroll from '../WideScroll'
+import SyncButton from './SyncButton'
+import EditButton from './EditButton'
 
 /**
  * Замовлення з сайту й телефону.
@@ -33,6 +35,9 @@ export default async function SiteOrdersPage() {
   const readOnly = role === 'viewer'
 
   const supabase = createServiceClient()
+  const { data: zones } = await supabase.from('delivery_zones').select('warehouse')
+  const warehouses = [...new Set((zones ?? []).map(z => z.warehouse as string))].sort()
+
   const { data } = await supabase
     .from('orders')
     .select('id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token')
@@ -53,13 +58,16 @@ export default async function SiteOrdersPage() {
             Сайт і телефон — склад, період доставки, бланк для комірника
           </p>
         </div>
-        <Link
-          href="/orders/manual"
-          className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium
-                     px-4 py-2 rounded-lg transition-colors"
-        >
-          + Нове замовлення
-        </Link>
+        <div className="flex items-start gap-2">
+          <SyncButton />
+          <Link
+            href="/orders/manual"
+            className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium
+                       px-4 py-2 rounded-lg transition-colors"
+          >
+            + Нове замовлення
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -99,12 +107,13 @@ export default async function SiteOrdersPage() {
                 <th className="text-right px-3 py-2 whitespace-nowrap">Сума</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Статус</th>
                 <th className="px-3 py-2"></th>
+                <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
               {orders.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="text-center py-12 text-zinc-500">
+                  <td colSpan={11} className="text-center py-12 text-zinc-500">
                     Замовлень ще немає —{' '}
                     <Link href="/orders/manual" className="text-red-400 hover:text-red-300">
                       створити перше
@@ -153,6 +162,9 @@ export default async function SiteOrdersPage() {
                       status={o.status}
                       disabled={readOnly}
                     />
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <EditButton id={o.id} warehouses={warehouses} />
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     {o.share_token && (

@@ -1,3 +1,5 @@
+import { STAGE_NAMES } from '@/lib/bitrix-stages'
+
 /**
  * Статуси, які можна поставити вручну.
  *
@@ -15,9 +17,12 @@ export const ROZETKA_STATUSES = [
   'Доставляється', 'Чекає в пункті', 'Доставлено', 'Скасовано',
 ]
 
-export const SITE_STATUSES = [
-  'Нове', 'Прийнято', 'Узгоджено', 'На доставці', 'Доставлено', 'Скасовано',
-]
+/**
+ * Замовлення з сайту й телефону живуть у воронці Бітрікса, тож і статуси в
+ * них звідти: оператор у CRM і оператор у Мерчанті мають називати той самий
+ * стан тим самим словом.
+ */
+export const SITE_STATUSES = STAGE_NAMES
 
 export function statusOptions(platform: string | null): string[] {
   if (platform === 'rozetka') return ROZETKA_STATUSES
