@@ -1,0 +1,573 @@
+'use client'
+
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
+
+interface Recent {
+  id: string; external_id: string; manual_number: number | null
+  delivery_date: string | null; delivery_slot: string | null; warehouse: string | null
+  customer_name: string | null; customer_phone: string | null; address: string | null
+  total: number | null; status: string | null; share_token: string | null
+  created_at: string
+}
+interface SlotOption { label: string; available: boolean; reason: string | null }
+interface Product {
+  id: string; name: string; sku: string | null; code_1c: string | null
+  price: number; unit: string; pack: number | null
+  stock: number | null; status: string; category: string | null
+}
+interface Customer {
+  name: string; phones: string[]; addresses: string[]; orders: number; last: string | null
+}
+interface Line {
+  key: string
+  product_id: string | null
+  title: string
+  unit: string
+  unit_weight: number
+  price_per_unit: number
+  qty: number
+}
+
+const money = (n: number) => `${Math.round(n * 100) / 100} ₴`
+const field = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-red-500'
+
+export default function ManualOrdersClient({ recent, warehouses, initial }: {
+  recent: Recent[]
+  warehouses: string[]
+  initial: { date: string; slot: string; slots: SlotOption[] }
+}) {
+  const router = useRouter()
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="p-4 sm:p-6 space-y-5 max-w-[1400px] mx-auto">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Ручні замовлення</h1>
+          <p className="text-zinc-400 text-sm mt-0.5">
+            Замовлення, прийняті телефоном. Потрапляють у загальний список разом із маркетплейсними.
+          </p>
+        </div>
+        <button
+          onClick={() => setOpen(true)}
+          className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium
+                     px-4 py-2 rounded-lg transition-colors"
+        >
+          + Нове замовлення
+        </button>
+      </div>
+
+      {recent.length === 0 ? (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-6 py-12 text-center">
+          <div className="text-white text-sm font-medium">Ще немає жодного ручного замовлення</div>
+          <p className="text-zinc-500 text-xs mt-2 max-w-md mx-auto leading-relaxed">
+            Натисніть «Нове замовлення» — форма підкаже склад за адресою й доступні періоди доставки.
+          </p>
+        </div>
+      ) : (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl divide-y divide-zinc-800">
+          {recent.map(o => (
+            <div key={o.id} className="px-4 py-3 flex items-center gap-3 flex-wrap">
+              <span className="w-10 text-center text-white text-sm font-semibold tabular-nums">
+                {o.manual_number ?? '—'}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-white text-sm">{o.customer_name}</div>
+                <div className="text-zinc-500 text-xs mt-0.5 truncate">
+                  {o.customer_phone} · {o.address}
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-zinc-300 text-xs">
+                  {o.delivery_date} · {o.delivery_slot}
+                </div>
+                <div className="text-zinc-500 text-xs">{o.warehouse ?? 'склад не визначено'}</div>
+              </div>
+              <span className="text-white text-sm tabular-nums w-24 text-right shrink-0">
+                {money(Number(o.total ?? 0))}
+              </span>
+              {o.share_token && (
+                <a
+                  href={`/zamovlennya/${o.share_token}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-cyan-400 hover:text-cyan-300 text-xs shrink-0 transition-colors"
+                >
+                  бланк →
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {open && (
+        <NewOrder
+          warehouses={warehouses}
+          initial={initial}
+          onClose={() => setOpen(false)}
+          onCreated={() => { setOpen(false); router.refresh() }}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Форма прийому замовлення.
+ *
+ * Порядок полів повторює паперовий бланк — ПІБ, контакти, адреса, товари, —
+ * бо операторка заповнює його під час розмови й читає з того самого місця,
+ * що й раніше. Склад і період стоять після адреси, бо саме вона їх визначає.
+ */
+function NewOrder({ warehouses, initial, onClose, onCreated }: {
+  warehouses: string[]
+  initial: { date: string; slot: string; slots: SlotOption[] }
+  onClose: () => void
+  onCreated: () => void
+}) {
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [address, setAddress] = useState('')
+  const [comment, setComment] = useState('')
+
+  const [warehouse, setWarehouse] = useState<string>('')
+  const [zone, setZone] = useState<string | null>(null)
+  const [zoneNote, setZoneNote] = useState<string | null>(null)
+  const [resolving, setResolving] = useState(false)
+
+  const [date, setDate] = useState(initial.date)
+  const [slot, setSlot] = useState(initial.slot)
+  const [slots, setSlots] = useState<SlotOption[]>(initial.slots)
+
+  const [lines, setLines] = useState<Line[]>([])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState<{ number: number; url: string } | null>(null)
+
+  // Клієнти з минулих замовлень
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [picked, setPicked] = useState<Customer | null>(null)
+
+  const nameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (nameTimer.current) clearTimeout(nameTimer.current)
+    if (name.trim().length < 2 || picked?.name === name) { setCustomers([]); return }
+    nameTimer.current = setTimeout(async () => {
+      const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(name)}`)
+      const d = await r.json().catch(() => ({}))
+      setCustomers(d.customers ?? [])
+    }, 350)
+  }, [name, picked])
+
+  /** Адреса → склад і періоди. Запитуємо, коли оператор дописав адресу. */
+  const resolve = useCallback(async (addr: string, when: string) => {
+    if (addr.trim().length < 5) return
+    setResolving(true)
+    try {
+      const r = await fetch('/api/orders/manual/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: addr, date: when }),
+      })
+      const d = await r.json()
+      setSlots(d.slots ?? [])
+      setZone(d.zone ?? null)
+      setZoneNote(d.note ?? null)
+      if (d.warehouse) setWarehouse(d.warehouse)
+      // Якщо обраний період закрився, пересуваємось на перший доступний
+      const free = (d.slots ?? []).find((s: SlotOption) => s.available)
+      if (free && !(d.slots ?? []).find((s: SlotOption) => s.label === slot && s.available)) {
+        setSlot(free.label)
+      }
+    } finally {
+      setResolving(false)
+    }
+  }, [slot])
+
+  const addrTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (addrTimer.current) clearTimeout(addrTimer.current)
+    addrTimer.current = setTimeout(() => void resolve(address, date), 700)
+  }, [address, date, resolve])
+
+  const total = lines.reduce((s, l) => s + l.qty * l.price_per_unit, 0)
+
+  async function submit() {
+    setError('')
+    setSaving(true)
+    try {
+      const res = await fetch('/api/orders/manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_name: name, customer_phone: phone, address,
+          warehouse: warehouse || null, delivery_zone: zone,
+          delivery_date: date, delivery_slot: slot,
+          comment: comment || null,
+          lines: lines.map(({ key, ...l }) => l),   // eslint-disable-line @typescript-eslint/no-unused-vars
+        }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Не вдалося створити')
+      setDone({ number: d.number, url: d.document_url })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (done) {
+    return (
+      <Overlay onClose={onCreated}>
+        <div className="p-6 text-center">
+          <div className="text-emerald-400 text-sm">✓ Замовлення прийнято</div>
+          <div className="text-white text-3xl font-bold mt-2">№ {done.number}</div>
+          <p className="text-zinc-400 text-xs mt-3">
+            Номер записано в замовлення. Бланк для складу — за посиланням нижче,
+            він відкривається без входу в Мерчант.
+          </p>
+          <div className="flex items-center gap-2 mt-4">
+            <input
+              readOnly
+              value={typeof window !== 'undefined' ? window.location.origin + done.url : done.url}
+              onFocus={e => e.currentTarget.select()}
+              className={field}
+            />
+            <a href={done.url} target="_blank" rel="noreferrer"
+              className="bg-zinc-700 hover:bg-zinc-600 text-white text-sm px-3 py-2 rounded-lg shrink-0">
+              Відкрити
+            </a>
+          </div>
+          <button onClick={onCreated}
+            className="mt-5 bg-red-600 hover:bg-red-500 text-white text-sm px-4 py-2 rounded-lg">
+            Готово
+          </button>
+        </div>
+      </Overlay>
+    )
+  }
+
+  return (
+    <Overlay onClose={onClose}>
+      <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
+        <h2 className="text-white font-semibold">Нове замовлення</h2>
+        <button onClick={onClose} className="text-zinc-500 hover:text-white text-xl px-1">×</button>
+      </div>
+
+      <div className="p-5 grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-5">
+        <div className="space-y-4">
+          {/* ПІБ із пошуком по клієнтах */}
+          <div className="relative">
+            <label className="text-zinc-400 text-xs block mb-1">ПІБ клієнта</label>
+            <input
+              autoFocus
+              value={name}
+              onChange={e => { setName(e.target.value); setPicked(null) }}
+              placeholder="Прізвище та ім'я, або почніть вводити для пошуку"
+              className={field}
+            />
+            {customers.length > 0 && (
+              <div className="absolute z-20 left-0 right-0 mt-1 bg-zinc-800 border border-zinc-700
+                              rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                {customers.map(c => (
+                  <button
+                    key={c.name}
+                    onClick={() => {
+                      setPicked(c); setName(c.name); setCustomers([])
+                      if (c.phones[0]) setPhone(c.phones[0])
+                      if (c.addresses[0]) setAddress(c.addresses[0])
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-zinc-700 transition-colors"
+                  >
+                    <div className="text-white text-sm">{c.name}</div>
+                    <div className="text-zinc-500 text-xs">
+                      {c.phones[0] ?? 'без телефону'} · замовлень: {c.orders}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-zinc-400 text-xs block mb-1">Контакти</label>
+            <input value={phone} onChange={e => setPhone(e.target.value)}
+              placeholder="+380…" className={field} />
+            {picked && picked.phones.length > 1 && (
+              <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                {picked.phones.map(p => (
+                  <button key={p} onClick={() => setPhone(p)}
+                    className={`px-2 py-1 rounded text-xs transition-colors ${
+                      phone === p ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                    }`}>
+                    {p}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-zinc-400 text-xs block mb-1">Адреса</label>
+            <input value={address} onChange={e => setAddress(e.target.value)}
+              placeholder="Львів, вул. Городоцька, 120, кв. 5" className={field} />
+            {picked && picked.addresses.length > 1 && (
+              <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                {picked.addresses.slice(0, 4).map(a => (
+                  <button key={a} onClick={() => setAddress(a)}
+                    className="px-2 py-1 rounded text-xs bg-zinc-800 text-zinc-400 hover:text-white
+                               transition-colors max-w-[240px] truncate">
+                    {a}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Склад — випливає з адреси, але лишається виправним */}
+          <div>
+            <label className="text-zinc-400 text-xs block mb-1">
+              Склад замовлення
+              {resolving && <span className="text-zinc-600"> · визначаємо…</span>}
+              {zone && !resolving && <span className="text-emerald-500"> · за адресою ({zone})</span>}
+            </label>
+            <select value={warehouse} onChange={e => setWarehouse(e.target.value)} className={field}>
+              <option value="">— оберіть склад —</option>
+              {warehouses.map(w => <option key={w} value={w}>{w}</option>)}
+            </select>
+            {zoneNote && <div className="text-amber-400 text-xs mt-1">{zoneNote}</div>}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-zinc-400 text-xs block mb-1">Дата доставки</label>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className={field} />
+            </div>
+            <div>
+              <label className="text-zinc-400 text-xs block mb-1">Період</label>
+              <div className="flex flex-col gap-1">
+                {slots.map(s => (
+                  <button
+                    key={s.label}
+                    disabled={!s.available}
+                    onClick={() => setSlot(s.label)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs text-left transition-colors ${
+                      slot === s.label && s.available ? 'bg-red-600 text-white'
+                        : s.available ? 'bg-zinc-800 text-zinc-300 hover:text-white'
+                        : 'bg-zinc-800/40 text-zinc-600 cursor-default'
+                    }`}
+                  >
+                    {s.label}
+                    {!s.available && s.reason && (
+                      <span className="text-zinc-600"> — {s.reason}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-zinc-400 text-xs block mb-1">Коментар (необовʼязково)</label>
+            <textarea value={comment} onChange={e => setComment(e.target.value)} rows={2}
+              placeholder="Подзвонити перед виїздом" className={field} />
+          </div>
+        </div>
+
+        <ProductPicker lines={lines} onChange={setLines} total={total} />
+      </div>
+
+      {error && (
+        <div className="mx-5 mb-3 bg-red-950/50 border border-red-800 rounded-lg px-3 py-2
+                        text-red-400 text-xs">{error}</div>
+      )}
+
+      <div className="px-5 py-4 border-t border-zinc-800 flex items-center justify-between gap-3">
+        <div className="text-zinc-400 text-sm">
+          Позицій: <span className="text-white">{lines.length}</span>
+          <span className="mx-2 text-zinc-700">·</span>
+          Сума: <span className="text-white font-semibold">{money(total)}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={onClose} className="text-zinc-400 hover:text-white text-sm px-3 py-2">
+            Скасувати
+          </button>
+          <button
+            disabled={saving || !name.trim() || !phone.trim() || !address.trim() || !lines.length}
+            onClick={submit}
+            className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white
+                       text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+          >
+            {saving ? 'Приймаємо…' : 'Прийняти замовлення'}
+          </button>
+        </div>
+      </div>
+    </Overlay>
+  )
+}
+
+function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-start justify-center p-4 overflow-y-auto"
+      onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-5xl my-8"
+        onClick={e => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Перелік товару.
+ *
+ * Пошук шукає серед усього каталогу — включно зі знятим із продажу, бо по
+ * телефону замовляють і те, чого на сайті вже немає. Стан товару при цьому
+ * видно: оператор має знати, що саме пропонує.
+ *
+ * Зібране замовлення стоїть поруч із пошуком, а не під ним: його читають
+ * уголос клієнту, і для цього воно має бути на очах увесь час.
+ */
+function ProductPicker({ lines, onChange, total }: {
+  lines: Line[]
+  onChange: (lines: Line[]) => void
+  total: number
+}) {
+  const [query, setQuery] = useState('')
+  const [found, setFound] = useState<Product[]>([])
+  const [searching, setSearching] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (timer.current) clearTimeout(timer.current)
+    if (query.trim().length < 2) { setFound([]); return }
+    setSearching(true)
+    timer.current = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/orders/manual/products?q=${encodeURIComponent(query)}`)
+        const d = await r.json().catch(() => ({}))
+        setFound(d.products ?? [])
+      } finally {
+        setSearching(false)
+      }
+    }, 300)
+  }, [query])
+
+  function add(p: Product) {
+    // Ваговий товар додається одним фасуванням, штучний — однією штукою:
+    // саме так його й замовляють уголос
+    const pack = p.pack ?? 0
+    const qty = p.unit === 'кг' && pack > 0 ? pack : 1
+    onChange([...lines, {
+      key: `${p.id}-${Date.now()}`,
+      product_id: p.id,
+      title: p.name,
+      unit: p.unit,
+      unit_weight: pack,
+      price_per_unit: p.price,
+      qty,
+    }])
+    setQuery('')
+    setFound([])
+  }
+
+  const patch = (key: string, next: Partial<Line>) =>
+    onChange(lines.map(l => (l.key === key ? { ...l, ...next } : l)))
+
+  return (
+    <div className="bg-zinc-800/30 border border-zinc-800 rounded-xl p-3 flex flex-col gap-3
+                    max-h-[70vh]">
+      <div className="relative">
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Пошук товару: назва, артикул або код 1С"
+          className={field}
+        />
+        {(found.length > 0 || searching) && (
+          <div className="absolute z-20 left-0 right-0 mt-1 bg-zinc-800 border border-zinc-700
+                          rounded-lg max-h-72 overflow-y-auto">
+            {searching && <div className="px-3 py-2 text-zinc-500 text-xs">Шукаємо…</div>}
+            {found.map(p => (
+              <button
+                key={p.id}
+                onClick={() => add(p)}
+                className="w-full text-left px-3 py-2 hover:bg-zinc-700 transition-colors
+                           border-b border-zinc-700/50 last:border-0"
+              >
+                <div className="flex items-start gap-2">
+                  <span className="text-white text-sm min-w-0 flex-1">{p.name}</span>
+                  <span className="text-zinc-300 text-xs whitespace-nowrap">
+                    {p.price} ₴/{p.unit}
+                  </span>
+                </div>
+                <div className="text-zinc-500 text-xs mt-0.5">
+                  {p.sku ?? '—'}
+                  {p.pack ? ` · фасування ${p.pack} ${p.unit}` : ''}
+                  {p.status !== 'active' && (
+                    <span className="text-amber-500"> · знято з продажу</span>
+                  )}
+                  {p.stock === 0 && <span className="text-amber-500"> · немає на складі</span>}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="text-zinc-400 text-xs">Замовлення</div>
+
+      <div className="flex-1 overflow-y-auto space-y-1.5 min-h-[120px]">
+        {lines.length === 0 && (
+          <div className="text-zinc-600 text-xs px-1 py-6 text-center">
+            Знайдіть товар у полі вище — він з’явиться тут
+          </div>
+        )}
+        {lines.map((l, i) => (
+          <div key={l.key} className="bg-zinc-800/60 rounded-lg px-2.5 py-2">
+            <div className="flex items-start gap-2">
+              <span className="text-zinc-600 text-xs w-4 shrink-0 pt-0.5">{i + 1}</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-white text-xs leading-snug">{l.title}</div>
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <input
+                    type="number" step="0.01" min="0" value={l.qty}
+                    onChange={e => patch(l.key, { qty: Number(e.target.value) })}
+                    className="w-20 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
+                               text-white text-xs focus:outline-none focus:border-red-500"
+                  />
+                  <span className="text-zinc-500 text-xs w-7">{l.unit}</span>
+                  <span className="text-zinc-600 text-xs">×</span>
+                  <input
+                    type="number" step="0.01" min="0" value={l.price_per_unit}
+                    onChange={e => patch(l.key, { price_per_unit: Number(e.target.value) })}
+                    className="w-20 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
+                               text-white text-xs focus:outline-none focus:border-red-500"
+                  />
+                  <span className="text-white text-xs ml-auto tabular-nums">
+                    {money(l.qty * l.price_per_unit)}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => onChange(lines.filter(x => x.key !== l.key))}
+                className="text-zinc-600 hover:text-red-400 text-xs shrink-0 transition-colors"
+                title="Прибрати"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="border-t border-zinc-800 pt-2 flex items-center justify-between">
+        <span className="text-zinc-400 text-xs">Разом</span>
+        <span className="text-white text-sm font-semibold tabular-nums">{money(total)}</span>
+      </div>
+    </div>
+  )
+}

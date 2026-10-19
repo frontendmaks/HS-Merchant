@@ -23,7 +23,12 @@ const nav = [
     ],
   },
   { href: '/syncs',    label: 'Синхронізації',  icon: '↻', roles: PAGE_ROLES.syncs },
-  { href: '/orders',   label: 'Замовлення',     icon: '◷', roles: PAGE_ROLES.orders },
+  {
+    href: '/orders', label: 'Замовлення', icon: '◷', roles: PAGE_ROLES.orders,
+    children: [
+      { href: '/orders/manual', label: 'Ручні замовлення', roles: PAGE_ROLES.manualOrders },
+    ],
+  },
   { href: '/news',     label: 'Новини',         icon: '◫', roles: PAGE_ROLES.news },
   {
     href: '/requests', label: 'Запити', icon: '✉', roles: PAGE_ROLES.requests,

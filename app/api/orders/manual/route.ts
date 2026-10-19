@@ -1,0 +1,155 @@
+import { randomBytes } from 'node:crypto'
+import { NextRequest, NextResponse } from 'next/server'
+import { createServiceClient } from '@/lib/supabase/service'
+import { currentActor, logOrderEvent } from '@/lib/order-events'
+import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { notifyIntegrations } from '@/lib/integration-webhooks'
+import { isValidSlot, slotsForDate } from '@/lib/delivery-slots'
+import {
+  MANUAL_PLATFORM, manualExternalId, manualWeight, nextManualNumber,
+  orderTotal, lineTotal, type ManualLine,
+} from '@/lib/manual-orders'
+
+/**
+ * POST /api/orders/manual — прийняти замовлення по телефону.
+ *
+ * Створює звичайне замовлення з платформою «manual»: далі з ним працюють
+ * тими самими засобами, що й із маркетплейсним.
+ */
+export async function POST(req: NextRequest) {
+  const actor = await currentActor()
+  if (!actor) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const body = await req.json().catch(() => null) as {
+    customer_name?: string
+    customer_phone?: string
+    address?: string
+    warehouse?: string | null
+    delivery_zone?: string | null
+    delivery_date?: string
+    delivery_slot?: string
+    comment?: string | null
+    lines?: ManualLine[]
+  } | null
+
+  const name = body?.customer_name?.trim()
+  const phone = body?.customer_phone?.trim()
+  const address = body?.address?.trim()
+  const date = body?.delivery_date
+  const slot = body?.delivery_slot
+  const lines = (body?.lines ?? []).filter(l => l.title?.trim() && Number(l.qty) > 0)
+
+  if (!name) return NextResponse.json({ error: 'Вкажіть ПІБ клієнта' }, { status: 400 })
+  if (!phone) return NextResponse.json({ error: 'Вкажіть телефон' }, { status: 400 })
+  if (!address) return NextResponse.json({ error: 'Вкажіть адресу' }, { status: 400 })
+  if (!date || !slot || !isValidSlot(slot)) {
+    return NextResponse.json({ error: 'Оберіть дату й період доставки' }, { status: 400 })
+  }
+  if (!lines.length) {
+    return NextResponse.json({ error: 'Додайте хоча б один товар' }, { status: 400 })
+  }
+
+  // Період міг закритись, поки оператор набирав замовлення — буфер на те й є
+  const slotNow = slotsForDate(date).find(s => s.label === slot)
+  if (!slotNow?.available) {
+    return NextResponse.json(
+      { error: `Період ${slot} уже недоступний${slotNow?.reason ? ` — ${slotNow.reason}` : ''}` },
+      { status: 409 },
+    )
+  }
+
+  const service = createServiceClient()
+  const total = orderTotal(lines)
+  const weight = manualWeight(lines)
+
+  /**
+   * Номер і запис — з повтором при зіткненні.
+   *
+   * Двоє операторів можуть оформляти одночасно, і тоді обидва побачать той
+   * самий «останній вільний». Унікальний індекс не дасть зберегти дубль, а ми
+   * просто візьмемо наступний — замість того щоб показати людині помилку, якої
+   * вона не спричиняла.
+   */
+  type Created = {
+    id: string; manual_number: number; external_id: string; share_token: string
+  }
+  let created: Created | null = null
+  let lastError = ''
+
+  for (let attempt = 0; attempt < 5 && !created; attempt++) {
+    const number = await nextManualNumber(service, date)
+    const externalId = manualExternalId(date, number)
+
+    const { data, error } = await service.from('orders').insert({
+      external_id: externalId,
+      platform: MANUAL_PLATFORM,
+      manual_number: number,
+      order_date: date,
+      delivery_date: date,
+      delivery_slot: slot,
+      delivery_zone: body?.delivery_zone ?? null,
+      warehouse: body?.warehouse ?? null,
+      customer_name: name,
+      customer_phone: phone,
+      address,
+      status: 'Прийнято',
+      total,
+      commission: 0,
+      weight,
+      seats_amount: 1,
+      operator_comment: body?.comment?.trim() || null,
+      created_by: actor.id,
+      // Токен для бланка складу: комірник відкриває його без акаунта
+      share_token: randomBytes(18).toString('base64url'),
+      items: lines.map(l => `${l.title}, ${l.qty} ${l.unit} x ${l.price_per_unit} грн`).join('\n'),
+    }).select('id, manual_number, external_id, share_token').single()
+
+    if (!error && data) {
+      created = data as Created
+      break
+    }
+    lastError = error?.message ?? 'Не вдалося створити замовлення'
+    // Унікальний індекс спрацював — пробуємо наступний номер
+    if (!error?.message?.includes('duplicate')) break
+  }
+
+  if (!created) {
+    return NextResponse.json({ error: lastError }, { status: 500 })
+  }
+
+  await service.from('order_items').insert(lines.map((l, i) => ({
+    order_id: created!.id,
+    position: i,
+    source: 'manual',
+    product_id: l.product_id ?? null,
+    title: l.title.trim(),
+    unit: l.unit || 'шт',
+    unit_weight: Number(l.unit_weight ?? 0),
+    price_per_unit: Number(l.price_per_unit ?? 0),
+    ordered_qty: Number(l.qty),
+    ordered_total: lineTotal(l),
+    removed: false,
+  })))
+
+  await logOrderEvent(service, created.id, 'created', {
+    details: {
+      number: created.manual_number, slot, warehouse: body?.warehouse ?? null,
+      lines: lines.length, total,
+    },
+  }, actor)
+
+  await broadcastOrderChange(created.id, 'items')
+  await notifyIntegrations(created.id, 'order.created', service)
+
+  return NextResponse.json({
+    ok: true,
+    id: created.id,
+    number: created.manual_number,
+    external_id: created.external_id,
+    total,
+    weight,
+    share_token: created.share_token,
+    /** Посилання для складу — відкривається без входу в Мерчант */
+    document_url: `/zamovlennya/${created.share_token}`,
+  })
+}

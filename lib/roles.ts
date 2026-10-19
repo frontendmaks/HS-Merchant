@@ -81,6 +81,8 @@ export const PAGE_ROLES = {
   // strategy rather than trade figures, so it stays outside the analyst's view.
   priceMonitor: ['super_admin', 'admin', 'manager'],
   orders:    ['super_admin', 'admin', 'manager', 'operator', 'viewer'],
+  /** Приймання замовлень телефоном — Глядач лише дивиться, тож сюди не ходить */
+  manualOrders: ['super_admin', 'admin', 'manager', 'operator'],
   requests:  ['super_admin', 'admin', 'manager', 'operator'],
   /** Everyone has a newsfeed; which pieces land in it is decided per piece
    *  by its audience — see lib/news.ts */
