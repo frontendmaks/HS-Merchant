@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor } from '@/lib/order-events'
 import { getCurrentRole } from '@/lib/getRole'
-import { visibleChats, telegramConfigured } from '@/lib/telegram'
+import { visibleChats } from '@/lib/bitrix-chat'
+import { bitrixConfigured } from '@/lib/bitrix'
 
 /**
  * Чати складів.
@@ -24,19 +25,19 @@ export async function GET() {
   const service = createServiceClient()
   const [{ data: zones }, { data: linked }] = await Promise.all([
     service.from('delivery_zones').select('warehouse'),
-    service.from('telegram_chats').select('warehouse, chat_id, title'),
+    service.from('warehouse_chats').select('warehouse, dialog_id, title'),
   ])
 
   const warehouses = [...new Set((zones ?? []).map(z => z.warehouse as string))].sort()
 
-  let chats: { id: number; title: string; type: string }[] = []
+  let chats: { id: string; title: string }[] = []
   let error: string | null = null
-  if (telegramConfigured()) {
+  if (bitrixConfigured()) {
     try { chats = await visibleChats() } catch (e) {
       error = e instanceof Error ? e.message : String(e)
     }
   } else {
-    error = 'TELEGRAM_BOT_TOKEN не налаштовано'
+    error = 'Бітрікс не налаштовано'
   }
 
   return NextResponse.json({ warehouses, linked: linked ?? [], chats, error })
@@ -49,7 +50,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => null) as
-    { warehouse?: string; chat_id?: number | null; title?: string } | null
+    { warehouse?: string; dialog_id?: string | null; title?: string } | null
 
   if (!body?.warehouse) {
     return NextResponse.json({ error: 'Вкажіть склад' }, { status: 400 })
@@ -57,14 +58,14 @@ export async function POST(req: NextRequest) {
 
   const service = createServiceClient()
 
-  if (body.chat_id == null) {
-    await service.from('telegram_chats').delete().eq('warehouse', body.warehouse)
+  if (!body.dialog_id) {
+    await service.from('warehouse_chats').delete().eq('warehouse', body.warehouse)
     return NextResponse.json({ ok: true, removed: true })
   }
 
-  await service.from('telegram_chats').upsert({
+  await service.from('warehouse_chats').upsert({
     warehouse: body.warehouse,
-    chat_id: body.chat_id,
+    dialog_id: body.dialog_id,
     title: body.title ?? null,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'warehouse' })

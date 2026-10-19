@@ -1,8 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 
-interface Chat { id: number; title: string; type: string }
-interface Linked { warehouse: string; chat_id: number; title: string | null }
+interface Chat { id: string; title: string }
+interface Linked { warehouse: string; dialog_id: string; title: string | null }
 
 /**
  * Куди надсилати бланк кожного складу.
@@ -19,20 +19,20 @@ export default function TelegramChats() {
   const [busy, setBusy] = useState('')
 
   async function load() {
-    const r = await fetch('/api/telegram/chats')
+    const r = await fetch('/api/chats')
     if (r.ok) setData(await r.json())
   }
   useEffect(() => { if (open) void load() }, [open])
 
-  async function link(warehouse: string, chatId: string) {
+  async function link(warehouse: string, dialogId: string) {
     setBusy(warehouse)
-    const chat = data?.chats.find(c => String(c.id) === chatId)
-    await fetch('/api/telegram/chats', {
+    const chat = data?.chats.find(c => c.id === dialogId)
+    await fetch('/api/chats', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         warehouse,
-        chat_id: chatId ? Number(chatId) : null,
+        dialog_id: dialogId || null,
         title: chat?.title ?? null,
       }),
     })
@@ -59,7 +59,7 @@ export default function TelegramChats() {
         <div>
           <div className="text-white text-sm font-medium">Чати складів</div>
           <div className="text-zinc-500 text-xs mt-0.5">
-            Бланк нового замовлення йде в чат того складу, на який воно впало
+            Бланк нового замовлення йде в чат Бітрікса того складу, на який воно впало
           </div>
         </div>
         <button onClick={() => setOpen(false)} className="text-zinc-500 hover:text-white text-sm">
@@ -76,8 +76,8 @@ export default function TelegramChats() {
 
       {data && data.chats.length === 0 && !data.error && (
         <div className="text-zinc-500 text-xs">
-          Бот поки не бачить жодної групи. Додайте його в групи складів — після
-          цього список з’явиться.
+          Чатів не видно — перевірте, чи має доступ до них той користувач
+          Бітрікса, від чийого імені працює інтеграція.
         </div>
       )}
 
@@ -88,16 +88,16 @@ export default function TelegramChats() {
             <div key={w} className="flex items-center gap-2">
               <span className="text-zinc-300 text-xs w-56 shrink-0 truncate">{w}</span>
               <select
-                value={current?.chat_id ?? ''}
+                value={current?.dialog_id ?? ''}
                 disabled={busy === w}
                 onChange={e => void link(w, e.target.value)}
                 className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1
                            text-white text-xs focus:outline-none focus:border-red-500"
               >
                 <option value="">— не надсилати —</option>
-                {current && !(data?.chats ?? []).some(c => c.id === current.chat_id) && (
-                  <option value={current.chat_id}>
-                    {current.title ?? `чат ${current.chat_id}`}
+                {current && !(data?.chats ?? []).some(c => c.id === current.dialog_id) && (
+                  <option value={current.dialog_id}>
+                    {current.title ?? current.dialog_id}
                   </option>
                 )}
                 {(data?.chats ?? []).map(c => (

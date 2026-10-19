@@ -3,7 +3,6 @@ export const dynamic = 'force-dynamic'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
 import { redirect } from 'next/navigation'
-import { phoneKey } from '@/lib/phone'
 import CustomerRow, { type Customer } from './CustomerRow'
 import CustomerSearch from './CustomerSearch'
 import WideScroll from '../orders/WideScroll'
@@ -33,11 +32,13 @@ export default async function CustomersPage({
   let query = service.from('customers').select('*')
 
   if (q.trim()) {
-    const digits = phoneKey(q) || q.replace(/\D/g, '')
-    // Набрали цифри — шукаємо номер, літери — ім'я чи адресу
-    query = digits.length >= 4
-      ? query.like('phone_key', `%${digits.slice(-9)}%`)
-      : query.or(`name.ilike.%${q.trim()}%`)
+    const digits = q.replace(/\D/g, '')
+    // Один рядок на всі поля: ім'я, адреса, будь-який із номерів. Нуль
+    // попереду відкидаємо — «0677…» і «+38067…» це той самий номер
+    const needle = digits.length >= 3
+      ? digits.replace(/^0+/, '')
+      : q.trim().toLowerCase()
+    query = query.ilike('search', `%${needle.replace(/[%_]/g, ' ')}%`)
   }
 
   query = sort === 'orders'

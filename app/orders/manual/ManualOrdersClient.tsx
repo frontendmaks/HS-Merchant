@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { isPhoneComplete, phoneKey } from '@/lib/phone'
 import { deliveryFeeFor } from '@/lib/delivery-fee'
 import Overlay, { ProductPicker, field, money, type Line } from '@/components/OrderLinesPicker'
-import TelegramChats from './TelegramChats'
+import WarehouseChats from './WarehouseChats'
 
 interface Recent {
   id: string; external_id: string; manual_number: number | null
@@ -48,7 +48,7 @@ export default function ManualOrdersClient({ recent, warehouses, initial, canSet
         </button>
       </div>
 
-      {canSetChats && <TelegramChats />}
+      {canSetChats && <WarehouseChats />}
 
       {recent.length === 0 ? (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-6 py-12 text-center">
@@ -168,7 +168,7 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
       const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(phone)}`)
       const d = await r.json().catch(() => ({}))
       setByPhone(d.customers ?? [])
-    }, 200)
+    }, 120)
   }, [phone, picked])
 
   const nameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -179,7 +179,7 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
       const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(name)}`)
       const d = await r.json().catch(() => ({}))
       setByName(d.customers ?? [])
-    }, 200)
+    }, 120)
   }, [name, picked])
 
   // Адреса теж шукає: постійному клієнту її диктують рідко — її впізнають
@@ -191,7 +191,7 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
       const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(address)}`)
       const d = await r.json().catch(() => ({}))
       setByAddress(d.customers ?? [])
-    }, 300)
+    }, 200)
   }, [address, picked])
 
   /** Що саме підставила база — щоб відрізнити це від набраного руками. */

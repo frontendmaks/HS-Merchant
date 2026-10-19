@@ -13,7 +13,7 @@ import { reserveNumber } from '@/lib/manual-register'
 import { withDelivery } from '@/lib/delivery-fee'
 import { pushOrderToBitrix } from '@/lib/bitrix-deal'
 import { bitrixConfigured } from '@/lib/bitrix'
-import { sendOrderSheet, telegramConfigured } from '@/lib/telegram'
+import { sendOrderSheet } from '@/lib/bitrix-chat'
 
 /**
  * POST /api/orders/manual — прийняти замовлення по телефону.
@@ -179,9 +179,9 @@ export async function POST(req: NextRequest) {
    * Склад уже вирахувано з адреси, а в кожного складу свій чат: посилання
    * доїжджає туди, де замовлення збиратимуть, без пересилань руками.
    */
-  const chat = telegramConfigured()
+  const chat = bitrixConfigured()
     ? await sendOrderSheet(service, created.id)
-    : { error: 'Телеграм не налаштовано' }
+    : { error: 'Бітрікс не налаштовано' }
 
   return NextResponse.json({
     ok: true,
