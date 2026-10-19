@@ -35,11 +35,14 @@ export default async function CustomersPage({
   const search = customerQuery(q)
   if (search) query = query.like(search.column, `%${search.needle}%`)
 
+  // Клієнти без замовлень — це контакти з CRM, яких у нас ще не було.
+  // Їх двадцять п'ять тисяч, і першими вони бути не повинні: спадний порядок
+  // у Postgres ставить порожнечу попереду, тож кажемо навпаки
   query = sort === 'orders'
     ? query.order('orders_count', { ascending: false })
     : sort === 'spent'
-    ? query.order('total_spent', { ascending: false })
-    : query.order('last_order', { ascending: false })
+    ? query.order('total_spent', { ascending: false, nullsFirst: false })
+    : query.order('last_order', { ascending: false, nullsFirst: false })
 
   // Рахуємо окремо: у списку лежить сторінка, а в картці має стояти скільки
   // їх насправді — інакше «300» означало б рівно те, що ми показали
