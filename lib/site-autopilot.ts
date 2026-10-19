@@ -115,8 +115,17 @@ export async function autoProcessSiteOrders(
           service, order.delivery_date, order.customer_name ?? 'замовлення з сайту',
         )
         if (reserved.source === 'sheet') {
-          patch.manual_number = reserved.number
-          patch.number_source = reserved.source
+          /**
+           * Номер зберігаємо тієї ж миті.
+           *
+           * У журналі він уже зайнятий — ім'я вписане. Якщо впасти між цим і
+           * кінцем обходу, рядок лишиться зайнятим ніким, а наступний прохід
+           * візьме наступний номер і так само лишить по собі дірку.
+           */
+          await service.from('orders')
+            .update({ manual_number: reserved.number, number_source: reserved.source })
+            .eq('id', order.id)
+
           crm[FIELD.boxNumber] = String(reserved.number)
           result.numbered++
         } else {
