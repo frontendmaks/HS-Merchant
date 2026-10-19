@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { isPhoneComplete, phoneKey } from '@/lib/phone'
+import { deliveryFeeFor } from '@/lib/delivery-fee'
 
 interface Recent {
   id: string; external_id: string; manual_number: number | null
@@ -146,8 +147,13 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
   const [lines, setLines] = useState<Line[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [done, setDone] = useState<
-    { number: number; url: string; source?: string; note?: string | null } | null>(null)
+  const [done, setDone] = useState<{
+    number: number
+    source?: string
+    note?: string | null
+    deal_id?: number | null
+    crm_error?: string | null
+  } | null>(null)
 
   // Клієнти з минулих замовлень.
   //
@@ -249,7 +255,11 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
     addrTimer.current = setTimeout(() => void resolve(address, date), 700)
   }, [address, date, resolve])
 
-  const total = lines.reduce((s, l) => s + l.qty * l.price_per_unit, 0)
+  const goodsSum = lines.reduce((s, l) => s + l.qty * l.price_per_unit, 0)
+  // Оператор називає клієнту суму вголос, тож доставку він має бачити тут,
+  // а не дізнаватись про неї з готового замовлення
+  const delivery = lines.length ? deliveryFeeFor(lines) : 0
+  const total = goodsSum + delivery
 
   /**
    * Чого бракує, щоб замовлення можна було прийняти.
@@ -289,8 +299,9 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
       const d = await res.json()
       if (!res.ok) throw new Error(d.error || 'Не вдалося створити')
       setDone({
-        number: d.number, url: d.document_url,
+        number: d.number,
         source: d.number_source, note: d.number_note,
+        deal_id: d.deal_id ?? null, crm_error: d.crm_error ?? null,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -309,7 +320,6 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
             {done.source === 'sheet'
               ? 'Номер узято з журналу, ім’я клієнта вписано в таблицю.'
               : 'Номер видав Мерчант — у журнал він не потрапив.'}
-            {' '}Бланк для складу — за посиланням нижче, він відкривається без входу.
           </p>
           {done.note && (
             <div className="mt-2 bg-amber-950/40 border border-amber-900 rounded-lg
@@ -317,18 +327,17 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
               {done.note} — впишіть номер у журнал вручну
             </div>
           )}
-          <div className="flex items-center gap-2 mt-4">
-            <input
-              readOnly
-              value={typeof window !== 'undefined' ? window.location.origin + done.url : done.url}
-              onFocus={e => e.currentTarget.select()}
-              className={field}
-            />
-            <a href={done.url} target="_blank" rel="noreferrer"
-              className="bg-zinc-700 hover:bg-zinc-600 text-white text-sm px-3 py-2 rounded-lg shrink-0">
-              Відкрити
-            </a>
-          </div>
+          {done.deal_id ? (
+            <div className="mt-3 text-zinc-400 text-xs">
+              Угода в Бітріксі — <span className="text-white">#{done.deal_id}</span>
+            </div>
+          ) : (
+            <div className="mt-3 bg-amber-950/40 border border-amber-900 rounded-lg
+                            px-3 py-2 text-amber-400 text-xs">
+              У Бітрікс не потрапило{done.crm_error ? `: ${done.crm_error}` : ''}.
+              Замовлення прийняте — передайте його в CRM вручну.
+            </div>
+          )}
           <button onClick={onCreated}
             className="mt-5 bg-red-600 hover:bg-red-500 text-white text-sm px-4 py-2 rounded-lg">
             Готово
@@ -499,6 +508,14 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
           Позицій: <span className="text-white">{lines.length}</span>
           <span className="mx-2 text-zinc-700">·</span>
           Сума: <span className="text-white font-semibold">{money(total)}</span>
+          {delivery > 0 && (
+            <span className="text-zinc-500">
+              {' '}(товари {money(goodsSum)} + доставка {money(delivery)})
+            </span>
+          )}
+          {lines.length > 0 && delivery === 0 && (
+            <span className="text-emerald-500"> · доставка безкоштовна</span>
+          )}
           {missing.length > 0 && (
             <div className="text-amber-500 text-xs mt-0.5">
               Бракує: {missing.join(', ')}

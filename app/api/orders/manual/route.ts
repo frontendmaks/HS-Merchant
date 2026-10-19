@@ -10,6 +10,9 @@ import {
   orderTotal, lineTotal, type ManualLine,
 } from '@/lib/manual-orders'
 import { reserveNumber } from '@/lib/manual-register'
+import { withDelivery } from '@/lib/delivery-fee'
+import { pushOrderToBitrix } from '@/lib/bitrix-deal'
+import { bitrixConfigured } from '@/lib/bitrix'
 
 /**
  * POST /api/orders/manual — прийняти замовлення по телефону.
@@ -38,7 +41,10 @@ export async function POST(req: NextRequest) {
   const address = body?.address?.trim()
   const date = body?.delivery_date
   const slot = body?.delivery_slot
-  const lines = (body?.lines ?? []).filter(l => l.title?.trim() && Number(l.qty) > 0)
+  const goods = (body?.lines ?? []).filter(l => l.title?.trim() && Number(l.qty) > 0)
+  // Доставку додаємо тут, а не в формі: правило про тисячу має діяти однаково,
+  // хто б і звідки замовлення не прислав
+  const lines = withDelivery(goods)
 
   if (!name) return NextResponse.json({ error: 'Вкажіть ПІБ клієнта' }, { status: 400 })
   if (!phone) return NextResponse.json({ error: 'Вкажіть телефон' }, { status: 400 })
@@ -50,7 +56,7 @@ export async function POST(req: NextRequest) {
   if (!date || !slot || !isValidSlot(slot)) {
     return NextResponse.json({ error: 'Оберіть дату й період доставки' }, { status: 400 })
   }
-  if (!lines.length) {
+  if (!goods.length) {
     return NextResponse.json({ error: 'Додайте хоча б один товар' }, { status: 400 })
   }
 
@@ -65,7 +71,8 @@ export async function POST(req: NextRequest) {
 
   const service = createServiceClient()
   const total = orderTotal(lines)
-  const weight = manualWeight(lines)
+  // Вага — тільки товари: доставка не їде у ваговій накладній
+  const weight = manualWeight(goods)
 
   /**
    * Номер і запис — з повтором при зіткненні.
@@ -154,9 +161,22 @@ export async function POST(req: NextRequest) {
   await broadcastOrderChange(created.id, 'items')
   await notifyIntegrations(created.id, 'order.created', service)
 
+  /**
+   * Угода в Бітріксі.
+   *
+   * Якщо CRM не відповіла, замовлення все одно прийняте: воно вже в базі, у
+   * журналі й на бланку. Помилка лишається на замовленні, і надіслати його
+   * можна повторно — повторний виклик оновлює ту саму угоду.
+   */
+  const crm = bitrixConfigured()
+    ? await pushOrderToBitrix(service, created.id)
+    : { error: 'Бітрікс не налаштовано' }
+
   return NextResponse.json({
     ok: true,
     id: created.id,
+    deal_id: 'dealId' in crm ? crm.dealId : null,
+    crm_error: 'error' in crm ? crm.error : null,
     number: created.manual_number,
     number_source: reserved.source,
     number_note: reserved.note,
