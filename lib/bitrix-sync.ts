@@ -175,7 +175,7 @@ export async function syncSiteOrders(
         }
 
         const { data: existing } = await service
-          .from('orders').select('id, platform, status')
+          .from('orders').select('id, platform, status, address')
           .eq('bitrix_deal_id', Number(deal.ID)).maybeSingle()
 
         if (existing) {
@@ -188,8 +188,13 @@ export async function syncSiteOrders(
            */
           const ours = existing.platform === 'manual'
 
+          // Адресу поправили — отже, зону й склад варто перерахувати заново
+          const readdressed = !ours && existing.address !== fields.address
+
           await service.from('orders')
-            .update(ours ? { status, updated_at: fields.updated_at } : fields)
+            .update(ours
+              ? { status, updated_at: fields.updated_at }
+              : readdressed ? { ...fields, auto_done_at: null } : fields)
             .eq('id', existing.id)
 
           if (!ours) await saveRows(service, existing.id as string, rows)

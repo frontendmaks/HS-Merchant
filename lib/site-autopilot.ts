@@ -138,9 +138,16 @@ export async function autoProcessSiteOrders(
       }
 
       patch.auto_problem = problems.length ? problems.join(', ') : null
-      // Замовлення з хибами лишається в черзі: наступного разу адреса може
-      // розпізнатись, а товари — з'явитись
-      patch.auto_done_at = problems.length ? null : new Date().toISOString()
+      /**
+       * Оглянуте більше не переглядаємо — навіть із хибами.
+       *
+       * Хиба тут здебільшого стала: адреса в селі, якого геокодер не знає,
+       * такою й лишиться. Тримати ці замовлення в черзі означало б щоразу
+       * впиратись у них і не доходити до нових. Що не склалось, видно
+       * оператору написом «потребує уваги», а повторний огляд починає
+       * синхронізація, щойно адресу поправлять.
+       */
+      patch.auto_done_at = new Date().toISOString()
 
       await service.from('orders').update(patch).eq('id', order.id)
       if (problems.length) result.problems++
