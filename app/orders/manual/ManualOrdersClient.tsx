@@ -144,7 +144,8 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
   const [lines, setLines] = useState<Line[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [done, setDone] = useState<{ number: number; url: string } | null>(null)
+  const [done, setDone] = useState<
+    { number: number; url: string; source?: string; note?: string | null } | null>(null)
 
   // Клієнти з минулих замовлень
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -211,7 +212,10 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
       })
       const d = await res.json()
       if (!res.ok) throw new Error(d.error || 'Не вдалося створити')
-      setDone({ number: d.number, url: d.document_url })
+      setDone({
+        number: d.number, url: d.document_url,
+        source: d.number_source, note: d.number_note,
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -226,9 +230,17 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
           <div className="text-emerald-400 text-sm">✓ Замовлення прийнято</div>
           <div className="text-white text-3xl font-bold mt-2">№ {done.number}</div>
           <p className="text-zinc-400 text-xs mt-3">
-            Номер записано в замовлення. Бланк для складу — за посиланням нижче,
-            він відкривається без входу в Мерчант.
+            {done.source === 'sheet'
+              ? 'Номер узято з журналу, ім’я клієнта вписано в таблицю.'
+              : 'Номер видав Мерчант — у журнал він не потрапив.'}
+            {' '}Бланк для складу — за посиланням нижче, він відкривається без входу.
           </p>
+          {done.note && (
+            <div className="mt-2 bg-amber-950/40 border border-amber-900 rounded-lg
+                            px-3 py-2 text-amber-400 text-xs">
+              {done.note} — впишіть номер у журнал вручну
+            </div>
+          )}
           <div className="flex items-center gap-2 mt-4">
             <input
               readOnly

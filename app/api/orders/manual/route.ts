@@ -6,9 +6,10 @@ import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { isValidSlot, slotsForDate } from '@/lib/delivery-slots'
 import {
-  MANUAL_PLATFORM, manualExternalId, manualWeight, nextManualNumber,
+  MANUAL_PLATFORM, manualExternalId, manualWeight,
   orderTotal, lineTotal, type ManualLine,
 } from '@/lib/manual-orders'
+import { reserveNumber } from '@/lib/manual-register'
 
 /**
  * POST /api/orders/manual — прийняти замовлення по телефону.
@@ -76,8 +77,13 @@ export async function POST(req: NextRequest) {
   let created: Created | null = null
   let lastError = ''
 
+  // Номер беремо з журналу — тієї самої таблиці, куди пишуть і руками
+  const reserved = await reserveNumber(service, date, name)
+
   for (let attempt = 0; attempt < 5 && !created; attempt++) {
-    const number = await nextManualNumber(service, date)
+    const number = attempt === 0
+      ? reserved.number
+      : reserved.number + attempt
     const externalId = manualExternalId(date, number)
 
     const { data, error } = await service.from('orders').insert({
@@ -99,6 +105,7 @@ export async function POST(req: NextRequest) {
       seats_amount: 1,
       operator_comment: body?.comment?.trim() || null,
       created_by: actor.id,
+      number_source: reserved.source,
       // Токен для бланка складу: комірник відкриває його без акаунта
       share_token: randomBytes(18).toString('base64url'),
       items: lines.map(l => `${l.title}, ${l.qty} ${l.unit} x ${l.price_per_unit} грн`).join('\n'),
@@ -133,7 +140,9 @@ export async function POST(req: NextRequest) {
 
   await logOrderEvent(service, created.id, 'created', {
     details: {
-      number: created.manual_number, slot, warehouse: body?.warehouse ?? null,
+      number: created.manual_number,
+    number_source: reserved.source,
+    number_note: reserved.note, slot, warehouse: body?.warehouse ?? null,
       lines: lines.length, total,
     },
   }, actor)
@@ -145,6 +154,8 @@ export async function POST(req: NextRequest) {
     ok: true,
     id: created.id,
     number: created.manual_number,
+    number_source: reserved.source,
+    number_note: reserved.note,
     external_id: created.external_id,
     total,
     weight,
