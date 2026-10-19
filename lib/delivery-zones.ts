@@ -201,7 +201,7 @@ function queryVariants(address: string): string[] {
  * записи кешу з нижчою версією перепитуються, замість того щоб вічно
  * повертати координати, знайдені за старим правилом.
  */
-const RESOLVER_VERSION = 2
+const RESOLVER_VERSION = 3
 
 async function remember(
   service: Service,
