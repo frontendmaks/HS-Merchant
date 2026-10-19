@@ -154,6 +154,29 @@ function queryVariants(address: string): string[] {
   ])]
 }
 
+/**
+ * Версія логіки пошуку адреси.
+ *
+ * Піднімається щоразу, коли змінюється те, як складається запит до геокодера:
+ * записи кешу з нижчою версією перепитуються, замість того щоб вічно
+ * повертати координати, знайдені за старим правилом.
+ */
+const RESOLVER_VERSION = 2
+
+async function remember(
+  service: Service,
+  query: string,
+  point: Geocoded | null,
+): Promise<void> {
+  await service.from('geocode_cache').upsert({
+    query,
+    lat: point?.lat ?? null,
+    lng: point?.lng ?? null,
+    display_name: point?.display_name ?? null,
+    resolver: RESOLVER_VERSION,
+  }, { onConflict: 'query' })
+}
+
 export async function geocode(
   service: Service,
   address: string,
@@ -162,9 +185,12 @@ export async function geocode(
   if (query.length < 5) return null
 
   const { data: cached } = await service
-    .from('geocode_cache').select('lat, lng, display_name').eq('query', query).maybeSingle()
+    .from('geocode_cache').select('lat, lng, display_name, resolver').eq('query', query).maybeSingle()
 
-  if (cached) {
+  // Кеш старої версії не використовуємо: він пам'ятає відповідь, а не спосіб,
+  // яким її отримали, і після зміни способу тихо скасовував би виправлення —
+  // «Петлюри 14» так і лишалося б у Дрогобичі, вже знайденому раніше.
+  if (cached && Number(cached.resolver ?? 1) >= RESOLVER_VERSION) {
     return cached.lat == null ? null : {
       lat: Number(cached.lat), lng: Number(cached.lng),
       display_name: cached.display_name as string,
@@ -187,7 +213,7 @@ export async function geocode(
     firstHit ??= point
 
     if (zoneAt(point, zones)) {
-      await service.from('geocode_cache').upsert({ query, ...point }, { onConflict: 'query' })
+      await remember(service, query, point)
       return point
     }
     // Чужий сервіс просить не частіше разу на секунду
@@ -197,12 +223,11 @@ export async function geocode(
   // Жоден варіант не потрапив у зону — лишаємо перший знайдений, щоб
   // оператор бачив, що саме розпізналось, і міг виправити адресу
   if (firstHit) {
-    await service.from('geocode_cache').upsert({ query, ...firstHit }, { onConflict: 'query' })
+    await remember(service, query, firstHit)
     return firstHit
   }
 
-  await service.from('geocode_cache')
-    .upsert({ query, lat: null, lng: null, display_name: null }, { onConflict: 'query' })
+  await remember(service, query, null)
   return null
 }
 

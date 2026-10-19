@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { isPhoneComplete, phoneKey } from '@/lib/phone'
 
 interface Recent {
   id: string; external_id: string; manual_number: number | null
@@ -17,7 +18,8 @@ interface Product {
   stock: number | null; status: string; category: string | null
 }
 interface Customer {
-  name: string; phones: string[]; addresses: string[]; orders: number; last: string | null
+  key: string; phone: string; names: string[]; addresses: string[]
+  orders: number; last: string | null
 }
 interface Line {
   key: string
@@ -147,20 +149,44 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
   const [done, setDone] = useState<
     { number: number; url: string; source?: string; note?: string | null } | null>(null)
 
-  // Клієнти з минулих замовлень
-  const [customers, setCustomers] = useState<Customer[]>([])
+  // Клієнти з минулих замовлень.
+  //
+  // Шукати можна і з поля телефону, і з поля ПІБ: номер оператор чує першим,
+  // але постійний клієнт іноді називається раніше, ніж диктує номер.
+  const [byPhone, setByPhone] = useState<Customer[]>([])
+  const [byName, setByName] = useState<Customer[]>([])
   const [picked, setPicked] = useState<Customer | null>(null)
+
+  const phoneTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (phoneTimer.current) clearTimeout(phoneTimer.current)
+    if (phoneKey(phone).length < 4 || picked) { setByPhone([]); return }
+    phoneTimer.current = setTimeout(async () => {
+      const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(phone)}`)
+      const d = await r.json().catch(() => ({}))
+      setByPhone(d.customers ?? [])
+    }, 250)
+  }, [phone, picked])
 
   const nameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (nameTimer.current) clearTimeout(nameTimer.current)
-    if (name.trim().length < 2 || picked?.name === name) { setCustomers([]); return }
+    if (name.trim().length < 3 || picked) { setByName([]); return }
     nameTimer.current = setTimeout(async () => {
       const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(name)}`)
       const d = await r.json().catch(() => ({}))
-      setCustomers(d.customers ?? [])
-    }, 350)
+      setByName(d.customers ?? [])
+    }, 300)
   }, [name, picked])
+
+  /** Обраний клієнт заповнює решту полів — це і є сенс бази клієнтів. */
+  function pick(c: Customer) {
+    setPicked(c)
+    setPhone(c.phone)
+    if (c.names[0]) setName(c.names[0])
+    if (c.addresses[0]) setAddress(c.addresses[0])
+    setByPhone([]); setByName([])
+  }
 
   /** Адреса → склад і періоди. Запитуємо, коли оператор дописав адресу. */
   const resolve = useCallback(async (addr: string, when: string) => {
@@ -194,6 +220,26 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
   }, [address, date, resolve])
 
   const total = lines.reduce((s, l) => s + l.qty * l.price_per_unit, 0)
+
+  /**
+   * Чого бракує, щоб замовлення можна було прийняти.
+   *
+   * Усе, крім коментаря, обовʼязкове: половина бланка — це замовлення, яке
+   * комірник не збере, а кур'єр не відвезе. Показуємо переліком, а не одним
+   * «заповніть поля», щоб не шукати очима, де саме порожньо.
+   */
+  const missing: string[] = []
+  if (!isPhoneComplete(phone)) missing.push('телефон')
+  if (name.trim().length < 2) missing.push('ПІБ')
+  if (address.trim().length < 5) missing.push('адресу')
+  if (!warehouse) missing.push('склад')
+  if (!date) missing.push('дату')
+  if (!slots.some(x => x.label === slot && x.available)) missing.push('період доставки')
+  if (!lines.length) missing.push('товари')
+  else if (lines.some(l => l.qty <= 0 || l.price_per_unit <= 0)) {
+    missing.push('кількість і ціну в кожному рядку')
+  }
+
 
   async function submit() {
     setError('')
@@ -271,32 +317,27 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
 
       <div className="p-5 grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-5">
         <div className="space-y-4">
-          {/* ПІБ із пошуком по клієнтах */}
+          {/* Телефон — головний ідентифікатор клієнта */}
           <div className="relative">
-            <label className="text-zinc-400 text-xs block mb-1">ПІБ клієнта</label>
+            <label className="text-zinc-400 text-xs block mb-1">
+              Телефон <span className="text-red-500">*</span>
+            </label>
             <input
               autoFocus
-              value={name}
-              onChange={e => { setName(e.target.value); setPicked(null) }}
-              placeholder="Прізвище та ім'я, або почніть вводити для пошуку"
+              value={phone}
+              onChange={e => { setPhone(e.target.value); setPicked(null) }}
+              placeholder="+380…"
               className={field}
             />
-            {customers.length > 0 && (
+            {byPhone.length > 0 && (
               <div className="absolute z-20 left-0 right-0 mt-1 bg-zinc-800 border border-zinc-700
                               rounded-lg overflow-hidden max-h-60 overflow-y-auto">
-                {customers.map(c => (
-                  <button
-                    key={c.name}
-                    onClick={() => {
-                      setPicked(c); setName(c.name); setCustomers([])
-                      if (c.phones[0]) setPhone(c.phones[0])
-                      if (c.addresses[0]) setAddress(c.addresses[0])
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-zinc-700 transition-colors"
-                  >
-                    <div className="text-white text-sm">{c.name}</div>
+                {byPhone.map(c => (
+                  <button key={c.key} onClick={() => pick(c)}
+                    className="w-full text-left px-3 py-2 hover:bg-zinc-700 transition-colors">
+                    <div className="text-white text-sm">{c.phone}</div>
                     <div className="text-zinc-500 text-xs">
-                      {c.phones[0] ?? 'без телефону'} · замовлень: {c.orders}
+                      {c.names[0] ?? 'без імені'} · замовлень: {c.orders}
                     </div>
                   </button>
                 ))}
@@ -304,18 +345,38 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
             )}
           </div>
 
-          <div>
-            <label className="text-zinc-400 text-xs block mb-1">Контакти</label>
-            <input value={phone} onChange={e => setPhone(e.target.value)}
-              placeholder="+380…" className={field} />
-            {picked && picked.phones.length > 1 && (
+          <div className="relative">
+            <label className="text-zinc-400 text-xs block mb-1">
+              ПІБ клієнта <span className="text-red-500">*</span>
+            </label>
+            <input
+              value={name}
+              onChange={e => { setName(e.target.value); setPicked(null) }}
+              placeholder="Прізвище та ім'я"
+              className={field}
+            />
+            {byName.length > 0 && (
+              <div className="absolute z-20 left-0 right-0 mt-1 bg-zinc-800 border border-zinc-700
+                              rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                {byName.map(c => (
+                  <button key={c.key} onClick={() => pick(c)}
+                    className="w-full text-left px-3 py-2 hover:bg-zinc-700 transition-colors">
+                    <div className="text-white text-sm">{c.names[0] ?? c.phone}</div>
+                    <div className="text-zinc-500 text-xs">
+                      {c.phone} · замовлень: {c.orders}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {picked && picked.names.length > 1 && (
               <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                {picked.phones.map(p => (
-                  <button key={p} onClick={() => setPhone(p)}
+                {picked.names.slice(0, 4).map(n => (
+                  <button key={n} onClick={() => setName(n)}
                     className={`px-2 py-1 rounded text-xs transition-colors ${
-                      phone === p ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                      name === n ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'
                     }`}>
-                    {p}
+                    {n}
                   </button>
                 ))}
               </div>
@@ -323,7 +384,9 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
           </div>
 
           <div>
-            <label className="text-zinc-400 text-xs block mb-1">Адреса</label>
+            <label className="text-zinc-400 text-xs block mb-1">
+              Адреса <span className="text-red-500">*</span>
+            </label>
             <input value={address} onChange={e => setAddress(e.target.value)}
               placeholder="Львів, вул. Городоцька, 120, кв. 5" className={field} />
             {picked && picked.addresses.length > 1 && (
@@ -342,7 +405,7 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
           {/* Склад — випливає з адреси, але лишається виправним */}
           <div>
             <label className="text-zinc-400 text-xs block mb-1">
-              Склад замовлення
+              Склад замовлення <span className="text-red-500">*</span>
               {resolving && <span className="text-zinc-600"> · визначаємо…</span>}
               {zone && !resolving && <span className="text-emerald-500"> · за адресою ({zone})</span>}
             </label>
@@ -355,11 +418,15 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-zinc-400 text-xs block mb-1">Дата доставки</label>
+              <label className="text-zinc-400 text-xs block mb-1">
+                Дата доставки <span className="text-red-500">*</span>
+              </label>
               <input type="date" value={date} onChange={e => setDate(e.target.value)} className={field} />
             </div>
             <div>
-              <label className="text-zinc-400 text-xs block mb-1">Період</label>
+              <label className="text-zinc-400 text-xs block mb-1">
+                Період <span className="text-red-500">*</span>
+              </label>
               <div className="flex flex-col gap-1">
                 {slots.map(s => (
                   <button
@@ -398,17 +465,22 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
       )}
 
       <div className="px-5 py-4 border-t border-zinc-800 flex items-center justify-between gap-3">
-        <div className="text-zinc-400 text-sm">
+        <div className="text-zinc-400 text-sm min-w-0">
           Позицій: <span className="text-white">{lines.length}</span>
           <span className="mx-2 text-zinc-700">·</span>
           Сума: <span className="text-white font-semibold">{money(total)}</span>
+          {missing.length > 0 && (
+            <div className="text-amber-500 text-xs mt-0.5">
+              Бракує: {missing.join(', ')}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button onClick={onClose} className="text-zinc-400 hover:text-white text-sm px-3 py-2">
             Скасувати
           </button>
           <button
-            disabled={saving || !name.trim() || !phone.trim() || !address.trim() || !lines.length}
+            disabled={saving || missing.length > 0}
             onClick={submit}
             className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white
                        text-sm font-medium px-5 py-2 rounded-lg transition-colors"
@@ -488,24 +560,40 @@ function ProductPicker({ lines, onChange, total }: {
   total: number
 }) {
   const [query, setQuery] = useState('')
-  const [found, setFound] = useState<Product[]>([])
-  const [searching, setSearching] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [catalogue, setCatalogue] = useState<Product[] | null>(null)
 
+  /**
+   * Каталог береться один раз, щойно відкрилась форма.
+   *
+   * Дві тисячі позицій — це один запит замість запиту на кожну літеру, і
+   * підказка з'являється тієї ж миті, коли оператор домовляє слово. Поки
+   * список їде, поле вже приймає введення: доки оператор допише перше слово,
+   * каталог здебільшого вже тут.
+   */
   useEffect(() => {
-    if (timer.current) clearTimeout(timer.current)
-    if (query.trim().length < 2) { setFound([]); return }
-    setSearching(true)
-    timer.current = setTimeout(async () => {
-      try {
-        const r = await fetch(`/api/orders/manual/products?q=${encodeURIComponent(query)}`)
-        const d = await r.json().catch(() => ({}))
-        setFound(d.products ?? [])
-      } finally {
-        setSearching(false)
+    let alive = true
+    void (async () => {
+      const r = await fetch('/api/orders/manual/products')
+      const d = await r.json().catch(() => ({}))
+      if (alive) setCatalogue(d.products ?? [])
+    })()
+    return () => { alive = false }
+  }, [])
+
+  const needle = query.trim().toLowerCase()
+  const found = needle.length < 2 || !catalogue ? [] : (() => {
+    const hits: Product[] = []
+    for (const p of catalogue) {
+      if (p.name.toLowerCase().includes(needle)
+        || p.sku?.toLowerCase().includes(needle)
+        || p.code_1c?.toLowerCase().includes(needle)) {
+        hits.push(p)
+        if (hits.length === 40) break
       }
-    }, 300)
-  }, [query])
+    }
+    return hits
+  })()
+  const searching = needle.length >= 2 && !catalogue
 
   function add(p: Product) {
     // Ваговий товар додається одним фасуванням, штучний — однією штукою:
@@ -521,8 +609,8 @@ function ProductPicker({ lines, onChange, total }: {
       price_per_unit: p.price,
       qty,
     }])
+    // Порожній рядок пошуку ховає підказки сам — список рахується з нього
     setQuery('')
-    setFound([])
   }
 
   const patch = (key: string, next: Partial<Line>) =>
@@ -541,7 +629,7 @@ function ProductPicker({ lines, onChange, total }: {
         {(found.length > 0 || searching) && (
           <div className="absolute z-20 left-0 right-0 mt-1 bg-zinc-800 border border-zinc-700
                           rounded-lg max-h-72 overflow-y-auto">
-            {searching && <div className="px-3 py-2 text-zinc-500 text-xs">Шукаємо…</div>}
+            {searching && <div className="px-3 py-2 text-zinc-500 text-xs">Завантажуємо каталог…</div>}
             {found.map(p => (
               <button
                 key={p.id}

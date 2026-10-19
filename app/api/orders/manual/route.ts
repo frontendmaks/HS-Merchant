@@ -43,6 +43,10 @@ export async function POST(req: NextRequest) {
   if (!name) return NextResponse.json({ error: 'Вкажіть ПІБ клієнта' }, { status: 400 })
   if (!phone) return NextResponse.json({ error: 'Вкажіть телефон' }, { status: 400 })
   if (!address) return NextResponse.json({ error: 'Вкажіть адресу' }, { status: 400 })
+  // Без складу замовлення нікуди не потрапляє: бланк друкують саме там
+  if (!body?.warehouse?.trim()) {
+    return NextResponse.json({ error: 'Оберіть склад замовлення' }, { status: 400 })
+  }
   if (!date || !slot || !isValidSlot(slot)) {
     return NextResponse.json({ error: 'Оберіть дату й період доставки' }, { status: 400 })
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor } from '@/lib/order-events'
+import { phoneKey } from '@/lib/phone'
 
 /**
  * GET /api/orders/manual/customers?q=…
@@ -8,9 +9,12 @@ import { currentActor } from '@/lib/order-events'
  * Клієнти з минулих замовлень.
  *
  * Окремої бази клієнтів поки немає, але вона фактично вже є: кожне замовлення
- * несе ім'я, телефон і адресу. Групуємо за іменем — так один клієнт із трьома
- * номерами приходить одним записом із трьома номерами на вибір, а не трьома
- * однаковими рядками.
+ * несе ім'я, телефон і адресу.
+ *
+ * Збираємо за телефоном, не за іменем. Ім'я в замовленнях пишуть як почули —
+ * «Костишин Денис», «Денис К.», «денис костишин», — і за ним один клієнт
+ * розпадається на трьох. Телефон той самий у будь-якому записі, і саме його
+ * оператор чує першим.
  */
 export async function GET(req: NextRequest) {
   if (!await currentActor()) {
@@ -18,43 +22,55 @@ export async function GET(req: NextRequest) {
   }
 
   const q = (req.nextUrl.searchParams.get('q') ?? '').trim()
-  if (q.length < 2) return NextResponse.json({ customers: [] })
+  if (q.length < 3) return NextResponse.json({ customers: [] })
 
   const safe = q.replace(/[%_,()]/g, ' ').trim()
+  const digits = q.replace(/\D/g, '')
   const service = createServiceClient()
+
+  // Телефон у базі лежить по-різному: «+380…», «380…», «0…». Шукаємо за
+  // хвостом набраного — він однаковий у всіх записах
+  const tail = digits.length >= 4 ? digits.slice(-9) : ''
+  const filters = [`customer_name.ilike.%${safe}%`]
+  if (tail) filters.push(`customer_phone.ilike.%${tail}%`)
 
   const { data } = await service
     .from('orders')
     .select('customer_name, customer_phone, address, branch, order_date')
-    .or(`customer_name.ilike.%${safe}%,customer_phone.ilike.%${safe}%`)
-    .not('customer_name', 'is', null)
+    .or(filters.join(','))
+    .not('customer_phone', 'is', null)
     .order('order_date', { ascending: false })
-    .limit(200)
+    .limit(300)
 
-  const byName = new Map<string, {
-    name: string; phones: string[]; addresses: string[]; orders: number; last: string | null
-  }>()
+  interface Entry {
+    key: string; phone: string; names: string[]; addresses: string[]
+    orders: number; last: string | null
+  }
+  const byPhone = new Map<string, Entry>()
 
   for (const o of data ?? []) {
-    const name = (o.customer_name as string).trim()
-    if (!name) continue
-    const entry = byName.get(name) ?? {
-      name, phones: [], addresses: [], orders: 0, last: null,
+    const phone = (o.customer_phone as string | null)?.trim()
+    const key = phoneKey(phone)
+    if (!key) continue
+
+    const entry = byPhone.get(key) ?? {
+      key, phone: phone!, names: [], addresses: [], orders: 0, last: null,
     }
     entry.orders++
+    // Замовлення йдуть від найновішого, тож перше й буде останнім за датою
     entry.last ??= o.order_date as string
 
-    const phone = (o.customer_phone as string | null)?.trim()
-    if (phone && !entry.phones.includes(phone)) entry.phones.push(phone)
+    const name = (o.customer_name as string | null)?.trim()
+    if (name && !entry.names.includes(name)) entry.names.push(name)
 
     // Відділення теж адреса — просто чужа; для повторного замовлення згодиться
     const place = ((o.address as string | null) || (o.branch as string | null) || '').trim()
     if (place && !entry.addresses.includes(place)) entry.addresses.push(place)
 
-    byName.set(name, entry)
+    byPhone.set(key, entry)
   }
 
-  const customers = [...byName.values()]
+  const customers = [...byPhone.values()]
     .sort((a, b) => b.orders - a.orders)
     .slice(0, 20)
 

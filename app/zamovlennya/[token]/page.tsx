@@ -75,8 +75,6 @@ export default async function OrderSheet({
             <th className="text-right py-1.5 w-24">Кількість</th>
             <th className="text-right py-1.5 w-24">Ціна</th>
             <th className="text-right py-1.5 w-24">Сума</th>
-            {/* Порожня колонка під фактичну вагу — її вписують при зборі */}
-            <th className="text-right py-1.5 w-24">Факт</th>
           </tr>
         </thead>
         <tbody>
@@ -93,7 +91,6 @@ export default async function OrderSheet({
               <td className="py-2 text-right whitespace-nowrap">
                 {Number(i.ordered_total ?? 0)} ₴
               </td>
-              <td className="py-2" />
             </tr>
           ))}
         </tbody>
@@ -103,7 +100,6 @@ export default async function OrderSheet({
             <td className="py-2 text-right whitespace-nowrap">
               {Number(order.total ?? 0)} ₴
             </td>
-            <td />
           </tr>
           {order.weight != null && (
             <tr>
@@ -111,7 +107,6 @@ export default async function OrderSheet({
               <td className="py-1 text-right text-zinc-600 whitespace-nowrap">
                 {Number(order.weight)} кг
               </td>
-              <td />
             </tr>
           )}
         </tfoot>
