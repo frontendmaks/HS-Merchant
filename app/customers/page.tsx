@@ -46,7 +46,12 @@ export default async function CustomersPage({
     ? query.order('total_spent', { ascending: false })
     : query.order('last_order', { ascending: false })
 
-  const { data } = await query.limit(300)
+  // Рахуємо окремо: у списку лежить сторінка, а в картці має стояти скільки
+  // їх насправді — інакше «300» означало б рівно те, що ми показали
+  const [{ data }, { count }] = await Promise.all([
+    query.limit(300),
+    service.from('customers').select('phone_key', { count: 'exact', head: true }),
+  ])
   const customers = (data ?? []) as Customer[]
 
   const totals = customers.reduce(
@@ -82,6 +87,9 @@ export default async function CustomersPage({
         <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
           <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Клієнтів</div>
           <div className="text-3xl font-bold text-white">{customers.length}</div>
+          {customers.length < (count ?? 0) && (
+            <div className="text-zinc-500 text-sm mt-0.5">з {count} усього</div>
+          )}
         </div>
         <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
           <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Повторних</div>

@@ -66,7 +66,25 @@ async function contacts(ids: string[]) {
   return map
 }
 
-interface Row { PRODUCT_ID: string; PRODUCT_NAME: string; PRICE: string; QUANTITY: string }
+interface Row {
+  PRODUCT_ID: string; PRODUCT_NAME: string; PRICE: string; QUANTITY: string
+  MEASURE_NAME?: string | null
+}
+
+/**
+ * Одиниця позиції.
+ *
+ * Бітрікс присилає свою міру — «кг», «шт», «Пачка». Писати всюди «шт»
+ * означало б показати «0.6 шт філе» там, де насправді 600 грамів: комірник
+ * збере не те, а оператор не помітить.
+ */
+function unitOf(row: Row): string {
+  const m = (row.MEASURE_NAME ?? '').trim().toLowerCase()
+  if (m.startsWith('кг')) return 'кг'
+  if (m) return 'шт'
+  // Міри немає — дробова кількість сама себе видає: штуками так не беруть
+  return Number(row.QUANTITY) % 1 === 0 ? 'шт' : 'кг'
+}
 
 /**
  * Позиції одразу для багатьох угод.
@@ -150,7 +168,8 @@ export async function syncSiteOrders(
             : null,
           customer_comment: deal.COMMENTS?.trim() || null,
           items: rows.map(r =>
-            `${r.PRODUCT_NAME}, ${Number(r.QUANTITY)} x ${Number(r.PRICE)} грн`).join('\n'),
+            `${r.PRODUCT_NAME}, ${Number(r.QUANTITY)} ${unitOf(r)} x ${Number(r.PRICE)} грн`)
+            .join('\n'),
           updated_at: new Date().toISOString(),
         }
 
@@ -211,7 +230,7 @@ async function saveRows(service: Service, orderId: string, rows: Row[]) {
     source: 'site',
     title: r.PRODUCT_NAME,
     bitrix_product_id: Number(r.PRODUCT_ID) || null,
-    unit: 'шт',
+    unit: unitOf(r),
     unit_weight: 0,
     price_per_unit: Number(r.PRICE),
     ordered_qty: Number(r.QUANTITY),
