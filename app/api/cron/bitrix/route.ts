@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { syncSiteOrders } from '@/lib/bitrix-sync'
 import { bitrixConfigured } from '@/lib/bitrix'
+import { autoProcessSiteOrders } from '@/lib/site-autopilot'
+import { getSetting } from '@/lib/settings'
 
 /**
  * Замовлення з сайту — що змінилось за останню добу.
@@ -20,8 +22,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ skipped: 'BITRIX_WEBHOOK_URL не налаштовано' })
   }
 
+  const service = createServiceClient()
   const since = new Date(Date.now() - 24 * 3600_000).toISOString()
-  const result = await syncSiteOrders(createServiceClient(), { since, maxPages: 20 })
+  const result = await syncSiteOrders(service, { since, maxPages: 20 })
 
-  return NextResponse.json(result, { status: result.error ? 500 : 200 })
+  // Щойно привезені замовлення одразу й оглядаємо: номер, зона, повнота
+  const auto = await getSetting(service, 'auto_process_site_orders')
+    ? await autoProcessSiteOrders(service)
+    : null
+
+  return NextResponse.json({ ...result, auto }, { status: result.error ? 500 : 200 })
 }

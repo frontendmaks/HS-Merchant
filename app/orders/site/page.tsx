@@ -40,7 +40,7 @@ export default async function SiteOrdersPage() {
 
   const { data } = await supabase
     .from('orders')
-    .select('id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token')
+    .select('id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_problem, chat_sent_at')
     .in('platform', [...SITE_PLATFORMS])
     .order('delivery_date', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
@@ -129,6 +129,16 @@ export default async function SiteOrdersPage() {
                     {o.number_source === 'local' && (
                       <span className="block text-amber-500 text-xs" title="Номер узято локально, не з журналу">
                         не з журналу
+                      </span>
+                    )}
+                    {o.auto_problem && (
+                      <span className="block text-amber-500 text-xs" title={o.auto_problem}>
+                        потребує уваги
+                      </span>
+                    )}
+                    {o.chat_sent_at && (
+                      <span className="block text-emerald-600 text-xs" title="Бланк надіслано в чат складу">
+                        бланк у чаті
                       </span>
                     )}
                   </td>

@@ -30,6 +30,30 @@ export async function visibleChats(): Promise<Dialog[]> {
     .map(c => ({ id: String(c.id), title: c.title ?? String(c.id) }))
 }
 
+/**
+ * Стадія, на якій бланк потрібен складу.
+ *
+ * Раніше за неї надсилати нема сенсу: замовлення з сайту ще можуть
+ * скасувати або переписати, і склад збирав би те, чого вже немає.
+ */
+export const PICKING_STAGE = 'Комплектується'
+
+/**
+ * Реакція на зміну статусу — одна для всіх, хто його міняє.
+ *
+ * Статус міняють із трьох місць: оператор у Мерчанті, оператор у Бітріксі
+ * (а ми бачимо це синхронізацією) і сама CRM. Бланк має піти в усіх трьох
+ * випадках, тож правило живе тут, а не в кожному з них.
+ */
+export async function onStatusChanged(
+  service: Service,
+  orderId: string,
+  status: string | null,
+): Promise<void> {
+  if (status !== PICKING_STAGE) return
+  await sendOrderSheet(service, orderId)
+}
+
 export async function sendToChat(dialogId: string, text: string): Promise<void> {
   await bitrix('im.message.add', { DIALOG_ID: dialogId, MESSAGE: text })
 }

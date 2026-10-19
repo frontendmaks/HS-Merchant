@@ -11,7 +11,7 @@
  */
 import { createServiceClient } from '@/lib/supabase/service'
 import { readRange, writeCell, sheetsConfigured } from '@/lib/google-sheets'
-import { MANUAL_PLATFORM, nextManualNumber } from '@/lib/manual-orders'
+import { nextManualNumber } from '@/lib/manual-orders'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -42,18 +42,18 @@ export interface ReservedNumber {
 /**
  * Номери, які ми вже видали на цю дату — хай навіть у таблиці їх стерли.
  *
- * Рахуємо лише свої, телефонні. Сайтові замовлення теж несуть номер ящика,
- * але він там живе за іншим правилом: за одну добу те саме число трапляється
- * у двох замовленнях, іноді навіть на одному складі. Брати їх до уваги
- * означало б пропускати вільні рядки журналу через чужу нумерацію.
+ * Рахуємо ті, що видали самі: телефонні замовлення й сайтові, яким номер
+ * проставила система. Номери, що приїхали з Бітрікса вже готовими, до уваги
+ * не беремо — там те саме число трапляється двічі за добу, і це чужа
+ * нумерація, не журнальна.
  */
 async function takenNumbers(service: Service, date: string): Promise<Set<number>> {
   const { data } = await service
     .from('orders')
     .select('manual_number')
-    .eq('platform', MANUAL_PLATFORM)
     .eq('delivery_date', date)
     .not('manual_number', 'is', null)
+    .not('number_source', 'is', null)
 
   return new Set((data ?? []).map(o => Number(o.manual_number)))
 }

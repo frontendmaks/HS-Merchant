@@ -10,6 +10,7 @@ import { bitrix } from '@/lib/bitrix'
 import { createServiceClient } from '@/lib/supabase/service'
 import { stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
 import { WAREHOUSE_ID, SLOT_ID, CATEGORY_ID } from '@/lib/bitrix-deal'
+import { onStatusChanged } from '@/lib/bitrix-chat'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -174,7 +175,7 @@ export async function syncSiteOrders(
         }
 
         const { data: existing } = await service
-          .from('orders').select('id, platform')
+          .from('orders').select('id, platform, status')
           .eq('bitrix_deal_id', Number(deal.ID)).maybeSingle()
 
         if (existing) {
@@ -192,6 +193,11 @@ export async function syncSiteOrders(
             .eq('id', existing.id)
 
           if (!ours) await saveRows(service, existing.id as string, rows)
+
+          // Статус міняють здебільшого в CRM — бланк має піти й тоді
+          if (existing.status !== status) {
+            await onStatusChanged(service, existing.id as string, status)
+          }
           result.updated++
         } else {
           const { data: created } = await service

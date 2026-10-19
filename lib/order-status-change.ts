@@ -20,6 +20,7 @@ import { isHandedOver, requiresPayment } from '@/lib/order-statuses'
 import { orderSource } from '@/lib/order-source'
 import { bitrix } from '@/lib/bitrix'
 import { stageId } from '@/lib/bitrix-stages'
+import { onStatusChanged } from '@/lib/bitrix-chat'
 
 const MAUDAU_STATUS_MAP: Record<string, string> = {
   'Нове': 'new_order',
@@ -184,5 +185,7 @@ export async function changeOrderStatus(
 
   await broadcastOrderChange(id, 'status')
   await notifyIntegrations(id, 'order.status_changed')
+  // Комплектація — момент, коли бланк потрібен складу
+  await onStatusChanged(supabase, id, status)
   return NextResponse.json({ success: true })
 }
