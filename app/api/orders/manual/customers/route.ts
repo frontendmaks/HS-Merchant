@@ -24,15 +24,29 @@ export async function GET(req: NextRequest) {
 
   const service = createServiceClient()
   const { data } = await service.from('customers')
-    .select('phone_key, phone, name, names, addresses, orders_count, last_order')
+    .select('phone_key, phone, name, names, phones, addresses, orders_count, last_order')
     .like(q.column, `%${q.needle}%`)
     // Хто замовляв нещодавно, той імовірніше й дзвонить
     .order('last_order', { ascending: false, nullsFirst: false })
     .limit(20)
 
-  const customers = (data ?? []).map(c => ({
+  const customers = (data ?? []).map(c => {
+    const phones = (c.phones as string[] | null) ?? []
+    /**
+     * Показуємо той номер, який збігся.
+     *
+     * У клієнта їх буває три, а в картці стоїть перший-ліпший — і оператор
+     * бачив у списку номери, які не мають нічого спільного з набраним, хоча
+     * збіг щоразу був справжній, просто в іншому полі того самого клієнта.
+     */
+    const matched = q.column === 'phone_search'
+      ? phones.find(p => p.replace(/\D/g, '').includes(q.needle))
+      : undefined
+
+    return {
     key: c.phone_key,
-    phone: c.phone,
+    phone: matched ?? c.phone,
+    phones,
     // Найсвіжіше ім'я першим: саме його підставляє форма, а в масиві
     // `names` порядок довільний — там просто всі написання, які траплялись
     names: [...new Set([
@@ -42,7 +56,8 @@ export async function GET(req: NextRequest) {
     addresses: (c.addresses as string[] | null) ?? [],
     orders: Number(c.orders_count),
     last: c.last_order,
-  }))
+    }
+  })
 
   return NextResponse.json({ customers })
 }

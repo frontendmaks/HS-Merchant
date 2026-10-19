@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
 import { createServiceClient } from '@/lib/supabase/service'
 import { firstAvailable, slotsForDate } from '@/lib/delivery-slots'
+import { getSetting } from '@/lib/settings'
 import ManualOrdersClient from './ManualOrdersClient'
 
 export default async function ManualOrdersPage() {
@@ -12,7 +13,8 @@ export default async function ManualOrdersPage() {
   if (role === 'viewer') redirect('/orders')
 
   const service = createServiceClient()
-  const start = firstAvailable()
+  const buffer = await getSetting(service, 'delivery_buffer_minutes')
+  const start = firstAvailable(buffer)
 
   const [{ data: recent }, { data: zones }] = await Promise.all([
     service.from('orders')
@@ -31,10 +33,11 @@ export default async function ManualOrdersPage() {
     <ManualOrdersClient
       recent={recent ?? []}
       warehouses={warehouses}
-      initial={{ ...start, slots: slotsForDate(start.date) }}
+      initial={{ ...start, slots: slotsForDate(start.date, buffer) }}
       // Прив'язка чатів — разове налаштування, і міняти його має той, хто
       // відповідає за налаштування, а не кожен, хто приймає замовлення
       canSetChats={role === 'super_admin' || role === 'admin'}
+      buffer={buffer}
     />
   )
 }

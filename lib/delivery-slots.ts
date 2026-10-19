@@ -19,7 +19,12 @@ export const SLOTS: Slot[] = [
   { label: '17:00-20:00', from: '17:00', to: '20:00' },
 ]
 
-/** Скільки хвилин до початку періоду він ще приймає замовлення. */
+/**
+ * Скільки хвилин до початку періоду він ще приймає замовлення.
+ *
+ * Запасне значення: справжнє лежить у налаштуваннях і міняється без випуску
+ * нової версії — це число про те, як сьогодні їздять, а не про програму.
+ */
 export const BUFFER_MINUTES = 20
 
 const minutesOf = (hhmm: string) => {
@@ -56,7 +61,11 @@ export interface SlotAvailability extends Slot {
  * Для майбутніх днів доступні всі. Для сьогодні відпадають ті, до початку
  * яких лишилось менше за буфер — і ті, що вже тривають або минули.
  */
-export function slotsForDate(date: string, now = new Date()): SlotAvailability[] {
+export function slotsForDate(
+  date: string,
+  buffer: number = BUFFER_MINUTES,
+  now = new Date(),
+): SlotAvailability[] {
   const today = kyivToday(now)
 
   if (date < today) {
@@ -69,7 +78,7 @@ export function slotsForDate(date: string, now = new Date()): SlotAvailability[]
   const nowMin = kyivMinutesNow(now)
   return SLOTS.map(s => {
     const starts = minutesOf(s.from)
-    const closesAt = starts - BUFFER_MINUTES
+    const closesAt = starts - buffer
     if (nowMin >= minutesOf(s.to)) return { ...s, available: false, reason: 'період минув' }
     if (nowMin >= closesAt) {
       return { ...s, available: false, reason: `приймали до ${fmt(closesAt)}` }
@@ -82,9 +91,12 @@ const fmt = (minutes: number) =>
   `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
 
 /** Перша дата й період, які ще можна обрати — те, що форма підставляє одразу. */
-export function firstAvailable(now = new Date()): { date: string; slot: string } {
+export function firstAvailable(
+  buffer: number = BUFFER_MINUTES,
+  now = new Date(),
+): { date: string; slot: string } {
   const today = kyivToday(now)
-  const free = slotsForDate(today, now).find(s => s.available)
+  const free = slotsForDate(today, buffer, now).find(s => s.available)
   if (free) return { date: today, slot: free.label }
 
   const tomorrow = new Date(now.getTime() + 864e5)

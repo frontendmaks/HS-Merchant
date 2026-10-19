@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { isPhoneComplete, phoneKey } from '@/lib/phone'
 import { deliveryFeeFor } from '@/lib/delivery-fee'
 import Overlay, { ProductPicker, field, money, type Line } from '@/components/OrderLinesPicker'
-import WarehouseChats from './WarehouseChats'
+import Settings from './Settings'
 
 interface Recent {
   id: string; external_id: string; manual_number: number | null
@@ -16,16 +16,19 @@ interface Recent {
 }
 interface SlotOption { label: string; available: boolean; reason: string | null }
 interface Customer {
-  key: string; phone: string; names: string[]; addresses: string[]
+  key: string; phone: string; phones?: string[]; names: string[]; addresses: string[]
   orders: number; last: string | null
 }
 
 
-export default function ManualOrdersClient({ recent, warehouses, initial, canSetChats }: {
+export default function ManualOrdersClient({
+  recent, warehouses, initial, canSetChats, buffer,
+}: {
   recent: Recent[]
   warehouses: string[]
   initial: { date: string; slot: string; slots: SlotOption[] }
   canSetChats?: boolean
+  buffer: number
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -48,7 +51,7 @@ export default function ManualOrdersClient({ recent, warehouses, initial, canSet
         </button>
       </div>
 
-      {canSetChats && <WarehouseChats />}
+      {canSetChats && <Settings buffer={buffer} />}
 
       {recent.length === 0 ? (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-6 py-12 text-center">
@@ -197,7 +200,12 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
   /** Що саме підставила база — щоб відрізнити це від набраного руками. */
   const [filled, setFilled] = useState<{ name: string; address: string } | null>(null)
 
-  /** Обраний клієнт заповнює решту полів — це і є сенс бази клієнтів. */
+  /**
+   * Обраний клієнт заповнює решту полів — це і є сенс бази клієнтів.
+   *
+   * Адресу часто доводиться дозапитувати: більшість клієнтів прийшла з
+   * контактів CRM, де адреси немає, — вона лежить в їхніх угодах.
+   */
   function pick(c: Customer) {
     const pickedName = c.names[0] ?? ''
     const pickedAddress = c.addresses[0] ?? ''
@@ -207,6 +215,18 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
     if (pickedAddress) setAddress(pickedAddress)
     setFilled({ name: pickedName, address: pickedAddress })
     setByPhone([]); setByName([]); setByAddress([])
+
+    if (pickedAddress) return
+    void (async () => {
+      const r = await fetch(`/api/orders/manual/customers/${encodeURIComponent(c.key)}`)
+      const d = await r.json().catch(() => ({}))
+      const found = (d.addresses as string[] | undefined)?.[0]
+      if (!found) return
+      // Підставляємо, лише якщо оператор ще не почав писати адресу сам
+      setAddress(prev => (prev ? prev : found))
+      setFilled(f => (f ? { ...f, address: found } : f))
+      setPicked(p => (p && p.key === c.key ? { ...p, addresses: d.addresses } : p))
+    })()
   }
 
   /**

@@ -5,6 +5,7 @@ import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { isValidSlot, slotsForDate } from '@/lib/delivery-slots'
+import { getSetting } from '@/lib/settings'
 import {
   MANUAL_PLATFORM, manualExternalId, manualWeight,
   orderTotal, lineTotal, type ManualLine,
@@ -61,8 +62,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Додайте хоча б один товар' }, { status: 400 })
   }
 
+  const service = createServiceClient()
+
   // Період міг закритись, поки оператор набирав замовлення — буфер на те й є
-  const slotNow = slotsForDate(date).find(s => s.label === slot)
+  const slotNow = slotsForDate(date, await getSetting(service, 'delivery_buffer_minutes'))
+    .find(s => s.label === slot)
   if (!slotNow?.available) {
     return NextResponse.json(
       { error: `Період ${slot} уже недоступний${slotNow?.reason ? ` — ${slotNow.reason}` : ''}` },
@@ -70,7 +74,6 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const service = createServiceClient()
   const total = orderTotal(lines)
   // Вага — тільки товари: доставка не їде у ваговій накладній
   const weight = manualWeight(goods)

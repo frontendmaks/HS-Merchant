@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor } from '@/lib/order-events'
 import { resolveAddress } from '@/lib/delivery-zones'
 import { slotsForDate, firstAvailable } from '@/lib/delivery-slots'
+import { getSetting } from '@/lib/settings'
 
 /**
  * POST /api/orders/manual/resolve
@@ -24,7 +25,8 @@ export async function POST(req: NextRequest) {
     ? await resolveAddress(service, address)
     : { point: null, zone: null, warehouse: null, note: null }
 
-  const when = date || firstAvailable().date
+  const buffer = await getSetting(service, 'delivery_buffer_minutes')
+  const when = date || firstAvailable(buffer).date
 
   return NextResponse.json({
     zone: resolved.zone,
@@ -33,6 +35,6 @@ export async function POST(req: NextRequest) {
     coordinates: resolved.point ? { lat: resolved.point.lat, lng: resolved.point.lng } : null,
     matched_address: resolved.point?.display_name ?? null,
     date: when,
-    slots: slotsForDate(when),
+    slots: slotsForDate(when, buffer),
   })
 }
