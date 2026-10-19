@@ -179,13 +179,43 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
     }, 300)
   }, [name, picked])
 
+  /** Що саме підставила база — щоб відрізнити це від набраного руками. */
+  const [filled, setFilled] = useState<{ name: string; address: string } | null>(null)
+
   /** Обраний клієнт заповнює решту полів — це і є сенс бази клієнтів. */
   function pick(c: Customer) {
+    const pickedName = c.names[0] ?? ''
+    const pickedAddress = c.addresses[0] ?? ''
     setPicked(c)
     setPhone(c.phone)
-    if (c.names[0]) setName(c.names[0])
-    if (c.addresses[0]) setAddress(c.addresses[0])
+    if (pickedName) setName(pickedName)
+    if (pickedAddress) setAddress(pickedAddress)
+    setFilled({ name: pickedName, address: pickedAddress })
     setByPhone([]); setByName([])
+  }
+
+  /**
+   * Інший номер — інший клієнт.
+   *
+   * Поки поля лишались від попереднього, на екрані стояло замовлення на двох:
+   * номер одного, ім'я й адреса другого. Тому підставлене базою прибираємо, а
+   * набране руками лишаємо — оператор міг записати ім'я зі слуху й аж потім
+   * уточнити номер.
+   */
+  function changePhone(next: string) {
+    setPhone(next)
+    if (!picked || phoneKey(next) === picked.key) return
+
+    if (filled) {
+      if (name === filled.name) setName('')
+      if (address === filled.address) {
+        setAddress('')
+        // Склад випливав із тієї адреси — разом із нею й зникає
+        setWarehouse(''); setZone(null); setZoneNote(null)
+      }
+    }
+    setPicked(null)
+    setFilled(null)
   }
 
   /** Адреса → склад і періоди. Запитуємо, коли оператор дописав адресу. */
@@ -325,7 +355,7 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
             <input
               autoFocus
               value={phone}
-              onChange={e => { setPhone(e.target.value); setPicked(null) }}
+              onChange={e => changePhone(e.target.value)}
               placeholder="+380…"
               className={field}
             />
