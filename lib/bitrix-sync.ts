@@ -114,6 +114,8 @@ export interface SyncResult {
   seen: number
   created: number
   updated: number
+  /** Де спинились — щоб продовжити добір наступним викликом */
+  nextPage?: number | null
   error?: string
 }
 
@@ -126,11 +128,21 @@ export interface SyncResult {
  */
 export async function syncSiteOrders(
   service: Service,
-  { since, maxPages = 10, dealIds }: {
+  { since, maxPages = 10, dealIds, byCreated = false, startPage = 0 }: {
     since?: string
     maxPages?: number
     /** Конкретні угоди — коли Бітрікс сам сказав, яка саме змінилась */
     dealIds?: (string | number)[]
+    /**
+     * Шукати за датою створення, а не зміни.
+     *
+     * Для щоденної роботи важить зміна: що поправили, те й перечитуємо. Але
+     * коли добираємо минуле, замовлення тижневої давнини ніхто вже не чіпає
+     * — його знайде лише дата створення.
+     */
+    byCreated?: boolean
+    /** З якої сторінки продовжити — довгий добір іде частинами */
+    startPage?: number
   },
 ): Promise<SyncResult> {
   const result: SyncResult = { seen: 0, created: 0, updated: 0 }
@@ -139,13 +151,13 @@ export async function syncSiteOrders(
     for (let page = 0; page < maxPages; page++) {
       const filter: Record<string, unknown> = { CATEGORY_ID }
       if (dealIds?.length) filter.ID = dealIds
-      else if (since) filter['>=DATE_MODIFY'] = since
+      else if (since) filter[byCreated ? '>=DATE_CREATE' : '>=DATE_MODIFY'] = since
 
       const deals = await bitrix<Deal[]>('crm.deal.list', {
         filter,
         select: DEAL_FIELDS,
-        order: { DATE_MODIFY: 'ASC' },
-        start: page * 50,
+        order: byCreated ? { ID: 'ASC' } : { DATE_MODIFY: 'ASC' },
+        start: (startPage + page) * 50,
       })
 
       if (!deals?.length) break
@@ -237,7 +249,8 @@ export async function syncSiteOrders(
         }
       }
 
-      if (deals.length < 50) break
+      if (deals.length < 50) { result.nextPage = null; break }
+      result.nextPage = startPage + page + 1
     }
   } catch (e) {
     result.error = e instanceof Error ? e.message : String(e)

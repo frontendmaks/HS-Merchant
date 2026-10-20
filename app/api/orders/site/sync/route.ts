@@ -18,13 +18,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Бітрікс не налаштовано' }, { status: 503 })
   }
 
-  const body = await req.json().catch(() => ({})) as { days?: number }
-  // Більше місяця за раз не беремо: у воронці сто двадцять тисяч угод, і
-  // випадкове «за рік» означало б годину роботи й тисячі запитів
-  const days = Math.min(Math.max(Number(body?.days) || 3, 1), 31)
+  const body = await req.json().catch(() => ({})) as {
+    days?: number
+    /** Добір минулого: шукати за датою створення й продовжувати сторінками */
+    backfill?: boolean
+    page?: number
+  }
+  // Більше трьох місяців за раз не беремо: у воронці сто двадцять тисяч
+  // угод, і випадкове «за рік» означало б години роботи
+  const days = Math.min(Math.max(Number(body?.days) || 3, 1), 92)
 
   const since = new Date(Date.now() - days * 24 * 3600_000).toISOString()
-  const result = await syncSiteOrders(createServiceClient(), { since, maxPages: 40 })
+  const result = await syncSiteOrders(createServiceClient(), {
+    since,
+    maxPages: body?.backfill ? 6 : 40,
+    byCreated: !!body?.backfill,
+    startPage: Number(body?.page) || 0,
+  })
 
   return NextResponse.json(result, { status: result.error ? 500 : 200 })
 }
