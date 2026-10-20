@@ -112,6 +112,11 @@ const GEOCODER_UA =
 
 export interface Geocoded extends Point { display_name: string | null }
 
+/** Геокодер мовчить — питання про адресу лишається без відповіді. */
+export class GeocoderUnavailable extends Error {
+  constructor() { super('Геокодер не відповідає') }
+}
+
 /**
  * Координати адреси.
  *
@@ -119,7 +124,19 @@ export interface Geocoded extends Point { display_name: string | null }
  * ручних замовлень цього вдосталь. Результат кешується: та сама адреса
  * питається один раз, і повторне відкриття форми нікого не турбує.
  */
-async function ask(query: string): Promise<Geocoded | null> {
+/**
+ * Відповідь геокодера, у якій «не знайшов» і «не відповів» — різні речі.
+ *
+ * Раніше обидва випадки виглядали як порожнеча, і відмова сервісу осідала в
+ * кеші як «такої адреси немає». Одна хвилина недоступності отруювала сотню
+ * адрес назавжди.
+ */
+type Answer =
+  | { kind: 'found'; point: Geocoded }
+  | { kind: 'missing' }
+  | { kind: 'unavailable'; status: number | string }
+
+async function ask(query: string): Promise<Answer> {
   try {
     const url = 'https://nominatim.openstreetmap.org/search'
       + '?format=json&limit=1&countrycodes=ua&accept-language=uk&q=' + encodeURIComponent(query)
@@ -127,14 +144,15 @@ async function ask(query: string): Promise<Geocoded | null> {
       headers: { 'User-Agent': GEOCODER_UA },
       signal: AbortSignal.timeout(15_000),
     })
-    if (!res.ok) return null
+    if (!res.ok) return { kind: 'unavailable', status: res.status }
+
     const hits = await res.json() as { lat: string; lon: string; display_name: string }[]
     const first = hits[0]
     return first
-      ? { lat: Number(first.lat), lng: Number(first.lon), display_name: first.display_name }
-      : null
-  } catch {
-    return null
+      ? { kind: 'found', point: { lat: Number(first.lat), lng: Number(first.lon), display_name: first.display_name } }
+      : { kind: 'missing' }
+  } catch (e) {
+    return { kind: 'unavailable', status: e instanceof Error ? e.name : 'error' }
   }
 }
 
@@ -301,17 +319,27 @@ export async function geocode(
    * саме це й перевіряємо, перш ніж спинитись.
    */
   let firstHit: Geocoded | null = null
+  let refused = false
   const zones = await loadZones(service)
 
   for (const variant of queryVariants(query)) {
-    const point = await ask(variant)
-    if (!point) continue
-    firstHit ??= point
+    const answer = await ask(variant)
 
-    if (zoneAt(point, zones)) {
-      await remember(service, query, point)
-      return point
+    if (answer.kind === 'unavailable') {
+      // Сервіс не відповів — це не відповідь про адресу. Припиняємо й нічого
+      // не запам'ятовуємо: наступний прохід спитає заново
+      refused = true
+      break
     }
+
+    if (answer.kind === 'found') {
+      firstHit ??= answer.point
+      if (zoneAt(answer.point, zones)) {
+        await remember(service, query, answer.point)
+        return answer.point
+      }
+    }
+
     // Чужий сервіс просить не частіше разу на секунду
     await new Promise(r => setTimeout(r, 1100))
   }
@@ -322,6 +350,8 @@ export async function geocode(
     await remember(service, query, firstHit)
     return firstHit
   }
+
+  if (refused) throw new GeocoderUnavailable()
 
   await remember(service, query, null)
   return null

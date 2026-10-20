@@ -11,7 +11,7 @@
  * комплектацію, не раніше: доти його ще можуть скасувати чи переписати.
  */
 import { createServiceClient } from '@/lib/supabase/service'
-import { resolveAddress } from '@/lib/delivery-zones'
+import { resolveAddress, GeocoderUnavailable } from '@/lib/delivery-zones'
 import { reserveNumber } from '@/lib/manual-register'
 import { bitrix } from '@/lib/bitrix'
 import { CLOSED_STAGES } from '@/lib/bitrix-stages'
@@ -46,6 +46,8 @@ export interface AutopilotResult {
   numbered: number
   rezoned: number
   problems: number
+  /** Замовлення, відкладені через мовчання геокодера */
+  postponed: number
   error?: string
 }
 
@@ -70,7 +72,9 @@ export async function autoProcessSiteOrders(
   service: Service,
   { limit = 50, orderIds }: { limit?: number; orderIds?: string[] } = {},
 ): Promise<AutopilotResult> {
-  const result: AutopilotResult = { looked: 0, numbered: 0, rezoned: 0, problems: 0 }
+  const result: AutopilotResult = {
+    looked: 0, numbered: 0, rezoned: 0, problems: 0, postponed: 0,
+  }
 
   try {
     /**
@@ -122,19 +126,34 @@ export async function autoProcessSiteOrders(
       const patch: Record<string, unknown> = {}
       const crm: Record<string, unknown> = {}
 
-      // Зона й склад — з адреси. Те, що вибрав покупець, буває не тим
-      // складом, звідки реально везуть
+      /**
+       * Зона й склад — з адреси. Те, що вибрав покупець, буває не тим
+       * складом, звідки реально везуть.
+       *
+       * Якщо геокодер мовчить, замовлення не отримує вироку «адресу не
+       * розпізнано»: воно просто лишається в черзі. Відмова сервісу — не
+       * факт про адресу.
+       */
       if (order.address?.trim()) {
-        const zone = await resolveAddress(service, order.address)
-        if (zone.zone) {
-          patch.delivery_zone = zone.zone
-          if (zone.warehouse && zone.warehouse !== order.warehouse) {
-            patch.warehouse = zone.warehouse
-            crm[FIELD.warehouse] = WAREHOUSE_ID[zone.warehouse] ?? ''
-            result.rezoned++
+        try {
+          const zone = await resolveAddress(service, order.address)
+          if (zone.zone) {
+            patch.delivery_zone = zone.zone
+            if (zone.warehouse && zone.warehouse !== order.warehouse) {
+              patch.warehouse = zone.warehouse
+              crm[FIELD.warehouse] = WAREHOUSE_ID[zone.warehouse] ?? ''
+              result.rezoned++
+            }
+          } else {
+            problems.push(zone.note ?? 'зона доставки не визначена')
           }
-        } else {
-          problems.push(zone.note ?? 'зона доставки не визначена')
+        } catch (e) {
+          if (e instanceof GeocoderUnavailable) {
+            result.postponed++
+            // Решту проходу теж немає сенсу продовжувати: сервіс той самий
+            break
+          }
+          throw e
         }
       }
 
