@@ -171,6 +171,9 @@ export function tidyAddress(raw: string): string {
       // «Малечковичі вул.Степана Чарнецького» — геокодер хоче кому між
       // населеним пунктом і вулицею
       .replace(/\s+(вул|вулиця|просп|проспект|пров|провулок)\.?\s*/giu, ', $1. ')
+      // «Село Мшана» — слово зайве, назва самодостатня; «будинок бічна» теж
+      .replace(/^(село|селище|місто)\s+/iu, '')
+      .replace(/^будинок\s+(?!\d)/iu, '')
       .replace(/буд(?![\p{L}])\.?\s*№?\s*/giu, '')
       // Ініціал біля прізвища: «вул. Виговського І.» геокодер не впізнає,
       // «вул. Виговського» — впізнає
@@ -222,11 +225,25 @@ function queryVariants(address: string): string[] {
   /** Село чи містечко окремо: «Малечковичі, Львівська область» */
   const settlement = a.split(',')[0].trim()
 
+  /**
+   * Коротші прочитання адреси.
+   *
+   * У кінці часто висить те, що адресою не є: назва закладу, орієнтир,
+   * «домофон 22» чи ім'я отримувача. Геокодер від цього губиться цілком,
+   * хоча початок рядка — місто, вулиця й будинок — читається без проблем.
+   * Тому пробуємо ще й перші дві-три частини.
+   */
+  const parts = a.split(',').map(p => p.trim()).filter(Boolean)
+  const shorter = [3, 2]
+    .filter(n => parts.length > n)
+    .map(n => parts.slice(0, n).join(', '))
+
   return [...new Set([
     city(a),
     a,
     ...(withoutLetter !== a ? [city(withoutLetter)] : []),
     ...(cyrillic && cyrillic !== a ? [city(cyrillic), cyrillic] : []),
+    ...shorter.map(city),
     ...(streetOnly && streetOnly !== a ? [city(streetOnly)] : []),
     `Львівська область, ${a}`,
     ...(settlement && settlement !== a ? [`${settlement}, Львівська область`] : []),
@@ -240,7 +257,7 @@ function queryVariants(address: string): string[] {
  * записи кешу з нижчою версією перепитуються, замість того щоб вічно
  * повертати координати, знайдені за старим правилом.
  */
-const RESOLVER_VERSION = 5
+const RESOLVER_VERSION = 6
 
 async function remember(
   service: Service,
