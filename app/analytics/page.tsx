@@ -5,6 +5,7 @@ import { isAnalyst } from '@/lib/roles'
 import {
   learnCityOblasts, totals, ordersPerDay, popularProducts, popularCategories,
   customers, byRegion, normalizeTitle, operatorStats, cancelStats,
+  isCanceled,
   type OrderRow, type Gazetteer, type OperatorEventRow,
 } from '@/lib/analytics'
 import gazetteerJson from '@/lib/ua-settlements.json'
@@ -17,7 +18,7 @@ export const dynamic = 'force-dynamic'
 const gazetteer = gazetteerJson as unknown as Gazetteer
 
 /** Marketplace slugs as stored on orders.platform */
-export const PLATFORMS = ['maudau', 'rozetka'] as const
+export const PLATFORMS = ['maudau', 'rozetka', 'site', 'web', 'phone'] as const
 
 // Local date parts — toISOString() would shift midnight back a day in UTC+N
 const iso = (d: Date) =>
@@ -74,7 +75,7 @@ export default async function AnalyticsPage({
       supabase.from('orders')
         // The raw marketplace payload is large and mostly irrelevant here, so
         // Postgres digs out the three geography fields instead of sending it all
-        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, items, total, commission, status, cancel_reason, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code, md_placed:raw->>created_at, rz_placed:raw->>created')
+        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, area, items, total, commission, status, cancel_reason, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code, md_placed:raw->>created_at, rz_placed:raw->>created')
         .gte('order_date', from).lte('order_date', to)
         .order('order_date', { ascending: false })
         .limit(20000),
@@ -145,6 +146,21 @@ export default async function AnalyticsPage({
   const presenceSince = firstTick?.minute ? new Date(firstTick.minute as string) : null
 
   /** Everything the page shows, for one slice of the orders. */
+  /** Скільки замовлень і грошей дав кожен район чи населений пункт. */
+  function byArea(rows: OrderWithId[]) {
+    const found = new Map<string, { orders: number; revenue: number }>()
+    for (const o of rows) {
+      const area = (o as unknown as { area?: string | null }).area
+      if (!area || isCanceled(o)) continue
+      const acc = found.get(area) ?? { orders: 0, revenue: 0 }
+      acc.orders++
+      acc.revenue += Number(o.total ?? 0)
+      found.set(area, acc)
+    }
+    return [...found].map(([area, v]) => ({ area, ...v }))
+      .sort((a, b) => b.orders - a.orders)
+  }
+
   function bundle(rows: OrderWithId[]): Bundle {
     const learned = learnCityOblasts(rows)
     const all = customers(rows, learned, gazetteer)
@@ -169,6 +185,8 @@ export default async function AnalyticsPage({
         })(),
       },
       regions: byRegion(rows, learned, gazetteer),
+      // Райони Львова й села — для замовлень, які возить наш склад
+      areas: byArea(rows),
       cancels: limited ? EMPTY_CANCELS : cancelStats(
         rows,
         // An entry with an actor means a person here did it; sync writes none
@@ -205,6 +223,12 @@ export default async function AnalyticsPage({
         all: bundle(orders),
         maudau: bundle(orders.filter(o => o.platform === 'maudau')),
         rozetka: bundle(orders.filter(o => o.platform === 'rozetka')),
+        // Сайт і телефон окремо й разом: у них немає комісії, тож чистий
+        // дохід дорівнює виручці, і порівнювати їх із маркетплейсами треба
+        // саме так
+        site: bundle(orders.filter(o => o.platform === 'site' || o.platform === 'manual')),
+        web: bundle(orders.filter(o => o.platform === 'site')),
+        phone: bundle(orders.filter(o => o.platform === 'manual')),
       }}
     />
   )

@@ -155,8 +155,24 @@ export const cityCoords = (city: string, gazetteer?: Gazetteer):
 // --- Helpers --------------------------------------------------------------
 
 const num = (v: number | null | undefined) => Number(v ?? 0)
-export const isDelivered = (o: OrderRow) => o.status === DELIVERED
-export const isCanceled = (o: OrderRow) => o.status === CANCELED
+/**
+ * Доставлене — залежить від того, хто веде замовлення.
+ *
+ * У маркетплейсів є кінцевий статус «Доставлено», і доти замовлення може
+ * зірватись. Замовлення з сайту й телефону веде склад: щойно воно пішло на
+ * комплектацію, його зберуть і відвезуть — зриваються лише скасовані. Тому
+ * для них доставленим вважається все, що не скасоване, інакше виручка дня
+ * показувала б нуль до вечора.
+ */
+const SITE_LIKE = new Set(['site', 'manual'])
+
+export const isDelivered = (o: OrderRow) =>
+  SITE_LIKE.has(o.platform ?? '')
+    ? !isCanceled(o) && o.status !== 'Не вдалося' && o.status !== 'Повернено'
+    : o.status === DELIVERED
+
+export const isCanceled = (o: OrderRow) =>
+  o.status === CANCELED || o.status === 'Скасовано'
 
 /** Item lines look like "Ковбаса «Царська» в/г, 300 г, 2 шт x 71 грн". */
 export interface ParsedItem { title: string; qty: number; price: number }

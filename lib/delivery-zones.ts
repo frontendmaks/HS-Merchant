@@ -112,6 +112,29 @@ const GEOCODER_UA =
 
 export interface Geocoded extends Point { display_name: string | null }
 
+/**
+ * Район Львова або село — з того, що відповів геокодер.
+ *
+ * Для наших замовлень область нічого не каже: вони всі львівські. Значення
+ * має район міста чи село, бо саме між ними ділиться робота складів.
+ * У відповіді геокодера район стоїть поруч зі Львовом, а село — перед своєю
+ * громадою.
+ */
+export function areaFromDisplay(display: string | null | undefined): string | null {
+  if (!display) return null
+  const parts = display.split(',').map(p => p.trim()).filter(Boolean)
+
+  if (parts.includes('Львів')) {
+    const district = parts.find(p => p.endsWith('район'))
+    if (district) return district
+  }
+
+  const hromada = parts.findIndex(p => p.includes('громада'))
+  if (hromada > 0) return parts[hromada - 1]
+
+  return null
+}
+
 /** Геокодер мовчить — питання про адресу лишається без відповіді. */
 export class GeocoderUnavailable extends Error {
   constructor() { super('Геокодер не відповідає') }

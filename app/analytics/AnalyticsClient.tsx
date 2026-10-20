@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import UkraineMap from './UkraineMap'
+import AreaBreakdown, { type AreaStat } from './AreaBreakdown'
 import type {
   Totals, DayBucket, ProductStat, CategoryStat, CustomerStat, RegionStat,
 } from '@/lib/analytics'
@@ -536,6 +537,11 @@ const MARKETPLACES = [
   { key: 'all', label: 'Загальна' },
   { key: 'maudau', label: 'MauDau' },
   { key: 'rozetka', label: 'Rozetka' },
+  // Сайт і телефон — один потік із двома рукавами: обидва веде наш склад,
+  // обидва без комісії. Порівнювати їх цікаво саме між собою
+  { key: 'site', label: 'Сайт і телефон' },
+  { key: 'web', label: '— сайт' },
+  { key: 'phone', label: '— телефон' },
 ] as const
 
 /** Every figure on the page is recomputed for the chosen marketplace. */
@@ -577,6 +583,7 @@ export interface Bundle {
     avgCadence: number | null
   }
   regions: RegionStat[]
+  areas: AreaStat[]
   operators: OperatorStat[]
   cancels: CancelStats
 }
@@ -621,7 +628,7 @@ export default function AnalyticsClient({
   }
 
   const {
-    totals: t, perDay, products, categories, customers, customerSummary, regions, operators,
+    totals: t, perDay, products, categories, customers, customerSummary, regions, areas, operators,
     cancels,
   } = bundles[platform] ?? bundles.all
 
@@ -700,7 +707,11 @@ export default function AnalyticsClient({
 
       {!limited && <Cancellations c={cancels} />}
 
-      <UkraineMap regions={regions} />
+      {/* Замовлення з сайту й телефону всі львівські: карта областей там
+          світилася б однією плямою, а питання стоїть про райони */}
+      {['site', 'web', 'phone'].includes(platform)
+        ? <AreaBreakdown areas={areas} />
+        : <UkraineMap regions={regions} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
         <Panel title="Популярні товари" subtitle="За кількістю проданих одиниць">

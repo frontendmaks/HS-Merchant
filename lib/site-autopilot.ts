@@ -11,7 +11,7 @@
  * комплектацію, не раніше: доти його ще можуть скасувати чи переписати.
  */
 import { createServiceClient } from '@/lib/supabase/service'
-import { resolveAddress, GeocoderUnavailable } from '@/lib/delivery-zones'
+import { resolveAddress, GeocoderUnavailable, areaFromDisplay } from '@/lib/delivery-zones'
 import { reserveNumber } from '@/lib/manual-register'
 import { bitrix } from '@/lib/bitrix'
 import { CLOSED_STAGES } from '@/lib/bitrix-stages'
@@ -147,6 +147,8 @@ export async function autoProcessSiteOrders(
       if (order.address?.trim()) {
         try {
           const zone = await resolveAddress(service, order.address)
+          // Район або село — для аналітики доставок
+          patch.area = areaFromDisplay(zone.point?.display_name) ?? null
           if (zone.zone) {
             patch.delivery_zone = zone.zone
             if (zone.warehouse && zone.warehouse !== order.warehouse) {
