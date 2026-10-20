@@ -10,6 +10,8 @@ import { createServiceClient } from '@/lib/supabase/service'
 
 type Service = ReturnType<typeof createServiceClient>
 
+import { hasLatin, toCyrillic } from '@/lib/address-latin'
+
 export const ZONES_URL =
   'https://halytska-svizhyna.ua/wp-content/uploads/2026/06/zona-dostavky-1.json'
 
@@ -165,7 +167,10 @@ export function tidyAddress(raw: string): string {
       .test(p))
     .map(p => p
       // Крапка або пробіл обов'язкові: інакше «Мшана» лишається «шана»
-      .replace(/^м\.\s*|^м\s+/i, '')
+      .replace(/^(м|с|смт|сщ)\.\s*|^(м|с|смт)\s+/i, '')
+      // «Малечковичі вул.Степана Чарнецького» — геокодер хоче кому між
+      // населеним пунктом і вулицею
+      .replace(/\s+(вул|вулиця|просп|проспект|пров|провулок)\.?\s*/giu, ', $1. ')
       .replace(/буд(?![\p{L}])\.?\s*№?\s*/giu, '')
       // Ініціал біля прізвища: «вул. Виговського І.» геокодер не впізнає,
       // «вул. Виговського» — впізнає
@@ -194,18 +199,38 @@ function queryVariants(address: string): string[] {
   const a = tidyAddress(address)
   const mentionsCity = /львів|брюховичі|винники|сокільники|зимна вода|рудно|малехів|солонка|пустомити|сихів/i.test(a)
 
+  const city = (q: string) => (mentionsCity ? q : `Львів, ${q}`)
+
   /**
    * Літера в номері будинку — «17а», «35б» — для геокодера часто зайва: сам
    * будинок він знає, а з літерою не знаходить нічого.
    */
   const withoutLetter = a.replace(/(\d+)\s*[а-яіїєґa-z](?![\p{L}\d])/giu, '$1')
 
+  /**
+   * Вулиця без номера будинку.
+   *
+   * Останній рубіж, і несподівано надійний: нам потрібна зона доставки, а не
+   * під'їзд. Вулиця цілком лежить в одній зоні майже завжди, тож точка на ній
+   * відповідає на те саме питання, що й точний будинок.
+   */
+  const streetOnly = a.replace(/,?\s*\d+\s*[а-яіїєґa-z]?\s*$/iu, '').trim()
+
+  /** Назва латиницею — геокодер знає ці вулиці лише українською */
+  const cyrillic = hasLatin(a) ? toCyrillic(a) : null
+
+  /** Село чи містечко окремо: «Малечковичі, Львівська область» */
+  const settlement = a.split(',')[0].trim()
+
   return [...new Set([
-    mentionsCity ? a : `Львів, ${a}`,
+    city(a),
     a,
-    ...(withoutLetter !== a ? [mentionsCity ? withoutLetter : `Львів, ${withoutLetter}`] : []),
+    ...(withoutLetter !== a ? [city(withoutLetter)] : []),
+    ...(cyrillic && cyrillic !== a ? [city(cyrillic), cyrillic] : []),
+    ...(streetOnly && streetOnly !== a ? [city(streetOnly)] : []),
     `Львівська область, ${a}`,
-  ])]
+    ...(settlement && settlement !== a ? [`${settlement}, Львівська область`] : []),
+  ].filter(q => q.replace(/[^\p{L}]/gu, '').length >= 4))]
 }
 
 /**
@@ -215,7 +240,7 @@ function queryVariants(address: string): string[] {
  * записи кешу з нижчою версією перепитуються, замість того щоб вічно
  * повертати координати, знайдені за старим правилом.
  */
-const RESOLVER_VERSION = 4
+const RESOLVER_VERSION = 5
 
 async function remember(
   service: Service,

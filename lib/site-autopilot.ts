@@ -97,6 +97,23 @@ export async function autoProcessSiteOrders(
     result.looked = orders.length
 
     for (const order of orders) {
+      /**
+       * Що саме зараз оглядаємо.
+       *
+       * Черга йде за часом надходження, і з боку оператора це довга пауза,
+       * у якій незрозуміло, чи щось узагалі відбувається. Запис про поточне
+       * замовлення робить роботу видимою.
+       */
+      await service.from('app_settings').upsert({
+        key: 'autopilot_now',
+        value: {
+          external_id: order.external_id,
+          customer: order.customer_name,
+          at: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'key' })
+
       const { count } = await service
         .from('order_items').select('id', { count: 'exact', head: true })
         .eq('order_id', order.id).eq('removed', false)
@@ -167,6 +184,12 @@ export async function autoProcessSiteOrders(
   } catch (e) {
     result.error = e instanceof Error ? e.message : String(e)
   }
+
+  // Черга скінчилась — прибираємо позначку, щоб не висіла назавжди
+  await service.from('app_settings')
+    .upsert({ key: 'autopilot_now', value: null, updated_at: new Date().toISOString() },
+      { onConflict: 'key' })
+    .then(() => {}, () => {})
 
   return result
 }

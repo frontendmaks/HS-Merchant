@@ -8,7 +8,12 @@ import { useRouter } from 'next/navigation'
  * Розклад і так забирає зміни кожні чверть години, але оператор, який щойно
  * щось поправив у CRM, не має чекати чверть години, щоб у це повірити.
  */
-export default function SyncButton({ last }: { last?: string | null }) {
+export default function SyncButton({ last, queued = 0, checking = null }: {
+  last?: string | null
+  /** Скільки замовлень чекає на огляд */
+  queued?: number
+  checking?: { external_id?: string; customer?: string; at?: string } | null
+}) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
@@ -58,6 +63,17 @@ export default function SyncButton({ last }: { last?: string | null }) {
       <div className="text-zinc-600 text-xs mt-1">
         {note || (ago ? `перевіряли ${ago}` : 'розклад ще не ходив')}
       </div>
+      {queued > 0 && (
+        <div className="text-xs mt-0.5">
+          <span className="text-zinc-500">у черзі {queued}</span>
+          {checking?.external_id && (
+            <span className="text-cyan-500">
+              {' · зараз '}{checking.external_id}
+              {checking.customer ? ` — ${checking.customer}` : ''}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }

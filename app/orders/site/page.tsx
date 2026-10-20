@@ -77,8 +77,15 @@ const FUNNEL: { key: string; label: string; match: (o: Row) => boolean }[] = [
       && o.manual_number != null,
   },
   {
+    /**
+     * Хиба важить, лише поки замовлення ще в обробці.
+     *
+     * Щойно людина перевела його далі — вона подивилась на нього сама й
+     * вирішила, що воно готове. Наші зауваження після цього вже не про те
+     * замовлення, яке поїхало.
+     */
     key: 'problem', label: 'Потребує уваги',
-    match: o => !!o.auto_problem && o.status !== CANCELED,
+    match: o => !!o.auto_problem && (o.status === PROCESSING || o.status === PREORDER),
   },
   { key: 'preorder', label: 'Передзамовлення', match: o => o.status === PREORDER },
   {
@@ -103,6 +110,15 @@ export default async function SiteOrdersPage({
 
   const supabase = createServiceClient()
   const lastSync = await lastCronRun(supabase, 'bitrix-sync')
+
+  // Черга огляду: скільки чекає і що саме зараз дивимось
+  const [{ count: queued }, { data: nowChecking }] = await Promise.all([
+    supabase.from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('platform', 'site').is('auto_done_at', null)
+      .not('status', 'in', '("Виконано","Скасовано","Повернено","Не вдалося")'),
+    supabase.from('app_settings').select('value').eq('key', 'autopilot_now').maybeSingle(),
+  ])
   const { data: zones } = await supabase.from('delivery_zones').select('warehouse')
   const warehouses = [...new Set((zones ?? []).map(z => z.warehouse as string))].sort()
 
@@ -133,7 +149,11 @@ export default async function SiteOrdersPage({
           </p>
         </div>
         <div className="flex items-start gap-2">
-          <SyncButton last={lastSync?.ran_at ?? null} />
+          <SyncButton
+            last={lastSync?.ran_at ?? null}
+            queued={queued ?? 0}
+            checking={(nowChecking?.value as { external_id?: string; customer?: string; at?: string } | null) ?? null}
+          />
           <Link
             href="/orders/manual"
             className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium
