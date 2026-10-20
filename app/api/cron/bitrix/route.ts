@@ -31,12 +31,26 @@ export async function GET(request: NextRequest) {
    * широкий — за добу, — щоб підібрати те, що проґавилось під час збою чи
    * простою.
    */
-  const minutes = Math.min(Math.max(
-    Number(new URL(request.url).searchParams.get('minutes') ?? 30), 5), 2880)
+  const params = new URL(request.url).searchParams
+  const minutes = Math.min(Math.max(Number(params.get('minutes') ?? 30), 5), 200_000)
+
+  /**
+   * Добір минулого — окремий режим.
+   *
+   * Шукає за датою створення й іде частинами: тисячі угод в один виклик не
+   * вкладаються, а розклад тим часом має й далі ходити по своєму вікну.
+   */
+  const backfill = params.get('backfill') === '1'
+  const startPage = Number(params.get('page') ?? 0)
 
   const startedAt = Date.now()
   const since = new Date(Date.now() - minutes * 60_000).toISOString()
-  const result = await syncSiteOrders(service, { since, maxPages: minutes > 120 ? 20 : 4 })
+  const result = await syncSiteOrders(service, {
+    since,
+    maxPages: backfill ? 6 : minutes > 120 ? 20 : 4,
+    byCreated: backfill,
+    startPage,
+  })
 
   await logCronRun(service, 'bitrix-sync', startedAt, { ...result, minutes }, result.error)
   return NextResponse.json({ ...result, minutes }, { status: result.error ? 500 : 200 })
