@@ -6,6 +6,7 @@ import { syncSiteOrders } from '@/lib/bitrix-sync'
 import { autoProcessSiteOrders } from '@/lib/site-autopilot'
 import { getSetting } from '@/lib/settings'
 import { CATEGORY_ID } from '@/lib/bitrix-deal'
+import { logCronRun } from '@/lib/cron-log'
 
 /**
  * POST /api/bitrix/event — Бітрікс сам каже, що змінилось.
@@ -48,6 +49,7 @@ export async function POST(req: NextRequest) {
   }
 
   const service = createServiceClient()
+  const startedAt = Date.now()
 
   // Фільтр за воронкою — у самій синхронізації: угоди інших воронок просто
   // не повернуться, і ми нічого з ними не зробимо
@@ -62,6 +64,16 @@ export async function POST(req: NextRequest) {
       auto = await autoProcessSiteOrders(service, { orderIds: [order.id as string], limit: 1 })
     }
   }
+
+  /**
+   * Слід від кожної події.
+   *
+   * Поки вебхук налаштовують, це єдиний спосіб переконатися, що він справді
+   * дійшов: у замовленнях може не змінитись нічого видимого, а подія при
+   * цьому була.
+   */
+  await logCronRun(service, 'bitrix-event', startedAt,
+    { event, deal: dealId, ...sync, auto }, sync.error)
 
   return NextResponse.json({ ok: true, event, deal: dealId, category: CATEGORY_ID, sync, auto })
 }
