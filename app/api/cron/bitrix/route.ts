@@ -42,12 +42,15 @@ export async function GET(request: NextRequest) {
    */
   const backfill = params.get('backfill') === '1'
   const startPage = Number(params.get('page') ?? 0)
+  // Скільки сторінок за виклик: сто п'ятдесят угод — це близько двох
+  // хвилин, і це вже половина відведеного часу
+  const pages = Math.min(Math.max(Number(params.get('pages') ?? 3), 1), 8)
 
   const startedAt = Date.now()
   const since = new Date(Date.now() - minutes * 60_000).toISOString()
   const result = await syncSiteOrders(service, {
     since,
-    maxPages: backfill ? 6 : minutes > 120 ? 20 : 4,
+    maxPages: backfill ? pages : minutes > 120 ? 20 : 4,
     byCreated: backfill,
     startPage,
   })
