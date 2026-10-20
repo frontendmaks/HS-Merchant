@@ -1,4 +1,5 @@
 'use client'
+import { useState } from 'react'
 
 export interface AreaStat {
   area: string
@@ -14,12 +15,18 @@ export interface AreaStat {
  * інше — котрий район міста й котрі села дають роботу, бо між ними
  * розподіляються склади.
  */
-export default function AreaBreakdown({ areas }: { areas: AreaStat[] }) {
+export default function AreaBreakdown({ areas, pending = 0 }: {
+  areas: AreaStat[]
+  /** Скільки замовлень періоду ще без розпізнаного району */
+  pending?: number
+}) {
+  const [all, setAll] = useState(false)
+
   if (!areas.length) {
     return (
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6 text-center
                       text-zinc-500 text-sm">
-        Районів ще не визначено — вони з'являються, щойно адреси розпізнаються
+        Районів ще не визначено — вони з&apos;являються, щойно адреси розпізнаються
       </div>
     )
   }
@@ -63,7 +70,24 @@ export default function AreaBreakdown({ areas }: { areas: AreaStat[] }) {
       {outside.length > 0 && (
         <div className="space-y-1.5">
           <div className="text-zinc-400 text-xs">Околиці</div>
-          {outside.slice(0, 15).map(row)}
+          {(all ? outside : outside.slice(0, 15)).map(row)}
+          {outside.length > 15 && (
+            <button
+              onClick={() => setAll(v => !v)}
+              className="text-xs text-zinc-500 hover:text-white transition-colors pt-1"
+            >
+              {all ? 'Згорнути' : `Показати всі ${outside.length}`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Чесніше назвати залишок, ніж промовчати: інакше сума стовпчиків
+          тихо не сходиться з кількістю замовлень періоду */}
+      {pending > 0 && (
+        <div className="text-zinc-600 text-xs border-t border-zinc-800 pt-3">
+          Ще {pending} {pending === 1 ? 'замовлення' : 'замовлень'} без розпізнаного
+          району — адреси дорозпізнаються у фоні
         </div>
       )}
     </div>

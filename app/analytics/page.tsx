@@ -67,6 +67,38 @@ export default async function AnalyticsPage({
   const platform = (PLATFORMS as readonly string[]).includes(sp.platform ?? '')
     ? sp.platform! : 'all'
 
+  /**
+   * Попередній відрізок такої самої довжини, впритул до обраного.
+   *
+   * Питання «більше чи менше» без нього не має відповіді: 1481 замовлення
+   * саме по собі не каже нічого, поки поруч немає вересня. Для цілого
+   * місяця беремо саме попередній місяць, а не «стільки ж днів назад» —
+   * інакше серпень порівнювався б із хвостом липня.
+   */
+  const previousRange = (() => {
+    const whole = (() => {
+      const f = new Date(from + 'T00:00:00')
+      const t = new Date(to + 'T00:00:00')
+      const firstOfMonth = f.getDate() === 1
+      const lastOfMonth = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate() === t.getDate()
+      return firstOfMonth && lastOfMonth && f.getMonth() === t.getMonth()
+        && f.getFullYear() === t.getFullYear()
+    })()
+
+    const f = new Date(from + 'T00:00:00')
+    if (whole) {
+      const start = new Date(f.getFullYear(), f.getMonth() - 1, 1)
+      const end = new Date(f.getFullYear(), f.getMonth(), 0)
+      return { from: iso(start), to: iso(end) }
+    }
+
+    const t = new Date(to + 'T00:00:00')
+    const days = Math.round((t.getTime() - f.getTime()) / 86_400_000) + 1
+    const end = new Date(f.getTime() - 86_400_000)
+    const start = new Date(end.getTime() - (days - 1) * 86_400_000)
+    return { from: iso(start), to: iso(end) }
+  })()
+
   const supabase = createServiceClient()
 
   // Запускаємо одразу: зони ні від чого не залежать і чекати на них нема чого
@@ -75,7 +107,7 @@ export default async function AnalyticsPage({
 
   // One pass over the period. Splitting by marketplace happens in memory below,
   // so switching between them costs no round trip at all.
-  const [orderRows, productRows, { data: operatorRows }] =
+  const [orderRows, previousRows, productRows, { data: operatorRows }] =
     await Promise.all([
       /**
        * Сторінками, а не одним запитом.
@@ -89,9 +121,18 @@ export default async function AnalyticsPage({
       fetchAllRows(() => supabase.from('orders')
         // The raw marketplace payload is large and mostly irrelevant here, so
         // Postgres digs out the three geography fields instead of sending it all
-        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, area, delivery_zone, items, total, commission, status, cancel_reason, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code, md_placed:raw->>created_at, rz_placed:raw->>created')
+        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, area, delivery_zone, warehouse, items, total, commission, status, cancel_reason, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code, md_placed:raw->>created_at, rz_placed:raw->>created')
         .gte('order_date', from).lte('order_date', to)
         .order('order_date', { ascending: false })),
+      /**
+       * Попередній відрізок — лише те, з чого рахуються підсумки.
+       *
+       * Ні позиції, ні адреси тут не потрібні: порівнюємо вісім чисел на
+       * картках, а не малюємо для минулого місяця другу карту.
+       */
+      fetchAllRows(() => supabase.from('orders')
+        .select('id, platform, order_date, customer_phone, customer_name, total, commission, status')
+        .gte('order_date', previousRange.from).lte('order_date', previousRange.to)),
       // Only needed to put order lines into categories
       // Назви й категорії всіх товарів — щоб рядки замовлень лягли в категорії
       fetchAllRows(() => supabase.from('products').select('name, category_name')),
@@ -103,6 +144,18 @@ export default async function AnalyticsPage({
   const { data: zoneRows } = await zonesPromise
 
   const orders = (orderRows ?? []) as unknown as OrderWithId[]
+  const previous = (previousRows ?? []) as unknown as OrderWithId[]
+
+  /** Підсумки минулого відрізка плюс скільки там було різних покупців */
+  const previousTotals = (rows: OrderWithId[]) => ({
+    ...totals(rows),
+    customers: new Set(
+      rows
+        .filter(o => !isCanceled(o))
+        .map(o => (o.customer_phone ?? o.customer_name ?? '').trim().toLowerCase())
+        .filter(Boolean),
+    ).size,
+  })
   const operatorIds = new Set((operatorRows ?? []).map(r => r.id as string))
 
   const productCategories = new Map<string, string>()
@@ -174,16 +227,41 @@ export default async function AnalyticsPage({
   /** Everything the page shows, for one slice of the orders. */
   /** Навантаження на кожну зону доставки — для карти. */
   function byZone(rows: OrderWithId[]) {
+    const zones = zoneRows ?? []
+    const known = new Set(zones.map(z => z.code as string))
+
+    /*
+     * Коли зони немає — зараховуємо за складом.
+     *
+     * Зону проставляє геокодер, і він устиг не скрізь; склад же стоїть
+     * майже в кожному замовленні, бо приходить із Бітрікса — від тих, хто
+     * замовлення справді збирав. Карта, яка показує чверть доставок, бреше
+     * помітніше, ніж карта, яка не вміє розрізнити дві плями одного складу.
+     *
+     * Склад із двома зонами (АС 2) зараховується в першу: легенда й так
+     * підсумовує за складом, тож у підсумку число виходить те саме.
+     */
+    const home = new Map<string, string>()
+    for (const z of zones) {
+      const w = z.warehouse as string
+      if (!home.has(w)) home.set(w, z.code as string)
+    }
+
     const load = new Map<string, { orders: number; revenue: number }>()
     for (const o of rows) {
-      const zone = (o as unknown as { delivery_zone?: string | null }).delivery_zone
-      if (!zone || isCanceled(o)) continue
-      const acc = load.get(zone) ?? { orders: 0, revenue: 0 }
+      if (isCanceled(o)) continue
+      const row = o as unknown as { delivery_zone?: string | null; warehouse?: string | null }
+      const code = row.delivery_zone && known.has(row.delivery_zone)
+        ? row.delivery_zone
+        : (row.warehouse ? home.get(row.warehouse) ?? null : null)
+      if (!code) continue
+      const acc = load.get(code) ?? { orders: 0, revenue: 0 }
       acc.orders++
       acc.revenue += Number(o.total ?? 0)
-      load.set(zone, acc)
+      load.set(code, acc)
     }
-    return (zoneRows ?? []).map(z => ({
+
+    return zones.map(z => ({
       code: z.code as string,
       warehouse: z.warehouse as string,
       polygon: (z.polygon as { lat: number; lng: number }[]) ?? [],
@@ -196,7 +274,8 @@ export default async function AnalyticsPage({
     const found = new Map<string, { orders: number; revenue: number }>()
     for (const o of rows) {
       const area = (o as unknown as { area?: string | null }).area
-      if (!area || isCanceled(o)) continue
+      if (isCanceled(o)) continue
+      if (!area) continue
       const acc = found.get(area) ?? { orders: 0, revenue: 0 }
       acc.orders++
       acc.revenue += Number(o.total ?? 0)
@@ -238,6 +317,10 @@ export default async function AnalyticsPage({
       regions: byRegion(rows, learned, gazetteer),
       // Райони Львова й села — для замовлень, які возить наш склад
       areas: byArea(rows),
+      // Скільки з них ще без району — щоб підпис під стовпчиками не вдавав,
+      // ніби це всі замовлення періоду
+      areasPending: rows.filter(o => !isCanceled(o)
+        && !(o as unknown as { area?: string | null }).area).length,
       zoneLoad: byZone(rows),
       cancels: limited ? EMPTY_CANCELS : cancelStats(
         rows,
@@ -271,6 +354,18 @@ export default async function AnalyticsPage({
       to={to}
       platform={platform}
       limited={limited}
+      previous={{
+        from: previousRange.from,
+        to: previousRange.to,
+        totals: {
+          all: previousTotals(previous),
+          maudau: previousTotals(previous.filter(o => o.platform === 'maudau')),
+          rozetka: previousTotals(previous.filter(o => o.platform === 'rozetka')),
+          site: previousTotals(previous.filter(o => o.platform === 'site' || o.platform === 'manual')),
+          web: previousTotals(previous.filter(o => o.platform === 'site')),
+          phone: previousTotals(previous.filter(o => o.platform === 'manual')),
+        },
+      }}
       bundles={{
         all: bundle(orders),
         maudau: bundle(orders.filter(o => o.platform === 'maudau')),

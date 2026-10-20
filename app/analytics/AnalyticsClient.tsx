@@ -14,11 +14,44 @@ import type { OperatorStat, CancelStats, CancelSide } from '@/lib/analytics'
 import { CANCEL_SIDE_LABEL } from '@/lib/analytics'
 import { money, moneyShort, pct, num, dayMonth, orderWord } from '@/lib/format'
 
-function Card({ label, value, sub, tone = 'white' }: {
+/**
+ * Зміна проти попереднього відрізка.
+ *
+ * `goodDown` — для скасувань: там падіння і є добра новина, і фарбувати
+ * його червоним означало б читати число задом наперед.
+ */
+function Delta({ now, before, goodDown = false, label }: {
+  now: number
+  before: number
+  goodDown?: boolean
+  label: string
+}) {
+  if (before === 0 && now === 0) return null
+
+  // Зростання з нуля у відсотках не виражається — так і кажемо
+  const ratio = before === 0 ? null : (now - before) / before
+  const up = now > before
+  const flat = now === before
+  const good = flat ? null : (goodDown ? !up : up)
+
+  const tone = good === null ? 'text-zinc-500'
+    : good ? 'text-emerald-400' : 'text-red-400'
+
+  return (
+    <div className={`text-xs mt-1 ${tone}`} title={`Було ${label}`}>
+      {flat ? '—' : up ? '↑' : '↓'}
+      {ratio != null && !flat && ` ${Math.abs(Math.round(ratio * 100))}%`}
+      <span className="text-zinc-600"> проти {label}</span>
+    </div>
+  )
+}
+
+function Card({ label, value, sub, tone = 'white', delta }: {
   label: string
   value: string
   sub?: string
   tone?: 'white' | 'emerald' | 'red' | 'amber' | 'cyan'
+  delta?: React.ReactNode
 }) {
   const colors = {
     white: 'text-white', emerald: 'text-emerald-400', red: 'text-red-400',
@@ -29,6 +62,7 @@ function Card({ label, value, sub, tone = 'white' }: {
       <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">{label}</div>
       <div className={`text-2xl font-bold ${colors[tone]}`}>{value}</div>
       {sub && <div className="text-zinc-500 text-xs mt-0.5">{sub}</div>}
+      {delta}
     </div>
   )
 }
@@ -253,6 +287,29 @@ function monthRange(anchor: string, offset = 0) {
   return { from: iso(first), to: iso(last) }
 }
 
+/**
+ * Швидкі відрізки.
+ *
+ * «Весь час» починається з 1 липня 2026 — раніше замовлень у Мерчанті
+ * просто немає, а відкрита дата зліва змушувала б малювати порожню
+ * половину графіка.
+ */
+const EPOCH = '2026-07-01'
+
+const shiftDays = (days: number) => {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  return iso(d)
+}
+
+const PRESETS: { label: string; range: () => { from: string; to: string } }[] = [
+  { label: 'Сьогодні', range: () => ({ from: iso(new Date()), to: iso(new Date()) }) },
+  { label: 'Тиждень', range: () => ({ from: shiftDays(-6), to: iso(new Date()) }) },
+  { label: '30 днів', range: () => ({ from: shiftDays(-29), to: iso(new Date()) }) },
+  { label: 'Цей місяць', range: () => monthRange(iso(new Date())) },
+  { label: 'Весь час', range: () => ({ from: EPOCH, to: iso(new Date()) }) },
+]
+
 function PeriodPicker({ from, to, onChange, pending }: {
   from: string
   to: string
@@ -311,12 +368,21 @@ function PeriodPicker({ from, to, onChange, pending }: {
         onFocus={e => openPicker(e.currentTarget)}
       />
 
-      <button
-        onClick={() => onChange(thisMonth.from, thisMonth.to)}
-        className="px-2.5 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
-      >
-        Цей місяць
-      </button>
+      {PRESETS.map(preset => {
+        const r = preset.range()
+        const active = r.from === from && r.to === to
+        return (
+          <button
+            key={preset.label}
+            onClick={() => onChange(r.from, r.to)}
+            className={`px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
+              active ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+            }`}
+          >
+            {preset.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -710,18 +776,31 @@ export interface Bundle {
   }
   regions: RegionStat[]
   areas: AreaStat[]
+  areasPending: number
   zoneLoad: ZoneLoad[]
   operators: OperatorStat[]
   cancels: CancelStats
 }
 
+export interface PreviousTotals extends Totals {
+  customers: number
+}
+
+export interface Previous {
+  from: string
+  to: string
+  totals: Record<string, PreviousTotals>
+}
+
 export default function AnalyticsClient({
-  from, to, platform: initialPlatform, bundles, limited = false,
+  from, to, platform: initialPlatform, bundles, previous, limited = false,
 }: {
   from: string
   to: string
   platform: string
   bundles: Record<string, Bundle>
+  /** Той самий набір чисел за попередній відрізок — для стрілок на картках */
+  previous: Previous
   /** An analyst: the trade, without the blocks that are about the team */
   limited?: boolean
 }) {
@@ -755,9 +834,12 @@ export default function AnalyticsClient({
   }
 
   const {
-    totals: t, perDay, products, categories, customers, customerSummary, regions, areas, zoneLoad, operators,
+    totals: t, perDay, products, categories, customers, customerSummary, regions, areas, areasPending, zoneLoad, operators,
     cancels,
   } = bundles[platform] ?? bundles.all
+
+  // Той самий зріз за попередній відрізок — для стрілок
+  const p = previous.totals[platform] ?? previous.totals.all
 
   const maxProductQty = Math.max(1, ...products.map(p => p.qty))
   const maxCategoryRevenue = Math.max(1, ...categories.map(c => c.revenue))
@@ -770,6 +852,11 @@ export default function AnalyticsClient({
           <p className="text-zinc-400 text-sm mt-0.5">
             {dayMonth(shownFrom)} — {dayMonth(shownTo)} ·{' '}
             {pending ? 'рахую…' : `${t.orders} ${orderWord(t.orders)}`}
+            {!pending && (
+              <span className="text-zinc-600">
+                {' '}· порівняння з {dayMonth(previous.from)} — {dayMonth(previous.to)}
+              </span>
+            )}
             {platform !== 'all' && (
               <span className="text-zinc-500">
                 {' '}· лише {MARKETPLACES.find(m => m.key === platform)?.label}
@@ -789,22 +876,29 @@ export default function AnalyticsClient({
 
       {/* Money */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Card label="Загальний дохід" value={money(t.revenue)} sub="по доставлених" />
-        <Card label="Комісія" value={money(t.commission)} sub="по доставлених" tone="amber" />
-        <Card label="Чистий дохід" value={money(t.net)} sub="дохід мінус комісія" tone="emerald" />
+        <Card label="Загальний дохід" value={money(t.revenue)} sub="по доставлених"
+          delta={<Delta now={t.revenue} before={p.revenue} label={moneyShort(p.revenue)} />} />
+        <Card label="Комісія" value={money(t.commission)} sub="по доставлених" tone="amber"
+          delta={<Delta now={t.commission} before={p.commission} goodDown label={moneyShort(p.commission)} />} />
+        <Card label="Чистий дохід" value={money(t.net)} sub="дохід мінус комісія" tone="emerald"
+          delta={<Delta now={t.net} before={p.net} label={moneyShort(p.net)} />} />
         <Card
           label="Середній чек"
           value={money(t.avgCheck)}
           sub={`по всіх, крім скасованих — ${money(t.avgCheckAll)}`}
           tone="cyan"
+          delta={<Delta now={t.avgCheck} before={p.avgCheck} label={moneyShort(p.avgCheck)} />}
         />
       </div>
 
       {/* Funnel */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Card label="Всього замовлень" value={String(t.orders)} />
-        <Card label="Доставлено" value={String(t.delivered)} sub={pct(t.delivered, t.orders)} tone="emerald" />
-        <Card label="Скасовано" value={String(t.canceled)} sub={pct(t.canceled, t.orders)} tone="red" />
+        <Card label="Всього замовлень" value={String(t.orders)}
+          delta={<Delta now={t.orders} before={p.orders} label={String(p.orders)} />} />
+        <Card label="Доставлено" value={String(t.delivered)} sub={pct(t.delivered, t.orders)} tone="emerald"
+          delta={<Delta now={t.delivered} before={p.delivered} label={String(p.delivered)} />} />
+        <Card label="Скасовано" value={String(t.canceled)} sub={pct(t.canceled, t.orders)} tone="red"
+          delta={<Delta now={t.canceled} before={p.canceled} goodDown label={String(p.canceled)} />} />
         <Card label="В процесі" value={String(t.inFlight)} tone="cyan" />
       </div>
 
@@ -845,7 +939,7 @@ export default function AnalyticsClient({
             </p>
             <DeliveryMap zones={zoneLoad} />
           </div>
-          <AreaBreakdown areas={areas} />
+          <AreaBreakdown areas={areas} pending={areasPending} />
         </div>
       ) : <UkraineMap regions={regions} />}
 
@@ -875,7 +969,8 @@ export default function AnalyticsClient({
 
       {/* Customers */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <Card label="Клієнтів" value={String(customerSummary.total)} />
+        <Card label="Клієнтів" value={String(customerSummary.total)}
+          delta={<Delta now={customerSummary.total} before={p.customers} label={String(p.customers)} />} />
         <Card
           label="Повторні покупці"
           value={String(customerSummary.repeat)}
