@@ -1,4 +1,5 @@
 import { promoFor, oldPriceFor } from '@/lib/price-promo'
+import { basePrice } from '@/lib/price-category'
 import {
   calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock,
 } from '@/lib/feed-xml'
@@ -86,10 +87,10 @@ export function generateRozetkaYML(feed: any, ctx: RozetkaFeedContext): {
     const baseName = fp.custom_name ?? p.name
     const name = (weightLabel ? `${baseName}, ${weightLabel}` : baseName ?? '').slice(0, 255)
 
-    const basePrice = Number(fp.custom_price ?? p.price)
+    const { price: baseForOffer } = basePrice(p, fp, feed.pricing)
     const price = fp.custom_price
-      ? basePrice
-      : (calcMarketplacePrice(basePrice, attrs) ?? basePrice)
+      ? baseForOffer
+      : (calcMarketplacePrice(baseForOffer, attrs) ?? baseForOffer)
 
     if (!name) { errors.push(`Немає назви: ${offerId}`); continue }
     if (!price || price <= 0) { errors.push(`Немає ціни: ${name}`); continue }

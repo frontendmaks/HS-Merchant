@@ -3,6 +3,7 @@ import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { notFound } from 'next/navigation'
 import FeedEditor from './FeedEditor'
 import PricePromos from './PricePromos'
+import FeedPricing from './FeedPricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,7 +50,12 @@ export default async function FeedPage({ params }: { params: Promise<{ id: strin
 
   return (
     <>
-      <div className="mb-3">
+      <div className="mb-3 flex flex-wrap items-start gap-3">
+        <FeedPricing
+          feedId={feed.id as string}
+          categories={categories.sort()}
+          products={products.map(p => ({ id: p.id as string, name: p.name as string }))}
+        />
         <PricePromos
           feedId={feed.id as string}
           categories={categories.sort()}

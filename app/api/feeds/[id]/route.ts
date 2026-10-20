@@ -3,6 +3,7 @@ import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { sanitizeSku } from '@/lib/transliterate'
 import { NextRequest, NextResponse } from 'next/server'
 import { loadPromos, promoFor, oldPriceFor } from '@/lib/price-promo'
+import { loadPricing, basePrice } from '@/lib/price-category'
 import {
   calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock,
 } from '@/lib/feed-xml'
@@ -97,8 +98,9 @@ export async function GET(
     }
   }
 
-  // Штучні акції — один запит на весь фід, не на кожен товар
+  // Категорії цін і штучні акції — по одному запиту на весь фід
   feed.promos = await loadPromos(supabase, feed.id)
+  feed.pricing = await loadPricing(supabase, feed)
 
   const { xml, offersCount, errorsCount, errors } = isMaudau
     ? generateMaudauYML(feed, slugToPortalId, catAttrsMap)
@@ -141,8 +143,10 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       const weightLabel = minWeightLabel(attrs)
       const baseName = fp.custom_name ?? p.name
       const name = weightLabel ? `${baseName}, ${weightLabel}` : baseName
-      const basePrice = Number(fp.custom_price ?? p.price)
-      const mPrice = fp.custom_price ? basePrice : (calcMarketplacePrice(basePrice, attrs) ?? basePrice)
+      const { price: baseForOffer } = basePrice(p, fp, feed.pricing)
+      const mPrice = fp.custom_price
+        ? baseForOffer
+        : (calcMarketplacePrice(baseForOffer, attrs) ?? baseForOffer)
       const price = mPrice
       if (!price) errors.push(`Немає ціни: ${name || p.sku || p.id}`)
       if (!name) errors.push(`Немає назви: ${p.sku || p.id}`)
@@ -271,14 +275,16 @@ function generateMaudauYML(
       const stock = fp.custom_stock ?? p.stock
       const catId = catIdMap.get(p.category_name ?? 'Без категорії') ?? '1'
 
-      // Calculate marketplace price: custom_params override first, then custom_price, then weight formula
-      const basePrice = Number(p.price)
+      // Ціна: вписана в параметрах, далі вписана в рядку, далі категорія
+      // цін фіда — і лише потім формула фасування
+      const { price: baseForOffer } = basePrice(p, fp, feed.pricing)
       const customParamPrice = fp.custom_params?.['Ціна на маркетплейсі']
       const unitPrice = customParamPrice && Number(customParamPrice) > 0
         ? Number(customParamPrice)
         : fp.custom_price
           ? Number(fp.custom_price)
-          : (calcMarketplacePrice(basePrice, p.attributes as Record<string, string> | null) ?? basePrice)
+          : (calcMarketplacePrice(baseForOffer, p.attributes as Record<string, string> | null)
+             ?? baseForOffer)
 
       // Validate
       const label = nameUa || p.sku || p.id
