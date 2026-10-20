@@ -43,6 +43,10 @@
     {
       "path": "/api/cron/marketplace-orders?limit=10",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/trello?limit=40",
+      "schedule": "*/3 * * * *"
     }
   ]
 }

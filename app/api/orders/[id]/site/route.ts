@@ -133,6 +133,14 @@ export async function PATCH(
         customerName: (order.customer_name as string) || 'замовлення',
       })
       numberNote = moved.note
+
+      // Номер міг змінитись: на новому дні старе число бувало зайняте.
+      // Записуємо те, під яким замовлення справді стало в журнал, —
+      // інакше склад шукатиме ящик, якого немає
+      if (moved.ok && moved.number !== Number(order.manual_number)) {
+        patch.manual_number = moved.number
+        changes.manual_number = moved.number
+      }
     }
   }
   if (body?.delivery_slot && body.delivery_slot !== order.delivery_slot) {

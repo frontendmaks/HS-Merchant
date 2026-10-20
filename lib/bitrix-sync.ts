@@ -255,8 +255,22 @@ export async function syncSiteOrders(
               toDate: fields.delivery_date,
               customerName: fields.customer_name || 'замовлення',
             })
-            if (!moved.ok && moved.note) {
+            if (moved.note) {
               result.notes = [...(result.notes ?? []), `№${existing.manual_number}: ${moved.note}`]
+            }
+
+            /*
+             * Номер міг змінитись — старе число на новому дні бувало
+             * зайняте. Тоді правимо і в себе, і в угоді: номер ящика
+             * читають зі складу саме з Бітрікса.
+             */
+            if (moved.ok && moved.number !== Number(existing.manual_number)) {
+              await service.from('orders')
+                .update({ manual_number: moved.number }).eq('id', existing.id)
+              await bitrix('crm.deal.update', {
+                id: Number(deal.ID),
+                fields: { UF_CRM_1607510002583: String(moved.number) },
+              })
             }
           }
 

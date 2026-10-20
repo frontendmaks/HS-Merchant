@@ -59,15 +59,39 @@ async function takenNumbers(service: Service, date: string): Promise<Set<number>
 }
 
 /**
+ * Найменший вільний номер у прочитаному аркуші.
+ *
+ * Рядок 1 — заголовки. Номер вважається вільним, коли навпроти нього немає
+ * імені й коли його не тримає жодне наше замовлення на цю дату.
+ *
+ * Колір комірки до уваги не береться: червоним там позначають щось своє,
+ * але ім'я в такому рядку стоїть, тобто номер зайнятий.
+ */
+function firstFree(
+  rows: string[][],
+  taken: Set<number>,
+): { row: number; number: number } | null {
+  let best: { row: number; number: number } | null = null
+
+  for (let i = 1; i < rows.length; i++) {
+    const n = Number((rows[i]?.[0] ?? '').toString().trim())
+    const name = (rows[i]?.[1] ?? '').toString().trim()
+    if (!Number.isFinite(n) || n <= 0 || name || taken.has(n)) continue
+    if (!best || n < best.number) best = { row: i + 1, number: n }
+  }
+
+  return best
+}
+
+/**
  * Наступний номер за журналом — і запис імені навпроти нього.
  *
- * Номер береться з кінця: перший порожній рядок **після останнього
- * заповненого**. Журнал читають згори вниз і зверяються з ним на складі, тож
- * нове замовлення має ставати в кінець черги, а не в діру посередині, яку
- * хтось лишив свідомо.
- *
- * Діру все ж використовуємо — але тільки якщо далі місця немає: краще
- * повторно зайняти звільнений рядок, ніж не видати номер узагалі.
+ * Береться **найменший вільний** номер, хоч би де він стояв. Раніше ми
+ * шукали перший порожній рядок після останнього заповненого, і це давало
+ * дірки: щойно замовлення переносили на інший день, його рядок звільнявся,
+ * а нумерація йшла далі — на аркуші стояли 62, 63 порожні, а новому
+ * замовленню видавався 68. Номер — це номер ящика, і діри в ньому
+ * означають ящики, які ніхто не взяв.
  *
  * Рядок, номер якого вже тримає наше замовлення, оминаємо: порожня комірка
  * там означає не «вільно», а «ім'я стерли», і два замовлення під одним
@@ -107,34 +131,13 @@ export async function reserveNumber(
     const rows = await readRange(spreadsheetId, `'${tab}'!A1:B300`)
     if (!rows) return fallback('Таблиця не відповіла')
 
-    // Рядок 1 — заголовки. Збираємо всі придатні рядки й окремо запам'ятовуємо,
-    // де закінчується заповнена частина журналу
-    const free: { row: number; number: number }[] = []
-    let lastFilled = 0
-
-    for (let i = 1; i < rows.length; i++) {
-      const n = Number((rows[i]?.[0] ?? '').toString().trim())
-      const name = (rows[i]?.[1] ?? '').toString().trim()
-      if (!Number.isFinite(n) || n <= 0) continue
-
-      if (name) { lastFilled = i; continue }
-      // Номер, який уже тримає наше замовлення, вільним не вважаємо
-      if (taken.has(n)) continue
-      free.push({ row: i + 1, number: n })
-    }
-
-    // Спершу — те, що за останнім заповненим рядком; якщо там порожньо,
-    // вертаємось до дір вище
-    const target = free.find(f => f.row > lastFilled + 1) ?? free[0]
-
+    const target = firstFree(rows, taken)
     if (!target) {
       return fallback(`У вкладці ${tab} не лишилось вільних номерів`)
     }
 
     const { row: targetRow, number } = target
-    const note = targetRow <= lastFilled
-      ? 'Номер узято з вільного рядка всередині журналу'
-      : null
+    const note = null
 
     // Перечитуємо саме цю комірку — раптом її щойно зайняли
     const fresh = await readRange(spreadsheetId, `'${tab}'!B${targetRow}`)
@@ -156,9 +159,13 @@ export async function reserveNumber(
  * складі й у розмові. Тож у журналі воно має зникнути з учорашнього аркуша
  * й з'явитись на завтрашньому під тим самим числом.
  *
- * Якщо на новий день цей номер уже зайнятий, нічого не переписуємо: чуже
- * замовлення в журналі важливіше за наше бажання зберегти число. Тоді
- * повертаємо пояснення, і номер лишається старий.
+ * Якщо на новий день це число вже зайняте, замовлення все одно переїжджає —
+ * але під найменшим вільним номером того дня. Чуже замовлення в журналі ми
+ * не переписуємо, а лишати замовлення взагалі без рядка на новому дні гірше,
+ * ніж змінити йому число: ящика з таким номером просто не буде.
+ *
+ * Повертаємо той номер, під яким замовлення врешті стало, — викликач має
+ * записати його в себе, інакше Мерчант і склад говоритимуть різними числами.
  */
 export async function moveNumber(
   service: Service,
@@ -168,48 +175,59 @@ export async function moveNumber(
     toDate: string
     customerName: string
   },
-): Promise<{ ok: boolean; note: string | null }> {
-  if (!sheetsConfigured()) return { ok: false, note: 'Журнал недоступний' }
+): Promise<{ ok: boolean; number: number; note: string | null }> {
+  const same = { ok: false, number }
+  if (!sheetsConfigured()) return { ...same, note: 'Журнал недоступний' }
 
   const [fromSheet, toSheet] = await Promise.all([
     registerFor(service, fromDate),
     registerFor(service, toDate),
   ])
-  if (!fromSheet || !toSheet) return { ok: false, note: 'Таблицю на ці дати не вказано' }
+  if (!fromSheet || !toSheet) return { ...same, note: 'Таблицю на ці дати не вказано' }
 
-  const rowOf = async (sheetId: string, date: string) => {
-    const rows = await readRange(sheetId, `'${tabNameFor(date)}'!A1:B300`)
-    if (!rows) return null
+  const rowOf = (rows: string[][], n: number) => {
     for (let i = 1; i < rows.length; i++) {
-      if (Number((rows[i]?.[0] ?? '').toString().trim()) === number) {
+      if (Number((rows[i]?.[0] ?? '').toString().trim()) === n) {
         return { row: i + 1, name: (rows[i]?.[1] ?? '').toString().trim() }
       }
     }
     return null
   }
 
-  const target = await rowOf(toSheet, toDate)
-  if (!target) return { ok: false, note: `У вкладці ${tabNameFor(toDate)} немає рядка ${number}` }
-  if (target.name) {
-    return {
-      ok: false,
-      note: `Номер ${number} на ${tabNameFor(toDate)} зайнятий — «${target.name}»`,
+  const toRows = await readRange(toSheet, `'${tabNameFor(toDate)}'!A1:B300`)
+  if (!toRows) return { ...same, note: `Вкладка ${tabNameFor(toDate)} не відповіла` }
+
+  const wanted = rowOf(toRows, number)
+  let target = wanted && !wanted.name ? { row: wanted.row, number } : null
+  let note: string | null = null
+
+  if (!target) {
+    // Номер зайнятий або такого рядка немає — шукаємо найменший вільний,
+    // пропускаючи ті, що вже тримають наші ж замовлення того дня
+    const free = firstFree(toRows, await takenNumbers(service, toDate))
+    if (!free) {
+      return { ...same, note: `У вкладці ${tabNameFor(toDate)} не лишилось вільних номерів` }
     }
+    target = free
+    note = wanted?.name
+      ? `Номер ${number} на ${tabNameFor(toDate)} зайнятий — «${wanted.name}», дали ${free.number}`
+      : `Номер ${number} на ${tabNameFor(toDate)} недоступний — дали ${free.number}`
   }
 
   const written = await writeCell(
     toSheet, `'${tabNameFor(toDate)}'!B${target.row}`, customerName,
   )
-  if (!written) return { ok: false, note: 'Не вдалося записати в журнал' }
+  if (!written) return { ...same, note: 'Не вдалося записати в журнал' }
 
   // Старий рядок звільняємо після запису нового: якщо щось піде не так,
   // замовлення лишиться видимим бодай в одному дні
-  const source = await rowOf(fromSheet, fromDate)
+  const fromRows = await readRange(fromSheet, `'${tabNameFor(fromDate)}'!A1:B300`)
+  const source = fromRows ? rowOf(fromRows, number) : null
   if (source?.row) {
     await writeCell(fromSheet, `'${tabNameFor(fromDate)}'!B${source.row}`, '')
   }
 
-  return { ok: true, note: null }
+  return { ok: true, number: target.number, note }
 }
 
 /** Чи готовий журнал до роботи — для підказки в інтерфейсі. */

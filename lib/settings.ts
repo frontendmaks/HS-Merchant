@@ -23,6 +23,12 @@ export const DEFAULTS = {
   marketplace_autoprocess: false,
   /** З якого складу відвантажують маркетплейсні замовлення */
   marketplace_warehouse: 'Гуртівня онлайн' as string,
+  /** Дошка доставки в Trello — коротке посилання */
+  trello_board: 'dIKowaNK' as string,
+  /** Список, у який чинна інтеграція кладе свіжі картки */
+  trello_new_list: '64071869483b7c6f5991699c' as string,
+  /** Чи дописувати в картки номер ящика й бланк */
+  trello_enrich: true,
 } as const
 
 export type SettingKey = keyof typeof DEFAULTS
