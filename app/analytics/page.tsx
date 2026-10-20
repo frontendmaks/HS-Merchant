@@ -111,18 +111,25 @@ export default async function AnalyticsPage({
 
   // Operator efficiency reads the order journal for the same window
   /**
-   * Журнал подій — теж сторінками, і лише по тих замовленнях, які вмістились
-   * у запит: перелік id у фільтрі має свою межу довжини.
+   * Журнал подій — частинами по замовленнях.
+   *
+   * Перелік ідентифікаторів їде в адресі запиту, а вона має межу довжини:
+   * півтори тисячі ключів перетворюють запит на «Bad Request», і сторінка
+   * просто не відкривається. Тому питаємо пачками по двісті.
    */
-  const measured = orders.slice(0, 5000).map(o => o.id)
-  const eventRows = measured.length
-    ? await fetchAllRows(() => supabase
-        .from('order_events')
-        .select('order_id, actor_id, actor_name, type, new_value, created_at')
-        .in('order_id', measured))
-    : []
+  const ids = orders.map(o => o.id)
+  const eventRows: OperatorEventRow[] = []
 
-  const events = (eventRows ?? []) as unknown as OperatorEventRow[]
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200)
+    const page = await fetchAllRows(() => supabase
+      .from('order_events')
+      .select('order_id, actor_id, actor_name, type, new_value, created_at')
+      .in('order_id', chunk))
+    eventRows.push(...(page as unknown as OperatorEventRow[]))
+  }
+
+  const events = eventRows
 
   // Efficiency is measured against the roster: a day someone was not due to
   // work is not their time, and time online can only come from the heartbeat
