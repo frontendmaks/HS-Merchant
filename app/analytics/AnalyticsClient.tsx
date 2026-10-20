@@ -255,6 +255,14 @@ type CustomerSort = 'name' | 'address' | 'orders' | 'delivered' | 'revenue' | 'c
 function CustomersTable({ rows }: { rows: CustomerStat[] }) {
   const [sort, setSort] = useState<CustomerSort>('revenue')
   const [dir, setDir] = useState<'asc' | 'desc'>('desc')
+  /**
+   * Показуємо спершу сотню, решту — на вимогу.
+   *
+   * Клієнтів за період бувають тисячі, і малювати їх усі одразу означає
+   * секунду мовчання в браузері. Але «скільки їх усього» має стояти поруч:
+   * саме це питання й ставлять, обираючи період.
+   */
+  const [shown, setShown] = useState(100)
 
   const toggle = (key: CustomerSort) => {
     if (key === sort) { setDir(d => d === 'asc' ? 'desc' : 'asc'); return }
@@ -284,7 +292,10 @@ function CustomersTable({ rows }: { rows: CustomerStat[] }) {
   ]
 
   return (
-    <Panel title="Топ клієнтів за LTV" subtitle="Натисніть на заголовок, щоб відсортувати">
+    <Panel
+      title={`Клієнти за період · ${rows.length}`}
+      subtitle="Натисніть на заголовок, щоб відсортувати"
+    >
       {sorted.length === 0 ? (
         <div className="px-5 py-10 text-center text-zinc-600 text-sm">Немає даних</div>
       ) : (
@@ -310,7 +321,7 @@ function CustomersTable({ rows }: { rows: CustomerStat[] }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
-              {sorted.map(c => (
+              {sorted.slice(0, shown).map(c => (
                 <tr key={c.key} className="hover:bg-zinc-800/30 transition-colors">
                   <td className="px-5 py-2.5 text-white text-xs">{c.name}</td>
                   <td className="px-5 py-2.5 text-zinc-400 text-xs max-w-[280px] truncate" title={c.address ?? ''}>
@@ -327,6 +338,16 @@ function CustomersTable({ rows }: { rows: CustomerStat[] }) {
               ))}
             </tbody>
           </table>
+
+          {sorted.length > shown && (
+            <button
+              onClick={() => setShown(n => n + 200)}
+              className="w-full py-2.5 text-xs text-zinc-400 hover:text-white
+                         border-t border-zinc-800 transition-colors"
+            >
+              Показати ще — лишилось {sorted.length - shown}
+            </button>
+          )}
         </div>
       )}
     </Panel>
@@ -539,32 +560,65 @@ const MARKETPLACES = [
   { key: 'maudau', label: 'MauDau' },
   { key: 'rozetka', label: 'Rozetka' },
   // Сайт і телефон — один потік із двома рукавами: обидва веде наш склад,
-  // обидва без комісії. Порівнювати їх цікаво саме між собою
+  // обидва без комісії
   { key: 'site', label: 'Сайт і телефон' },
-  { key: 'web', label: '— сайт' },
-  { key: 'phone', label: '— телефон' },
 ] as const
+
+/**
+ * Поділ усередині «Сайту й телефону».
+ *
+ * Збоку, поруч із майданчиками, він стояв не на своєму рівні: це не ще
+ * один канал продажу, а погляд усередину одного. Тому з'являється нижче й
+ * лише тоді, коли дивляться саме на нього.
+ */
+const SITE_SPLIT = [
+  { key: 'site', label: 'Усі' },
+  { key: 'web', label: 'Сайт' },
+  { key: 'phone', label: 'Телефон' },
+] as const
+
+const SITE_KEYS: readonly string[] = ['site', 'web', 'phone']
 
 /** Every figure on the page is recomputed for the chosen marketplace. */
 function PlatformTabs({ value, onChange }: {
   value: string
   onChange: (p: string) => void
 }) {
+  const inSite = SITE_KEYS.includes(value)
+
   return (
-    <div className="inline-flex bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
-      {MARKETPLACES.map(m => (
-        <button
-          key={m.key}
-          onClick={() => onChange(m.key)}
-          className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-            value === m.key
-              ? 'bg-red-600 text-white'
-              : 'text-zinc-400 hover:text-white'
-          }`}
-        >
-          {m.label}
-        </button>
-      ))}
+    <div className="flex flex-col items-start gap-1.5">
+      <div className="inline-flex bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
+        {MARKETPLACES.map(m => (
+          <button
+            key={m.key}
+            onClick={() => onChange(m.key)}
+            className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              (m.key === 'site' ? inSite : value === m.key)
+                ? 'bg-red-600 text-white'
+                : 'text-zinc-400 hover:text-white'
+            }`}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+
+      {inSite && (
+        <div className="inline-flex bg-zinc-900 border border-zinc-800 rounded-lg p-0.5 ml-auto">
+          {SITE_SPLIT.map(m => (
+            <button
+              key={m.key}
+              onClick={() => onChange(m.key)}
+              className={`px-3 py-1 rounded-md text-xs transition-colors ${
+                value === m.key ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-white'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

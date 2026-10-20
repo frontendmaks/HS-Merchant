@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
+import { colorFor } from '@/lib/zone-colors'
 
 export interface ZoneShape {
   code: string
@@ -44,7 +45,9 @@ export default function ZonePicker({ point, zones, warehouse, onPick }: {
 
       // Центр — сам Львів, поки адреси немає
       const center: [number, number] = point ? [point.lat, point.lng] : [49.8397, 24.0297]
-      map = L.map(box.current, { center, zoom: point ? 14 : 11, attributionControl: false })
+      map = L.map(box.current, {
+        center, zoom: point ? 14 : 11, attributionControl: false, boxZoom: false,
+      })
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 18,
@@ -52,12 +55,17 @@ export default function ZonePicker({ point, zones, warehouse, onPick }: {
 
       for (const zone of zones) {
         if (zone.polygon.length < 3) continue
+        const color = colorFor(zone.warehouse)
+        const chosen = zone.warehouse === warehouse
+
         const shape = L.polygon(
           zone.polygon.map(p => [p.lat, p.lng] as [number, number]),
           {
-            color: zone.warehouse === warehouse ? '#dc2626' : '#16a34a',
-            weight: zone.warehouse === warehouse ? 3 : 1.5,
-            fillOpacity: zone.warehouse === warehouse ? 0.18 : 0.06,
+            color,
+            weight: chosen ? 3 : 1.5,
+            fillColor: color,
+            fillOpacity: chosen ? 0.35 : 0.12,
+            className: 'zone-shape',
           },
         ).addTo(map)
 
@@ -81,7 +89,8 @@ export default function ZonePicker({ point, zones, warehouse, onPick }: {
 
   return (
     <div className="relative">
-      <div ref={box} className="h-72 rounded-lg overflow-hidden bg-zinc-800" />
+      <style>{'.zone-shape:focus { outline: none }'}</style>
+      <div ref={box} className="h-80 rounded-lg overflow-hidden bg-zinc-800" />
       {!ready && (
         <div className="absolute inset-0 grid place-items-center text-zinc-500 text-xs">
           Малюємо карту…

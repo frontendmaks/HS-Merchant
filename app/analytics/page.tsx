@@ -194,7 +194,13 @@ export default async function AnalyticsPage({
       perDay: ordersPerDay(rows, from, to),
       products: popularProducts(rows),
       categories: popularCategories(rows, productCategories),
-      customers: all.slice(0, 20),
+      /**
+       * Усі клієнти періоду, а не двадцятка.
+       *
+       * Двадцятка відповідала на «хто найбільший», але не на «скільки їх і
+       * що з рештою» — а саме це й питають, обираючи період.
+       */
+      customers: all,
       customerSummary: {
         total: all.length,
         repeat: all.filter(c => c.orders > 1).length,

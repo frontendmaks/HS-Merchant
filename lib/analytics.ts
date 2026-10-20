@@ -271,7 +271,7 @@ export interface ProductStat {
   orders: number
 }
 
-export function popularProducts(orders: OrderRow[], limit = 15): ProductStat[] {
+export function popularProducts(orders: OrderRow[], limit = 60): ProductStat[] {
   const map = new Map<string, ProductStat>()
   for (const o of orders) {
     if (isCanceled(o)) continue
@@ -295,7 +295,7 @@ export interface CategoryStat extends ProductStat { category: string }
 export function popularCategories(
   orders: OrderRow[],
   productCategories: Map<string, string>,
-  limit = 12,
+  limit = 40,
 ): CategoryStat[] {
   const map = new Map<string, CategoryStat>()
   for (const o of orders) {

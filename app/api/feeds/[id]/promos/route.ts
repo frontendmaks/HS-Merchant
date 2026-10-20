@@ -63,7 +63,22 @@ export async function POST(
   }
 
   const service = createServiceClient()
-  const { data, error } = await service.from('price_promos').upsert({
+
+  /**
+   * Правило на ту саму ціль замінюємо, а не додаємо друге.
+   *
+   * Через upsert це не виходить: унікальність тут часткова — вона діє лише
+   * в межах одного різновиду правил, — а такий індекс Postgres для ON
+   * CONFLICT не бере. Тому прибираємо попереднє самі.
+   */
+  let existing = service.from('price_promos').delete().eq('feed_id', id).eq('scope', body.scope)
+
+  if (body.scope === 'product') existing = existing.eq('product_id', body.product_id!)
+  else if (body.scope === 'category') existing = existing.eq('category_name', body.category_name!)
+
+  await existing
+
+  const { data, error } = await service.from('price_promos').insert({
     feed_id: id,
     scope: body.scope,
     category_name: body.scope === 'category' ? body.category_name : null,
@@ -73,10 +88,6 @@ export async function POST(
     note: body.note?.trim() || null,
     active: true,
     created_by: actor.id,
-  }, {
-    onConflict: body.scope === 'product'
-      ? 'feed_id,product_id'
-      : body.scope === 'category' ? 'feed_id,category_name' : undefined,
   }).select('id').single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
