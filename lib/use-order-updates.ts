@@ -62,3 +62,28 @@ export function useOrderUpdates(onChange: (change: OrderChange) => void): void {
     }
   }, [])
 }
+
+/**
+ * Те саме, але не частіше ніж раз на кілька секунд.
+ *
+ * Синхронізація сповіщає про кожне замовлення окремо — за один прохід це
+ * сотня повідомлень поспіль. Сторінка, яка перечитує себе на кожне з них,
+ * перестає відповідати на натискання: сто запитів до сервера стають у чергу
+ * попереду того, що хотіла людина.
+ *
+ * Тут важить не кожна подія, а те, що щось змінилось: одне перечитування
+ * після затишшя показує рівно те саме, що сто.
+ */
+export function useOrderUpdatesThrottled(
+  onChange: () => void,
+  quietMs = 2500,
+): void {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handler = useRef(onChange)
+  handler.current = onChange
+
+  useOrderUpdates(() => {
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => handler.current(), quietMs)
+  })
+}

@@ -146,6 +146,13 @@ export async function syncSiteOrders(
   },
 ): Promise<SyncResult> {
   const result: SyncResult = { seen: 0, created: 0, updated: 0 }
+  /**
+   * Останнє зачеплене замовлення — для одного сповіщення наприкінці.
+   *
+   * Сповіщати про кожне окремо означає сотню повідомлень за прохід, і
+   * сторінка, яка перечитує себе на кожне, перестає відповідати.
+   */
+  let touched: string | null = null
 
   try {
     for (let page = 0; page < maxPages; page++) {
@@ -225,8 +232,7 @@ export async function syncSiteOrders(
           // Статус міняють здебільшого в CRM — бланк має піти й тоді
           if (existing.status !== status) {
             await onStatusChanged(service, existing.id as string, status)
-            // Відкриті вкладки мають побачити це без перезавантаження
-            await broadcastOrderChange(existing.id as string, 'status')
+            touched = existing.id as string
           }
           result.updated++
         } else {
@@ -243,7 +249,7 @@ export async function syncSiteOrders(
             .select('id').single()
           if (created) {
             await saveRows(service, created.id as string, rows)
-            await broadcastOrderChange(created.id as string, 'sync')
+            touched = created.id as string
             result.created++
           }
         }
@@ -255,6 +261,8 @@ export async function syncSiteOrders(
   } catch (e) {
     result.error = e instanceof Error ? e.message : String(e)
   }
+
+  if (touched) await broadcastOrderChange(touched, 'sync')
 
   return result
 }

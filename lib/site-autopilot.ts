@@ -76,6 +76,8 @@ export async function autoProcessSiteOrders(
   const result: AutopilotResult = {
     looked: 0, numbered: 0, rezoned: 0, problems: 0, postponed: 0,
   }
+  // Одне сповіщення наприкінці — див. те саме міркування в синхронізації
+  let touched: string | null = null
 
   try {
     /**
@@ -223,13 +225,14 @@ export async function autoProcessSiteOrders(
       patch.auto_done_at = new Date().toISOString()
 
       await service.from('orders').update(patch).eq('id', order.id)
-      // Огляд щойно щось вирішив — хай це побачать відкриті вкладки
-      await broadcastOrderChange(order.id, 'items')
+      touched = order.id
       if (problems.length) result.problems++
     }
   } catch (e) {
     result.error = e instanceof Error ? e.message : String(e)
   }
+
+  if (touched) await broadcastOrderChange(touched, 'items')
 
   // Черга скінчилась — прибираємо позначку, щоб не висіла назавжди
   await service.from('app_settings')

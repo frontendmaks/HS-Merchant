@@ -1,7 +1,7 @@
 'use client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useTransition } from 'react'
-import { useOrderUpdates } from '@/lib/use-order-updates'
+import { useOrderUpdatesThrottled } from '@/lib/use-order-updates'
 
 export interface FunnelTab { key: string; label: string; count: number }
 
@@ -23,8 +23,9 @@ export default function SiteFilters({ date, stage, tabs }: {
   const [, start] = useTransition()
 
   // Зміна в будь-якому замовленні — привід перечитати список: оператор
-  // дивиться в екран і не має натискати оновлення, щоб побачити нове
-  useOrderUpdates(() => start(() => router.refresh()))
+  // дивиться в екран і не має натискати оновлення, щоб побачити нове.
+  // Але не на кожне з сотні повідомлень одного проходу — після затишшя
+  useOrderUpdatesThrottled(() => start(() => router.refresh()))
 
   function go(next: Record<string, string>) {
     const q = new URLSearchParams(params.toString())

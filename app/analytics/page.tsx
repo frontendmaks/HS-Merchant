@@ -69,6 +69,10 @@ export default async function AnalyticsPage({
 
   const supabase = createServiceClient()
 
+  // Запускаємо одразу: зони ні від чого не залежать і чекати на них нема чого
+  const zonesPromise = supabase
+    .from('delivery_zones').select('code, warehouse, polygon').order('code')
+
   // One pass over the period. Splitting by marketplace happens in memory below,
   // so switching between them costs no round trip at all.
   const [orderRows, productRows, { data: operatorRows }] =
@@ -96,8 +100,7 @@ export default async function AnalyticsPage({
     ])
 
   // Полігони зон — для географії доставок наших власних замовлень
-  const { data: zoneRows } = await supabase
-    .from('delivery_zones').select('code, warehouse, polygon').order('code')
+  const { data: zoneRows } = await zonesPromise
 
   const orders = (orderRows ?? []) as unknown as OrderWithId[]
   const operatorIds = new Set((operatorRows ?? []).map(r => r.id as string))
@@ -118,18 +121,16 @@ export default async function AnalyticsPage({
    * просто не відкривається. Тому питаємо пачками по двісті.
    */
   const ids = orders.map(o => o.id)
-  const eventRows: OperatorEventRow[] = []
+  const chunks: string[][] = []
+  for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200))
 
-  for (let i = 0; i < ids.length; i += 200) {
-    const chunk = ids.slice(i, i + 200)
-    const page = await fetchAllRows(() => supabase
-      .from('order_events')
-      .select('order_id, actor_id, actor_name, type, new_value, created_at')
-      .in('order_id', chunk))
-    eventRows.push(...(page as unknown as OperatorEventRow[]))
-  }
+  // Пачки незалежні — питаємо їх разом, а не одну за одною
+  const eventPages = await Promise.all(chunks.map(chunk => fetchAllRows(() => supabase
+    .from('order_events')
+    .select('order_id, actor_id, actor_name, type, new_value, created_at')
+    .in('order_id', chunk))))
 
-  const events = eventRows
+  const events = eventPages.flat() as unknown as OperatorEventRow[]
 
   // Efficiency is measured against the roster: a day someone was not due to
   // work is not their time, and time online can only come from the heartbeat
