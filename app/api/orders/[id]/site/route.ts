@@ -27,7 +27,7 @@ export async function GET(
       .select('id, external_id, platform, status, address, warehouse, delivery_zone, delivery_date, delivery_slot, customer_name, customer_phone, total, bitrix_deal_id')
       .eq('id', id).single(),
     service.from('order_items')
-      .select('id, position, title, unit, unit_weight, price_per_unit, ordered_qty, product_id, bitrix_product_id')
+      .select('id, position, title, unit, unit_weight, price_per_unit, ordered_qty, ordered_pieces, order_unit, product_id, bitrix_product_id')
       .eq('order_id', id).eq('removed', false).order('position'),
   ])
 
@@ -134,6 +134,9 @@ export async function PATCH(
       unit_weight: Number(l.unit_weight ?? 0),
       price_per_unit: Number(l.price_per_unit ?? 0),
       ordered_qty: Number(l.qty),
+      // Штуки зберігаємо окремо: клієнт замовив саме їх, а не вагу
+      order_unit: l.order_unit ?? null,
+      ordered_pieces: l.order_unit === 'шт' ? Number(l.pieces ?? 0) || null : null,
       ordered_total: lineTotal(l),
       removed: false,
     })))

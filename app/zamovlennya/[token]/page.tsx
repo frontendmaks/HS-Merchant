@@ -62,7 +62,7 @@ export default async function OrderSheet({
 
   const { data: items } = await service
     .from('order_items')
-    .select('position, title, unit, ordered_qty, price_per_unit, ordered_total')
+    .select('position, title, unit, ordered_qty, ordered_pieces, order_unit, price_per_unit, ordered_total')
     .eq('order_id', order.id)
     .order('position')
 
@@ -126,7 +126,14 @@ export default async function OrderSheet({
                 <td className="py-2">{n + 1}</td>
                 <td className="py-2">{i.title}</td>
                 <td className="py-2 text-right whitespace-nowrap">
-                  {Number(i.ordered_qty)} {i.unit}
+                  {i.order_unit === 'шт' && i.ordered_pieces ? (
+                    <>
+                      <strong>{Number(i.ordered_pieces)} шт</strong>
+                      <span style={MUTED}> ≈ {Number(i.ordered_qty)} кг</span>
+                    </>
+                  ) : (
+                    <>{Number(i.ordered_qty)} {i.unit}</>
+                  )}
                 </td>
                 <td className="py-2 text-right whitespace-nowrap">
                   {Number(i.price_per_unit)} ₴

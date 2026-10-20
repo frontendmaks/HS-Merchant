@@ -26,6 +26,9 @@ export interface Line {
   unit_weight: number
   price_per_unit: number
   qty: number
+  /** Кілограмами чи штуками — для вагового товару це різні замовлення */
+  order_unit?: 'кг' | 'шт' | null
+  pieces?: number | null
 }
 
 export const money = (n: number) => `${Math.round(n * 100) / 100} ₴`
@@ -104,6 +107,45 @@ function NumField({ value, onChange, className, autoFocus }: {
   )
 }
 
+export /** Ваговий товар із відомим фасуванням — лише його можна рахувати штуками */
+const weighted = (l: Line) => l.unit === 'кг' && (l.unit_weight ?? 0) > 0
+
+const byPieces = (l: Line) => weighted(l) && l.order_unit === 'шт'
+
+/**
+ * Перемикання одиниці замовлення.
+ *
+ * Кількість перераховується, щоб у рядку не лишалось чуже число: дві штуки
+ * по 400 г — це 0.8 кг, і навпаки.
+ */
+function toggleUnit(l: Line, unit: 'кг' | 'шт'): Partial<Line> {
+  if (unit === 'шт') {
+    const pieces = Math.max(1, Math.round((l.qty || 0) / (l.unit_weight || 1)))
+    return { order_unit: 'шт', pieces, qty: Math.round(pieces * l.unit_weight * 1000) / 1000 }
+  }
+  return { order_unit: 'кг', pieces: null }
+}
+
+function UnitToggle({ line, onPick }: { line: Line; onPick: (u: 'кг' | 'шт') => void }) {
+  return (
+    <div className="flex rounded overflow-hidden border border-zinc-700">
+      {(['шт', 'кг'] as const).map(u => (
+        <button
+          key={u}
+          onClick={() => onPick(u)}
+          className={`px-1.5 py-0.5 text-xs transition-colors ${
+            (line.order_unit ?? 'кг') === u
+              ? 'bg-red-600 text-white'
+              : 'bg-zinc-900 text-zinc-400 hover:text-white'
+          }`}
+        >
+          {u}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function ProductPicker({ lines, onChange, total }: {
   lines: Line[]
   onChange: (lines: Line[]) => void
@@ -161,6 +203,10 @@ export function ProductPicker({ lines, onChange, total }: {
       unit_weight: pack,
       price_per_unit: p.price,
       qty,
+      // Ваговий товар за замовчуванням замовляють штуками — фасуваннями;
+      // кілограми вмикають, коли клієнт називає вагу
+      order_unit: p.unit === 'кг' && pack > 0 ? 'шт' : null,
+      pieces: p.unit === 'кг' && pack > 0 ? 1 : null,
     }])
     // Порожній рядок пошуку ховає підказки сам — список рахується з нього
     setQuery('')
@@ -224,15 +270,44 @@ export function ProductPicker({ lines, onChange, total }: {
               <span className="text-zinc-600 text-xs w-4 shrink-0 pt-0.5">{i + 1}</span>
               <div className="min-w-0 flex-1">
                 <div className="text-white text-xs leading-snug">{l.title}</div>
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <NumField
-                    value={l.qty}
-                    autoFocus={l.key === added}
-                    onChange={v => patch(l.key, { qty: v })}
-                    className="w-20 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
-                               text-white text-xs focus:outline-none focus:border-red-500"
-                  />
-                  <span className="text-zinc-500 text-xs w-7">{l.unit}</span>
+                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                  {byPieces(l) ? (
+                    <>
+                      <NumField
+                        value={l.pieces ?? 1}
+                        autoFocus={l.key === added}
+                        onChange={v => patch(l.key, {
+                          pieces: v,
+                          // Вага йде за штуками, поки її не виправили руками
+                          qty: Math.round(v * (l.unit_weight || 0) * 1000) / 1000,
+                        })}
+                        className="w-16 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
+                                   text-white text-xs focus:outline-none focus:border-red-500"
+                      />
+                      <UnitToggle line={l} onPick={u => patch(l.key, toggleUnit(l, u))} />
+                      <span className="text-zinc-600 text-xs">≈</span>
+                      <NumField
+                        value={l.qty}
+                        onChange={v => patch(l.key, { qty: v })}
+                        className="w-16 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
+                                   text-white text-xs focus:outline-none focus:border-red-500"
+                      />
+                      <span className="text-zinc-500 text-xs">кг</span>
+                    </>
+                  ) : (
+                    <>
+                      <NumField
+                        value={l.qty}
+                        autoFocus={l.key === added}
+                        onChange={v => patch(l.key, { qty: v })}
+                        className="w-20 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
+                                   text-white text-xs focus:outline-none focus:border-red-500"
+                      />
+                      {weighted(l)
+                        ? <UnitToggle line={l} onPick={u => patch(l.key, toggleUnit(l, u))} />
+                        : <span className="text-zinc-500 text-xs w-7">{l.unit}</span>}
+                    </>
+                  )}
                   <span className="text-zinc-600 text-xs">×</span>
                   <NumField
                     value={l.price_per_unit}

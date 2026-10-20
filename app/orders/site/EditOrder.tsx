@@ -46,6 +46,7 @@ export default function EditOrder({ id, warehouses, onClose }: {
       interface Item {
         id: string; title: string; unit: string | null; unit_weight: number | null
         price_per_unit: number; ordered_qty: number
+        ordered_pieces: number | null; order_unit: 'кг' | 'шт' | null
         product_id: string | null; bitrix_product_id: number | null
       }
       setLines((d.items as Item[]).map(i => ({
@@ -57,6 +58,8 @@ export default function EditOrder({ id, warehouses, onClose }: {
         unit_weight: Number(i.unit_weight ?? 0),
         price_per_unit: Number(i.price_per_unit),
         qty: Number(i.ordered_qty),
+        order_unit: i.order_unit,
+        pieces: i.ordered_pieces,
       })))
       setLoading(false)
     })()

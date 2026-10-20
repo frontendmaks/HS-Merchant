@@ -123,7 +123,12 @@ export async function POST(req: NextRequest) {
       number_source: reserved.source,
       // Токен для бланка складу: комірник відкриває його без акаунта
       share_token: randomBytes(18).toString('base64url'),
-      items: lines.map(l => `${l.title}, ${l.qty} ${l.unit} x ${l.price_per_unit} грн`).join('\n'),
+      items: lines.map(l => {
+        const amount = l.order_unit === 'шт' && l.pieces
+          ? `${l.pieces} шт (≈${l.qty} кг)`
+          : `${l.qty} ${l.unit}`
+        return `${l.title}, ${amount} x ${l.price_per_unit} грн`
+      }).join('\n'),
     }).select('id, manual_number, external_id, share_token').single()
 
     if (!error && data) {
@@ -149,6 +154,9 @@ export async function POST(req: NextRequest) {
     unit_weight: Number(l.unit_weight ?? 0),
     price_per_unit: Number(l.price_per_unit ?? 0),
     ordered_qty: Number(l.qty),
+    // Штуки зберігаємо окремо: клієнт замовив саме їх, а не вагу
+    order_unit: l.order_unit ?? null,
+    ordered_pieces: l.order_unit === 'шт' ? Number(l.pieces ?? 0) || null : null,
     ordered_total: lineTotal(l),
     removed: false,
   })))
