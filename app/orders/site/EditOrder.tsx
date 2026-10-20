@@ -87,6 +87,13 @@ export default function EditOrder({ id, warehouses, onClose }: {
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'Не вдалося зберегти')
+      if (d.number_note) {
+        // Номер не переїхав — замовлення збережене, але людина має знати
+        setError(`Збережено. Номер лишився старий: ${d.number_note}`)
+        setSaving(false)
+        router.refresh()
+        return
+      }
       if (d.crm_error) {
         setError(`Збережено, але в Бітрікс не пішло: ${d.crm_error}`)
         setSaving(false)

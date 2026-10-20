@@ -6,6 +6,7 @@ import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { isValidSlot } from '@/lib/delivery-slots'
 import { resolveAddress } from '@/lib/delivery-zones'
 import { withDelivery } from '@/lib/delivery-fee'
+import { moveNumber } from '@/lib/manual-register'
 import { orderTotal, lineTotal, manualWeight, type ManualLine } from '@/lib/manual-orders'
 import { pushOrderToBitrix } from '@/lib/bitrix-deal'
 import { bitrixConfigured } from '@/lib/bitrix'
@@ -62,7 +63,7 @@ export async function PATCH(
 
   const service = createServiceClient()
   const { data: order } = await service
-    .from('orders').select('id, platform, address, warehouse, delivery_zone, delivery_date, delivery_slot, bitrix_deal_id')
+    .from('orders').select('id, platform, address, warehouse, delivery_zone, delivery_date, delivery_slot, bitrix_deal_id, manual_number, number_source, customer_name')
     .eq('id', id).single()
 
   if (!order) return NextResponse.json({ error: 'Замовлення не знайдено' }, { status: 404 })
@@ -111,9 +112,28 @@ export async function PATCH(
     changes.warehouse = body.warehouse
   }
 
+  let numberNote: string | null = null
+
   if (body?.delivery_date && body.delivery_date !== order.delivery_date) {
     patch.delivery_date = body.delivery_date
     changes.delivery_date = body.delivery_date
+
+    /**
+     * Номер їде разом із замовленням.
+     *
+     * На складі його знають під цим числом, і міняти число при перенесенні
+     * означає плутанину там, де її не було. Переносимо лише свої номери —
+     * ті, які ми самі взяли з журналу.
+     */
+    if (order.manual_number != null && order.number_source === 'sheet' && order.delivery_date) {
+      const moved = await moveNumber(service, {
+        number: Number(order.manual_number),
+        fromDate: order.delivery_date as string,
+        toDate: body.delivery_date,
+        customerName: (order.customer_name as string) || 'замовлення',
+      })
+      numberNote = moved.note
+    }
   }
   if (body?.delivery_slot && body.delivery_slot !== order.delivery_slot) {
     if (!isValidSlot(body.delivery_slot)) {
@@ -182,6 +202,7 @@ export async function PATCH(
   return NextResponse.json({
     ok: true,
     changes,
+    number_note: numberNote,
     crm_error: crm && 'error' in crm ? crm.error : null,
   })
 }

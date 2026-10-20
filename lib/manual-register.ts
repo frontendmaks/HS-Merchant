@@ -149,6 +149,69 @@ export async function reserveNumber(
   return fallback('Номер зайняли під час запису — спробуйте ще раз')
 }
 
+/**
+ * Переносить номер замовлення з одного дня на інший.
+ *
+ * Замовлення переносять цілком — разом із номером, під яким його знають на
+ * складі й у розмові. Тож у журналі воно має зникнути з учорашнього аркуша
+ * й з'явитись на завтрашньому під тим самим числом.
+ *
+ * Якщо на новий день цей номер уже зайнятий, нічого не переписуємо: чуже
+ * замовлення в журналі важливіше за наше бажання зберегти число. Тоді
+ * повертаємо пояснення, і номер лишається старий.
+ */
+export async function moveNumber(
+  service: Service,
+  { number, fromDate, toDate, customerName }: {
+    number: number
+    fromDate: string
+    toDate: string
+    customerName: string
+  },
+): Promise<{ ok: boolean; note: string | null }> {
+  if (!sheetsConfigured()) return { ok: false, note: 'Журнал недоступний' }
+
+  const [fromSheet, toSheet] = await Promise.all([
+    registerFor(service, fromDate),
+    registerFor(service, toDate),
+  ])
+  if (!fromSheet || !toSheet) return { ok: false, note: 'Таблицю на ці дати не вказано' }
+
+  const rowOf = async (sheetId: string, date: string) => {
+    const rows = await readRange(sheetId, `'${tabNameFor(date)}'!A1:B300`)
+    if (!rows) return null
+    for (let i = 1; i < rows.length; i++) {
+      if (Number((rows[i]?.[0] ?? '').toString().trim()) === number) {
+        return { row: i + 1, name: (rows[i]?.[1] ?? '').toString().trim() }
+      }
+    }
+    return null
+  }
+
+  const target = await rowOf(toSheet, toDate)
+  if (!target) return { ok: false, note: `У вкладці ${tabNameFor(toDate)} немає рядка ${number}` }
+  if (target.name) {
+    return {
+      ok: false,
+      note: `Номер ${number} на ${tabNameFor(toDate)} зайнятий — «${target.name}»`,
+    }
+  }
+
+  const written = await writeCell(
+    toSheet, `'${tabNameFor(toDate)}'!B${target.row}`, customerName,
+  )
+  if (!written) return { ok: false, note: 'Не вдалося записати в журнал' }
+
+  // Старий рядок звільняємо після запису нового: якщо щось піде не так,
+  // замовлення лишиться видимим бодай в одному дні
+  const source = await rowOf(fromSheet, fromDate)
+  if (source?.row) {
+    await writeCell(fromSheet, `'${tabNameFor(fromDate)}'!B${source.row}`, '')
+  }
+
+  return { ok: true, note: null }
+}
+
 /** Чи готовий журнал до роботи — для підказки в інтерфейсі. */
 export async function registerStatus(service: Service, date: string) {
   if (!sheetsConfigured()) {
