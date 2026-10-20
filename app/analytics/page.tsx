@@ -75,7 +75,7 @@ export default async function AnalyticsPage({
       supabase.from('orders')
         // The raw marketplace payload is large and mostly irrelevant here, so
         // Postgres digs out the three geography fields instead of sending it all
-        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, area, items, total, commission, status, cancel_reason, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code, md_placed:raw->>created_at, rz_placed:raw->>created')
+        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, area, delivery_zone, items, total, commission, status, cancel_reason, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code, md_placed:raw->>created_at, rz_placed:raw->>created')
         .gte('order_date', from).lte('order_date', to)
         .order('order_date', { ascending: false })
         .limit(20000),
@@ -84,6 +84,10 @@ export default async function AnalyticsPage({
       // Only operators are measured; managers and admins touch orders too
       supabase.from('profiles').select('id').eq('role', 'operator'),
     ])
+
+  // Полігони зон — для географії доставок наших власних замовлень
+  const { data: zoneRows } = await supabase
+    .from('delivery_zones').select('code, warehouse, polygon').order('code')
 
   const orders = (orderRows ?? []) as unknown as OrderWithId[]
   const operatorIds = new Set((operatorRows ?? []).map(r => r.id as string))
@@ -146,6 +150,25 @@ export default async function AnalyticsPage({
   const presenceSince = firstTick?.minute ? new Date(firstTick.minute as string) : null
 
   /** Everything the page shows, for one slice of the orders. */
+  /** Навантаження на кожну зону доставки — для карти. */
+  function byZone(rows: OrderWithId[]) {
+    const load = new Map<string, { orders: number; revenue: number }>()
+    for (const o of rows) {
+      const zone = (o as unknown as { delivery_zone?: string | null }).delivery_zone
+      if (!zone || isCanceled(o)) continue
+      const acc = load.get(zone) ?? { orders: 0, revenue: 0 }
+      acc.orders++
+      acc.revenue += Number(o.total ?? 0)
+      load.set(zone, acc)
+    }
+    return (zoneRows ?? []).map(z => ({
+      code: z.code as string,
+      warehouse: z.warehouse as string,
+      polygon: (z.polygon as { lat: number; lng: number }[]) ?? [],
+      ...(load.get(z.code as string) ?? { orders: 0, revenue: 0 }),
+    }))
+  }
+
   /** Скільки замовлень і грошей дав кожен район чи населений пункт. */
   function byArea(rows: OrderWithId[]) {
     const found = new Map<string, { orders: number; revenue: number }>()
@@ -187,6 +210,7 @@ export default async function AnalyticsPage({
       regions: byRegion(rows, learned, gazetteer),
       // Райони Львова й села — для замовлень, які возить наш склад
       areas: byArea(rows),
+      zoneLoad: byZone(rows),
       cancels: limited ? EMPTY_CANCELS : cancelStats(
         rows,
         // An entry with an actor means a person here did it; sync writes none

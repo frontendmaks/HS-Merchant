@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import UkraineMap from './UkraineMap'
 import AreaBreakdown, { type AreaStat } from './AreaBreakdown'
+import DeliveryMap, { type ZoneLoad } from './DeliveryMap'
 import type {
   Totals, DayBucket, ProductStat, CategoryStat, CustomerStat, RegionStat,
 } from '@/lib/analytics'
@@ -584,6 +585,7 @@ export interface Bundle {
   }
   regions: RegionStat[]
   areas: AreaStat[]
+  zoneLoad: ZoneLoad[]
   operators: OperatorStat[]
   cancels: CancelStats
 }
@@ -628,7 +630,7 @@ export default function AnalyticsClient({
   }
 
   const {
-    totals: t, perDay, products, categories, customers, customerSummary, regions, areas, operators,
+    totals: t, perDay, products, categories, customers, customerSummary, regions, areas, zoneLoad, operators,
     cancels,
   } = bundles[platform] ?? bundles.all
 
@@ -709,9 +711,18 @@ export default function AnalyticsClient({
 
       {/* Замовлення з сайту й телефону всі львівські: карта областей там
           світилася б однією плямою, а питання стоїть про райони */}
-      {['site', 'web', 'phone'].includes(platform)
-        ? <AreaBreakdown areas={areas} />
-        : <UkraineMap regions={regions} />}
+      {['site', 'web', 'phone'].includes(platform) ? (
+        <div className="space-y-3">
+          <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+            <h3 className="text-white text-sm font-semibold">Географія доставок</h3>
+            <p className="text-zinc-500 text-xs mt-0.5 mb-3">
+              Зони доставки, насиченість — за кількістю замовлень
+            </p>
+            <DeliveryMap zones={zoneLoad} />
+          </div>
+          <AreaBreakdown areas={areas} />
+        </div>
+      ) : <UkraineMap regions={regions} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
         <Panel title="Популярні товари" subtitle="За кількістю проданих одиниць">
