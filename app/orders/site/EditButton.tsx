@@ -6,12 +6,28 @@ import EditOrder from './EditOrder'
 export default function EditButton({ id, warehouses, recheck }: {
   id: string
   warehouses: string[]
-  /** Замовлення з хибою — поруч стає кнопка повторного огляду */
+  /** Замовлення з хибою — поруч стають кнопки огляду й ручного рішення */
   recheck?: boolean
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [approving, setApproving] = useState(false)
+  const [failed, setFailed] = useState('')
+
+  /** Оператор вирішив, що замовлення готове: номер і комплектація одразу */
+  async function approve() {
+    setApproving(true)
+    setFailed('')
+    try {
+      const r = await fetch(`/api/orders/${id}/approve`, { method: 'POST' })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setFailed(d.error || 'не вдалося'); return }
+      router.refresh()
+    } finally {
+      setApproving(false)
+    }
+  }
 
   return (
     <div className="flex items-center gap-2">
@@ -41,6 +57,18 @@ export default function EditButton({ id, warehouses, recheck }: {
           {busy ? '…' : '↻'}
         </button>
       )}
+      {recheck && (
+        <button
+          disabled={approving}
+          onClick={() => void approve()}
+          className="text-emerald-500 hover:text-emerald-400 text-xs transition-colors
+                     disabled:opacity-40 whitespace-nowrap"
+          title="Взяти номер із журналу й перевести на комплектацію"
+        >
+          {approving ? '…' : '✓ на комплектацію'}
+        </button>
+      )}
+      {failed && <span className="text-red-400 text-xs">{failed}</span>}
       {open && <EditOrder id={id} warehouses={warehouses} onClose={() => setOpen(false)} />}
     </div>
   )

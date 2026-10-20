@@ -250,9 +250,25 @@ export async function syncSiteOrders(
  * тож просто беремо його таким, як є.
  */
 async function saveRows(service: Service, orderId: string, rows: Row[]) {
+  /**
+   * Чи були товари до цього.
+   *
+   * Сайт створює угоду раніше, ніж додає до неї позиції, тож перший погляд
+   * бачить порожнє замовлення й чесно каже «бракує товарів». Коли позиції
+   * приїжджають, висновок застаріває — і замовлення має оглянутись заново.
+   */
+  const { count: before } = await service
+    .from('order_items').select('id', { count: 'exact', head: true })
+    .eq('order_id', orderId).eq('removed', false)
+
   await service.from('order_items').delete().eq('order_id', orderId).eq('source', 'site')
 
-  if (!rows.length) return
+  if (!rows.length) {
+    if (before) await service.from('orders').update({ auto_done_at: null }).eq('id', orderId)
+    return
+  }
+
+  if (!before) await service.from('orders').update({ auto_done_at: null }).eq('id', orderId)
 
   await service.from('order_items').insert(rows.map((r, i) => ({
     order_id: orderId,

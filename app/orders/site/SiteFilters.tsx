@@ -64,17 +64,29 @@ export default function SiteFilters({ date, stage, tabs }: {
 
       <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1
                       flex-wrap">
-        {tabs.map(t => (
-          <button key={t.key} onClick={() => go({ stage: t.key })}
-            className={`px-3 py-1.5 rounded-lg text-xs transition-colors whitespace-nowrap ${
-              stage === t.key ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white'
-            }`}>
-            {t.label}
-            <span className={stage === t.key ? 'text-zinc-300 ml-1.5' : 'text-zinc-600 ml-1.5'}>
-              {t.count}
-            </span>
-          </button>
-        ))}
+        {tabs.map(t => {
+          // Нулі приглушені, решта помітна: число на вкладці — це робота,
+          // яка там чекає, і її не має доводитись видивлятись
+          const empty = t.count === 0
+          const urgent = t.key === 'problem' || t.key === 'new'
+
+          return (
+            <button key={t.key} onClick={() => go({ stage: t.key })}
+              className={`px-3 py-1.5 rounded-lg text-xs transition-colors whitespace-nowrap
+                          flex items-center gap-1.5 ${
+                stage === t.key ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white'
+              }`}>
+              <span>{t.label}</span>
+              <span className={`px-1.5 py-0.5 rounded text-[11px] font-semibold tabular-nums ${
+                empty ? 'bg-zinc-800 text-zinc-600'
+                  : urgent ? 'bg-red-600 text-white'
+                  : 'bg-zinc-600 text-white'
+              }`}>
+                {t.count}
+              </span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )

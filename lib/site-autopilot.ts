@@ -85,11 +85,21 @@ export async function autoProcessSiteOrders(
      * заблокувалась намертво: нові замовлення не оглядались місяцями, бо
      * попереду вічно стояв десяток скасованих.
      */
+    /**
+     * Оглядаємо те, що ще поїде.
+     *
+     * Замовлення позавчорашнє вже або привезли, або ні — перевіряти в ньому
+     * зону доставки запізно, а черга від таких тільки довшає. Вікно — від
+     * учора: сьогоднішні везуть, учорашні ще можуть переноситись.
+     */
+    const horizon = new Date(Date.now() - 36 * 3600_000).toISOString().slice(0, 10)
+
     let query = service
       .from('orders')
       .select('id, external_id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, manual_number, number_source, status')
       .eq('platform', 'site')
       .is('auto_done_at', null)
+      .gte('delivery_date', horizon)
       .not('status', 'in', `(${CLOSED_STAGES.map(s => `"${s}"`).join(',')})`)
 
     // Названі замовлення — коли Бітрікс щойно сказав, що саме змінилось

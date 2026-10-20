@@ -93,11 +93,15 @@ export async function PATCH(
 
     // Нова адреса — новий склад: зона вираховується з неї, і лишити старий
     // склад означало б відправити замовлення не туди, куди його тепер везуть
-    const zone = await resolveAddress(service, address)
-    patch.delivery_zone = zone.zone
-    if (zone.warehouse) {
-      patch.warehouse = zone.warehouse
-      changes.warehouse = zone.warehouse
+    try {
+      const zone = await resolveAddress(service, address)
+      patch.delivery_zone = zone.zone
+      if (zone.warehouse) {
+        patch.warehouse = zone.warehouse
+        changes.warehouse = zone.warehouse
+      }
+    } catch {
+      // Геокодер мовчить — зону перерахує найближчий огляд
     }
   }
 

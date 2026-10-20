@@ -116,6 +116,8 @@ export default async function SiteOrdersPage({
     supabase.from('orders')
       .select('id', { count: 'exact', head: true })
       .eq('platform', 'site').is('auto_done_at', null)
+      // Той самий горизонт, що й в огляду: старе в черзі не рахуємо
+      .gte('delivery_date', new Date(Date.now() - 36 * 3600_000).toISOString().slice(0, 10))
       .not('status', 'in', '("Виконано","Скасовано","Повернено","Не вдалося")'),
     supabase.from('app_settings').select('value').eq('key', 'autopilot_now').maybeSingle(),
   ])

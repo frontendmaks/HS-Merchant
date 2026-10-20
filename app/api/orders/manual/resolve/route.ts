@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor } from '@/lib/order-events'
-import { resolveAddress } from '@/lib/delivery-zones'
+import { resolveAddress, GeocoderUnavailable } from '@/lib/delivery-zones'
 import { slotsForDate, firstAvailable } from '@/lib/delivery-slots'
 import { getSetting } from '@/lib/settings'
 
@@ -21,9 +21,29 @@ export async function POST(req: NextRequest) {
     { address?: string; date?: string }
 
   const service = createServiceClient()
-  const resolved = address?.trim()
-    ? await resolveAddress(service, address)
-    : { point: null, zone: null, warehouse: null, note: null }
+
+  /**
+   * Мовчання геокодера — не вирок адресі.
+   *
+   * Оператор на лінії з клієнтом: сказати йому «адресу не розпізнано», коли
+   * насправді не відповів чужий сервіс, означає змусити правити те, що й так
+   * правильне. Кажемо як є — і склад він обере сам.
+   */
+  let resolved: Awaited<ReturnType<typeof resolveAddress>> =
+    { point: null, zone: null, warehouse: null, note: null }
+
+  if (address?.trim()) {
+    try {
+      resolved = await resolveAddress(service, address)
+    } catch (e) {
+      resolved = {
+        point: null, zone: null, warehouse: null,
+        note: e instanceof GeocoderUnavailable
+          ? 'Довідник адрес не відповідає — оберіть склад вручну'
+          : 'Адресу не вдалося перевірити — оберіть склад вручну',
+      }
+    }
+  }
 
   const buffer = await getSetting(service, 'delivery_buffer_minutes')
   const when = date || firstAvailable(buffer).date
