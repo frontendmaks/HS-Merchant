@@ -13,6 +13,7 @@ import { stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
 import { WAREHOUSE_ID, SLOT_ID, CATEGORY_ID } from '@/lib/bitrix-deal'
 import { onStatusChanged } from '@/lib/bitrix-chat'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
+import { moveNumber } from '@/lib/manual-register'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -116,6 +117,8 @@ export interface SyncResult {
   updated: number
   /** Де спинились — щоб продовжити добір наступним викликом */
   nextPage?: number | null
+  /** Номери, які не вдалося перенести в журналі — щоб це не губилось мовчки */
+  notes?: string[]
   error?: string
 }
 
@@ -205,7 +208,8 @@ export async function syncSiteOrders(
         }
 
         const { data: existing } = await service
-          .from('orders').select('id, platform, status, address')
+          .from('orders')
+          .select('id, platform, status, address, delivery_date, manual_number, number_source')
           .eq('bitrix_deal_id', Number(deal.ID)).maybeSingle()
 
         if (existing) {
@@ -228,6 +232,33 @@ export async function syncSiteOrders(
             .eq('id', existing.id)
 
           if (!ours) await saveRows(service, existing.id as string, rows)
+
+          /**
+           * Дату перенесли в Бітріксі — номер має переїхати в журналі.
+           *
+           * Перенесення через Мерчант журнал уже чинило, але день замовлення
+           * частіше міняють у самій угоді: на складі тоді лишався аркуш, де
+           * замовлення стоїть у вчорашньому дні, а комірник збирає за
+           * аркушем. Тут той самий переїзд, тільки з іншого входу.
+           */
+          if (
+            !ours
+            && existing.number_source === 'sheet'
+            && existing.manual_number != null
+            && existing.delivery_date
+            && fields.delivery_date
+            && existing.delivery_date !== fields.delivery_date
+          ) {
+            const moved = await moveNumber(service, {
+              number: Number(existing.manual_number),
+              fromDate: existing.delivery_date as string,
+              toDate: fields.delivery_date,
+              customerName: fields.customer_name || 'замовлення',
+            })
+            if (!moved.ok && moved.note) {
+              result.notes = [...(result.notes ?? []), `№${existing.manual_number}: ${moved.note}`]
+            }
+          }
 
           // Статус міняють здебільшого в CRM — бланк має піти й тоді
           if (existing.status !== status) {
