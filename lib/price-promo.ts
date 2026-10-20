@@ -6,7 +6,9 @@
  * тож правило тримаємо окремо від ціни товару. Ціна в каталозі лишається
  * однією правдою, це — оформлення вітрини.
  */
-import { createServiceClient } from '@/lib/supabase/service'
+// Тип, не значення: цей модуль використовує і браузер, а службовий
+// клієнт туди потрапити не має
+import type { createServiceClient } from '@/lib/supabase/service'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -18,7 +20,7 @@ export interface Promo {
   product_id: string | null
   mode: 'percent' | 'amount'
   value: number
-  note: string | null
+  note?: string | null
 }
 
 /** Правила цього фіда плюс спільні для всіх. */

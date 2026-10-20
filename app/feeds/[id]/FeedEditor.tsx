@@ -2,6 +2,10 @@
 import { useState, useTransition, useMemo, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
+import {
+  basePrice, roundOffer, categoryFor, type PriceCategory,
+} from '@/lib/price-category'
+import { promoFor, oldPriceFor, type Promo } from '@/lib/price-promo'
 
 type Product = {
   id: string
@@ -29,6 +33,7 @@ type FeedProduct = {
   name_ru: string | null
   description_ru: string | null
   custom_params: Record<string, string> | null
+  price_category_id?: string | null
 }
 
 type Feed = {
@@ -38,6 +43,7 @@ type Feed = {
   status: string
   settings: any
   marketplace_id: string
+  price_category_id?: string | null
   marketplace?: { id: string; name: string; slug: string } | null
 }
 
@@ -47,6 +53,8 @@ type Props = {
   allProducts: Product[]
   categories: string[]
   marketplaces: { id: string; name: string }[]
+  priceCategories: PriceCategory[]
+  promos: Promo[]
 }
 
 type Override = {
@@ -236,7 +244,23 @@ function RozetkaCatDropdown({ value, categories, onChange }: {
   )
 }
 
-export default function FeedEditor({ feed, feedProducts, allProducts, categories, marketplaces }: Props) {
+export default function FeedEditor({
+  feed, feedProducts, allProducts, categories, marketplaces, priceCategories, promos,
+}: Props) {
+  /**
+   * Ціни рахуються тут так само, як у фіді.
+   *
+   * Доти таблиця показувала каталожну ціну з формулою фасування й нічого не
+   * знала ні про категорію ціни, ні про акцію — оператор міняв категорію й
+   * не бачив різниці, хоча у фіді вона вже діяла.
+   */
+  const pricingCtx = useMemo(() => ({
+    feedCategory: feed.price_category_id
+      ? priceCategories.find(c => c.id === feed.price_category_id) ?? null
+      : null,
+    byId: new Map(priceCategories.map(c => [c.id, c])),
+    bitrixPrices: new Map<string, Map<number, number>>(),
+  }), [feed.price_category_id, priceCategories])
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [saving, setSaving] = useState(false)
@@ -462,6 +486,12 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
       setTranslating(t => ({ ...t, [`${productId}:${field}`]: false }))
     }
   }
+
+  /** Збережений рядок фіда за товаром — звідти беремо його категорію ціни */
+  const savedByProduct = useMemo(
+    () => new Map(feedProducts.map(fp => [fp.product_id, fp])),
+    [feedProducts],
+  )
 
   // Stable snapshot of products saved in the feed (from DB, doesn't change until save)
   const savedFeedIds = useMemo(
@@ -1542,10 +1572,34 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
               // Marketplace price: for кг/л — price×min_kg (default 0.4); for г/мл — price as-is; null = piece
               const mPriceCalc = calcMarketplacePrice(mPrice, attrs)
               const mOldPriceCalc = mOldPrice != null ? calcMarketplacePrice(mOldPrice, attrs) : null
-
-              const displayMPrice = mPriceCalc !== null ? mPriceCalc : mPrice
-              const displayMOldPrice = mOldPrice != null ? (mOldPriceCalc !== null ? mOldPriceCalc : mOldPrice) : null
               const isWeightProduct = mPriceCalc !== null
+
+              /**
+               * Те саме, що побачить маркетплейс.
+               *
+               * Категорія ціни множить і заокруглює, акція домальовує стару
+               * ціну. Рахуємо тим самим кодом, що й фід, інакше таблиця
+               * показувала б одне, а вивантаження віддавало б інше.
+               */
+              const savedLine = savedByProduct.get(p.id)
+              const lineForPricing = {
+                custom_price: ov.custom_price !== undefined && ov.custom_price !== ''
+                  ? ov.custom_price
+                  : (savedLine?.custom_price ?? null),
+                price_category_id: savedLine?.price_category_id ?? null,
+              }
+              const priceCategory = categoryFor(lineForPricing, pricingCtx)
+              const { price: baseForOffer } = basePrice(p, lineForPricing, pricingCtx)
+              const withFormula = lineForPricing.custom_price
+                ? baseForOffer
+                : (calcMarketplacePrice(baseForOffer, attrs) ?? baseForOffer)
+              const displayMPrice = roundOffer(withFormula, priceCategory)
+
+              const activePromo = promoFor(promos, p)
+              const realOldForOffer = mOldPrice != null
+                ? (mOldPriceCalc !== null ? mOldPriceCalc : mOldPrice)
+                : null
+              const displayMOldPrice = oldPriceFor(displayMPrice, realOldForOffer, activePromo)
 
               // Min weight label for product name (weight products only, converted to grams)
               const minWeightLabel = (() => {
@@ -1669,15 +1723,35 @@ export default function FeedEditor({ feed, feedProducts, allProducts, categories
 
                     {/* Ціна М — marketplace price per min portion (weight) or as-is (piece) */}
                     <div className="text-right">
-                      <div className={`text-xs font-semibold ${wcOldPrice != null ? 'text-emerald-400' : 'text-white'}`}>
+                      <div className={`text-xs font-semibold ${
+                        displayMOldPrice != null ? 'text-emerald-400' : 'text-white'
+                      }`}>
                         {displayMPrice} ₴
                       </div>
+                      {/* Звідки ця ціна: видно одразу, не відкриваючи налаштувань */}
+                      {priceCategory && (
+                        <div className="text-[10px] text-zinc-500 leading-tight truncate"
+                          title={`Категорія ціни: ${priceCategory.name}`}>
+                          {priceCategory.name}
+                        </div>
+                      )}
                     </div>
 
                     {/* Акц. М — original price per min portion when product is on sale */}
                     <div className="text-right">
                       {displayMOldPrice != null ? (
-                        <div className="text-xs text-zinc-500 line-through">{displayMOldPrice} ₴</div>
+                        <>
+                          <div className="text-xs text-zinc-500 line-through">
+                            {displayMOldPrice} ₴
+                          </div>
+                          <div className="text-[10px] leading-tight truncate"
+                            style={{ color: activePromo ? '#f59e0b' : '#71717a' }}>
+                            {activePromo
+                              ? `акція +${Number(activePromo.value)}${
+                                  activePromo.mode === 'percent' ? '%' : ' ₴'}`
+                              : 'знижка з сайту'}
+                          </div>
+                        </>
                       ) : (
                         <span className="text-xs text-zinc-600">—</span>
                       )}

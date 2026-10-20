@@ -11,7 +11,9 @@
  * фіда → каталожна ціна. Інакше загальне правило мовчки перекривало б
  * окремий випадок, заради якого його й заводили.
  */
-import { createServiceClient } from '@/lib/supabase/service'
+// Тип, не значення: цей модуль використовує і браузер, а службовий
+// клієнт туди потрапити не має
+import type { createServiceClient } from '@/lib/supabase/service'
 
 type Service = ReturnType<typeof createServiceClient>
 

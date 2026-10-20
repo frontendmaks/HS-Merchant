@@ -13,7 +13,8 @@ export default async function FeedPage({ params }: { params: Promise<{ id: strin
   const { id } = await params
   const supabase = createServiceClient()
 
-  const [{ data: feed }, feedProducts, allProducts, { data: marketplaces }] = await Promise.all([
+  const [{ data: feed }, feedProducts, allProducts, { data: marketplaces },
+         { data: priceCategories }, { data: promos }] = await Promise.all([
     supabase.from('feeds').select('*, marketplace:marketplaces(id, name, slug)').eq('id', id).single(),
     fetchAllRows(() => supabase.from('feed_products').select('*').eq('feed_id', id)),
     fetchAllRows(() =>
@@ -24,6 +25,11 @@ export default async function FeedPage({ params }: { params: Promise<{ id: strin
         .order('name')
     ),
     supabase.from('marketplaces').select('id, name'),
+    supabase.from('price_categories')
+      .select('id, name, source, bitrix_price_type_id, multiplier, is_system, rounding, rounding_step'),
+    supabase.from('price_promos')
+      .select('id, feed_id, scope, category_name, product_id, mode, value')
+      .eq('active', true).or(`feed_id.eq.${id},feed_id.is.null`),
   ])
 
   if (!feed) notFound()
@@ -58,6 +64,8 @@ export default async function FeedPage({ params }: { params: Promise<{ id: strin
       </div>
       <FeedEditor
         feed={feed}
+        priceCategories={priceCategories ?? []}
+        promos={promos ?? []}
         feedProducts={feedProducts ?? []}
         allProducts={products}
         categories={categories.sort()}
