@@ -23,14 +23,21 @@ export async function POST(req: NextRequest) {
   if (!form) return NextResponse.json({ error: 'Bad request' }, { status: 400 })
 
   /**
-   * Бітрікс присилає свій токен застосунку — він і є ключем.
+   * Ключ — або в тілі, або в самій адресі.
    *
-   * Без перевірки будь-хто, знаючи адресу, змушував би нас перечитувати
-   * CRM скільки завгодно разів.
+   * Бітрікс присилає власний токен застосунку, і якщо його вписали нашим,
+   * підходить він. Але поле з токеном у формі вихідного вебхука буває
+   * недоступним для редагування, тож приймаємо ключ і з адреси: той, хто
+   * налаштовує, вписує одне посилання й більше нічого.
+   *
+   * Без перевірки будь-хто, знаючи адресу, змушував би нас перечитувати CRM
+   * скільки завгодно разів.
    */
-  const token = String(form.get('auth[application_token]') ?? '')
   const expected = process.env.BITRIX_EVENT_TOKEN
-  if (!expected || token !== expected) {
+  const fromBody = String(form.get('auth[application_token]') ?? '')
+  const fromUrl = new URL(req.url).searchParams.get('key') ?? ''
+
+  if (!expected || (fromBody !== expected && fromUrl !== expected)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
