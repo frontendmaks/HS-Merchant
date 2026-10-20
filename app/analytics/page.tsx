@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/service'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
 import { isAnalyst } from '@/lib/roles'
 import {
@@ -70,17 +71,26 @@ export default async function AnalyticsPage({
 
   // One pass over the period. Splitting by marketplace happens in memory below,
   // so switching between them costs no round trip at all.
-  const [{ data: orderRows }, { data: productRows }, { data: operatorRows }] =
+  const [orderRows, productRows, { data: operatorRows }] =
     await Promise.all([
-      supabase.from('orders')
+      /**
+       * Сторінками, а не одним запитом.
+       *
+       * PostgREST обрізає будь-яку відповідь на тисячі рядків і мовчить про
+       * це — `.limit(20000)` його не стосується. Через це аналітика бачила
+       * перші тисячу замовлень періоду, а решта просто не існувала: за
+       * жовтень це чотириста замовлень, яких не було ні в доході, ні в
+       * клієнтах, ні на карті.
+       */
+      fetchAllRows(() => supabase.from('orders')
         // The raw marketplace payload is large and mostly irrelevant here, so
         // Postgres digs out the three geography fields instead of sending it all
         .select('id, external_id, platform, order_date, customer_name, customer_phone, address, area, delivery_zone, items, total, commission, status, cancel_reason, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code, md_placed:raw->>created_at, rz_placed:raw->>created')
         .gte('order_date', from).lte('order_date', to)
-        .order('order_date', { ascending: false })
-        .limit(20000),
+        .order('order_date', { ascending: false })),
       // Only needed to put order lines into categories
-      supabase.from('products').select('name, category_name').limit(5000),
+      // Назви й категорії всіх товарів — щоб рядки замовлень лягли в категорії
+      fetchAllRows(() => supabase.from('products').select('name, category_name')),
       // Only operators are measured; managers and admins touch orders too
       supabase.from('profiles').select('id').eq('role', 'operator'),
     ])
@@ -100,28 +110,32 @@ export default async function AnalyticsPage({
   }
 
   // Operator efficiency reads the order journal for the same window
-  const { data: eventRows } = orders.length
-    ? await supabase
+  /**
+   * Журнал подій — теж сторінками, і лише по тих замовленнях, які вмістились
+   * у запит: перелік id у фільтрі має свою межу довжини.
+   */
+  const measured = orders.slice(0, 5000).map(o => o.id)
+  const eventRows = measured.length
+    ? await fetchAllRows(() => supabase
         .from('order_events')
         .select('order_id, actor_id, actor_name, type, new_value, created_at')
-        .in('order_id', orders.map(o => o.id))
-        .limit(50000)
-    : { data: [] }
+        .in('order_id', measured))
+    : []
 
-  const events = (eventRows ?? []) as OperatorEventRow[]
+  const events = (eventRows ?? []) as unknown as OperatorEventRow[]
 
   // Efficiency is measured against the roster: a day someone was not due to
   // work is not their time, and time online can only come from the heartbeat
   // trail — profiles.last_seen_at is a single overwritten moment.
-  const [{ data: shiftRows }, { data: tickRows }] = await Promise.all([
-    supabase.from('work_shifts')
+  // Присутність — хвилина на рядок: за місяць на кількох операторів це
+  // десятки тисяч, і тисячний поріг тут ріже найбільше
+  const [shiftRows, tickRows] = await Promise.all([
+    fetchAllRows(() => supabase.from('work_shifts')
       .select('operator_id, work_date')
-      .gte('work_date', from).lte('work_date', to)
-      .limit(20000),
-    supabase.from('presence_ticks')
+      .gte('work_date', from).lte('work_date', to)),
+    fetchAllRows(() => supabase.from('presence_ticks')
       .select('user_id, minute')
-      .gte('minute', `${from}T00:00:00Z`).lte('minute', `${to}T23:59:59Z`)
-      .limit(200000),
+      .gte('minute', `${from}T00:00:00Z`).lte('minute', `${to}T23:59:59Z`)),
   ])
 
   const roster = new Map<string, Set<string>>()
