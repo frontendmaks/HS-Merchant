@@ -125,14 +125,23 @@ export interface SyncResult {
  */
 export async function syncSiteOrders(
   service: Service,
-  { since, maxPages = 10 }: { since: string; maxPages?: number },
+  { since, maxPages = 10, dealIds }: {
+    since?: string
+    maxPages?: number
+    /** Конкретні угоди — коли Бітрікс сам сказав, яка саме змінилась */
+    dealIds?: (string | number)[]
+  },
 ): Promise<SyncResult> {
   const result: SyncResult = { seen: 0, created: 0, updated: 0 }
 
   try {
     for (let page = 0; page < maxPages; page++) {
+      const filter: Record<string, unknown> = { CATEGORY_ID }
+      if (dealIds?.length) filter.ID = dealIds
+      else if (since) filter['>=DATE_MODIFY'] = since
+
       const deals = await bitrix<Deal[]>('crm.deal.list', {
-        filter: { CATEGORY_ID, '>=DATE_MODIFY': since },
+        filter,
         select: DEAL_FIELDS,
         order: { DATE_MODIFY: 'ASC' },
         start: page * 50,

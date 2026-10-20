@@ -8,6 +8,7 @@ import { SITE_PLATFORMS, platformLabel } from '@/lib/order-source'
 import StatusSelect from '../StatusSelect'
 import WideScroll from '../WideScroll'
 import SyncButton from './SyncButton'
+import SiteFilters from './SiteFilters'
 import EditButton from './EditButton'
 
 /**
@@ -30,9 +31,47 @@ function shortDate(date: string | null) {
 const money = (n: number | null) =>
   (n ?? 0).toLocaleString('uk-UA', { maximumFractionDigits: 0 }) + ' ₴'
 
-export default async function SiteOrdersPage() {
+interface Row {
+  id: string; external_id: string | null; manual_number: number | null
+  number_source: string | null; platform: string | null; customer_name: string | null
+  customer_phone: string | null; address: string | null; warehouse: string | null
+  delivery_zone: string | null; delivery_date: string | null; delivery_slot: string | null
+  total: number | null; status: string | null; share_token: string | null
+  auto_done_at: string | null; auto_problem: string | null; chat_sent_at: string | null
+}
+
+/**
+ * Воронка опрацювання.
+ *
+ * Не те саме, що стадії Бітрікса: там стадія каже, де замовлення в житті, а
+ * тут — що з ним має зробити оператор. «Нове» це те, чого система ще не
+ * оглянула; «Перевірено» — оглянуте без хиб, із номером ящика й бланком.
+ */
+const FUNNEL: { key: string; label: string; match: (o: Row) => boolean }[] = [
+  { key: 'new',      label: 'Нові',            match: o => !o.auto_done_at && o.status !== PREORDER },
+  { key: 'checked',  label: 'Перевірено',      match: o => !!o.auto_done_at && !o.auto_problem
+                                                            && o.status !== PREORDER
+                                                            && o.status !== PICKING },
+  { key: 'problem',  label: 'Потребує уваги',  match: o => !!o.auto_problem },
+  { key: 'preorder', label: 'Передзамовлення', match: o => o.status === PREORDER },
+  { key: 'picking',  label: 'Комплектується',  match: o => o.status === PICKING },
+  { key: 'all',      label: 'Усі',             match: () => true },
+]
+
+const PREORDER = 'ПЕРЕДЗАМОВЛЕННЯ'
+const PICKING = 'Комплектується'
+
+export default async function SiteOrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ date?: string; stage?: string }>
+}) {
   const role = await getCurrentRole()
   const readOnly = role === 'viewer'
+  const { date: dateParam, stage = 'new' } = await searchParams
+
+  // За замовчуванням — сьогодні: саме сьогоднішні замовлення возять
+  const date = dateParam || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' })
 
   const supabase = createServiceClient()
   const { data: zones } = await supabase.from('delivery_zones').select('warehouse')
@@ -40,14 +79,20 @@ export default async function SiteOrdersPage() {
 
   const { data } = await supabase
     .from('orders')
-    .select('id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_problem, chat_sent_at')
+    .select('id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at')
     .in('platform', [...SITE_PLATFORMS])
-    .order('delivery_date', { ascending: false, nullsFirst: false })
+    .eq('delivery_date', date)
     .order('created_at', { ascending: false })
-    .limit(300)
+    .limit(500)
 
-  const orders = data ?? []
-  const active = orders.filter(o => isInProgress(o.status))
+  const forDay = (data ?? []) as Row[]
+  const tabs = FUNNEL.map(f => ({
+    key: f.key, label: f.label, count: forDay.filter(f.match).length,
+  }))
+
+  const matcher = FUNNEL.find(f => f.key === stage) ?? FUNNEL[0]
+  const orders = forDay.filter(matcher.match)
+  const active = forDay.filter(o => isInProgress(o.status))
 
   return (
     <div className="bg-zinc-950 text-white space-y-4">
@@ -70,27 +115,15 @@ export default async function SiteOrdersPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
-          <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Усього</div>
-          <div className="text-3xl font-bold text-white">{orders.length}</div>
-        </div>
-        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
-          <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">У роботі</div>
-          <div className="text-3xl font-bold text-cyan-400">{active.length}</div>
-        </div>
-        <div className="bg-zinc-900 rounded-xl p-3 border border-zinc-800">
-          <div className="text-zinc-400 text-xs font-medium uppercase tracking-wide mb-1">Доставлено</div>
-          <div className="text-3xl font-bold text-emerald-400">
-            {orders.filter(o => o.status === 'Доставлено').length}
-          </div>
-        </div>
-      </div>
+      <SiteFilters date={date} stage={matcher.key} tabs={tabs} />
 
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-800">
           <h2 className="text-sm font-semibold text-zinc-300">
-            Замовлення <span className="ml-1 text-zinc-500">({orders.length})</span>
+            {matcher.label} <span className="ml-1 text-zinc-500">({orders.length})</span>
+            <span className="ml-2 text-zinc-600 font-normal">
+              на {date.split('-').reverse().slice(0, 2).join('.')} · у роботі {active.length}
+            </span>
           </h2>
         </div>
         <WideScroll>
@@ -114,9 +147,9 @@ export default async function SiteOrdersPage() {
               {orders.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="text-center py-12 text-zinc-500">
-                    Замовлень ще немає —{' '}
+                    На цю дату тут порожньо —{' '}
                     <Link href="/orders/manual" className="text-red-400 hover:text-red-300">
-                      створити перше
+                      створити замовлення
                     </Link>
                   </td>
                 </tr>

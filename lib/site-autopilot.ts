@@ -68,20 +68,32 @@ function missingFields(order: Row, items: number): string[] {
 
 export async function autoProcessSiteOrders(
   service: Service,
-  { limit = 50 }: { limit?: number } = {},
+  { limit = 50, orderIds }: { limit?: number; orderIds?: string[] } = {},
 ): Promise<AutopilotResult> {
   const result: AutopilotResult = { looked: 0, numbered: 0, rezoned: 0, problems: 0 }
 
   try {
-    const { data } = await service
+    /**
+     * Закриті відсіюємо запитом, а не після нього.
+     *
+     * Доти вони лишались у вибірці, фільтрувались уже в пам'яті — і порція
+     * виходила порожньою, бо на початку черги стояли саме вони. Черга
+     * заблокувалась намертво: нові замовлення не оглядались місяцями, бо
+     * попереду вічно стояв десяток скасованих.
+     */
+    let query = service
       .from('orders')
       .select('id, external_id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, manual_number, number_source, status')
       .eq('platform', 'site')
       .is('auto_done_at', null)
-      .order('created_at', { ascending: true })
-      .limit(limit)
+      .not('status', 'in', `(${CLOSED_STAGES.map(s => `"${s}"`).join(',')})`)
 
-    const orders = (data ?? []).filter(o => !CLOSED_STAGES.includes(o.status ?? '')) as Row[]
+    // Названі замовлення — коли Бітрікс щойно сказав, що саме змінилось
+    if (orderIds?.length) query = query.in('id', orderIds)
+
+    const { data } = await query.order('created_at', { ascending: true }).limit(limit)
+
+    const orders = (data ?? []) as Row[]
     result.looked = orders.length
 
     for (const order of orders) {
