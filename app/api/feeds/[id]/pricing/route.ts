@@ -28,7 +28,7 @@ export async function GET(
 
   const [{ data: categories }, { data: feed }, { data: assigned }] = await Promise.all([
     service.from('price_categories')
-      .select('id, name, source, bitrix_price_type_id, multiplier, is_system, note')
+      .select('id, name, source, bitrix_price_type_id, multiplier, is_system, note, rounding, rounding_step')
       .order('is_system', { ascending: false }).order('name'),
     service.from('feeds').select('price_category_id').eq('id', id).single(),
     service.from('feed_products')
@@ -65,6 +65,8 @@ export async function POST(
     multiplier?: number
     source?: 'site' | 'bitrix'
     bitrix_price_type_id?: number | null
+    rounding?: 'none' | 'up' | 'down' | 'nearest'
+    rounding_step?: number
     category_id?: string | null
     scope?: 'all' | 'category' | 'product'
     category_name?: string | null
@@ -82,11 +84,14 @@ export async function POST(
       return NextResponse.json({ error: 'Коефіцієнт — число більше нуля' }, { status: 400 })
     }
 
+    const step = Number(body.rounding_step ?? 1)
     const { data, error } = await service.from('price_categories').insert({
       name,
       source: body.source === 'bitrix' ? 'bitrix' : 'site',
       bitrix_price_type_id: body.bitrix_price_type_id ?? null,
       multiplier,
+      rounding: ['up', 'down', 'nearest'].includes(body.rounding ?? '') ? body.rounding : 'none',
+      rounding_step: Number.isFinite(step) && step > 0 ? step : 1,
       created_by: actor.id,
     }).select('id').single()
 
@@ -142,4 +147,28 @@ export async function POST(
   }
 
   return NextResponse.json({ error: 'Невідома дія' }, { status: 400 })
+}
+
+export async function DELETE(req: NextRequest) {
+  if (!await guard()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const categoryId = new URL(req.url).searchParams.get('category')
+  if (!categoryId) return NextResponse.json({ error: 'Не вказано категорію' }, { status: 400 })
+
+  const service = createServiceClient()
+  const { data: category } = await service
+    .from('price_categories').select('is_system').eq('id', categoryId).maybeSingle()
+
+  if (category?.is_system) {
+    return NextResponse.json({ error: 'Вбудовану категорію не видалити' }, { status: 400 })
+  }
+
+  // Фіди й товари, що на неї посилались, повертаються до каталожної ціни —
+  // краще звична ціна, ніж фід, який перестав збиратись
+  await service.from('feeds').update({ price_category_id: null }).eq('price_category_id', categoryId)
+  await service.from('feed_products').update({ price_category_id: null })
+    .eq('price_category_id', categoryId)
+  await service.from('price_categories').delete().eq('id', categoryId)
+
+  return NextResponse.json({ ok: true })
 }

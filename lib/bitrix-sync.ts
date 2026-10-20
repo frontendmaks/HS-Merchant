@@ -6,6 +6,7 @@
  * воронці сто двадцять тисяч угод, і повне вичитування не має сенсу ні разу
  * на п'ять хвилин, ні взагалі.
  */
+import { randomBytes } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import { createServiceClient } from '@/lib/supabase/service'
 import { stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
@@ -205,8 +206,17 @@ export async function syncSiteOrders(
           }
           result.updated++
         } else {
+          /**
+           * Токен бланка — одразу при появі замовлення.
+           *
+           * Без нього посилання на бланк не існує, і в чат складу надсилати
+           * нічого: замовлення доходило до комплектації, а комірник його не
+           * бачив. Ручний прийом токен видавав, синхронізація — ні.
+           */
           const { data: created } = await service
-            .from('orders').insert(fields).select('id').single()
+            .from('orders')
+            .insert({ ...fields, share_token: randomBytes(18).toString('base64url') })
+            .select('id').single()
           if (created) {
             await saveRows(service, created.id as string, rows)
             result.created++

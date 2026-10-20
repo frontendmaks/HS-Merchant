@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   }
 
   const limit = Math.min(Math.max(
-    Number(new URL(request.url).searchParams.get('limit') ?? 10), 1), 40)
+    Number(new URL(request.url).searchParams.get('limit') ?? 30), 1), 60)
 
   const result = await autoProcessSiteOrders(service, { limit })
   return NextResponse.json(result, { status: result.error ? 500 : 200 })

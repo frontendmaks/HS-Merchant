@@ -22,6 +22,8 @@ export interface PriceCategory {
   bitrix_price_type_id: number | null
   multiplier: number
   is_system: boolean
+  rounding: 'none' | 'up' | 'down' | 'nearest'
+  rounding_step: number
 }
 
 export interface PricingContext {
@@ -37,11 +39,15 @@ export async function loadPricing(
 ): Promise<PricingContext> {
   const { data: categories } = await service
     .from('price_categories')
-    .select('id, name, source, bitrix_price_type_id, multiplier, is_system')
+    .select('id, name, source, bitrix_price_type_id, multiplier, is_system, rounding, rounding_step')
 
   const byId = new Map<string, PriceCategory>()
   for (const c of categories ?? []) {
-    byId.set(c.id as string, { ...c, multiplier: Number(c.multiplier) } as PriceCategory)
+    byId.set(c.id as string, {
+      ...c,
+      multiplier: Number(c.multiplier),
+      rounding_step: Number(c.rounding_step ?? 1),
+    } as PriceCategory)
   }
 
   // Ціни з Бітрікса тягнемо лише тоді, коли хоч одна категорія з них живе
@@ -69,6 +75,38 @@ export async function loadPricing(
     byId,
     bitrixPrices,
   }
+}
+
+/** Категорія, за якою рахується ціна цього рядка фіда. */
+export function categoryFor(
+  line: { price_category_id?: string | null },
+  ctx: PricingContext,
+): PriceCategory | null {
+  return (line.price_category_id ? ctx.byId.get(line.price_category_id) : null) ?? ctx.feedCategory
+}
+
+/**
+ * Заокруглення готової ціни пропозиції.
+ *
+ * Саме готової: між базовою ціною й ціною у фіді стоїть формула фасування,
+ * і заокруглена ціна за кілограм після множення на 0.4 знову перестає бути
+ * круглою. Округляємо те число, яке побачить покупець.
+ */
+export function roundOffer(price: number, category: PriceCategory | null): number {
+  if (!category || category.rounding === 'none' || !(price > 0)) return price
+
+  const step = category.rounding_step > 0 ? category.rounding_step : 1
+  const units = price / step
+  const rounded = category.rounding === 'up'
+    ? Math.ceil(units)
+    : category.rounding === 'down'
+      ? Math.floor(units)
+      : Math.round(units)
+
+  // Ціна не має впасти в нуль через великий крок: товар за 0 грн маркетплейс
+  // або відкине, або продасть
+  const value = Math.round(rounded * step * 100) / 100
+  return value > 0 ? value : Math.round(step * 100) / 100
 }
 
 /**

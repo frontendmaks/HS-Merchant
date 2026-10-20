@@ -3,7 +3,7 @@ import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { sanitizeSku } from '@/lib/transliterate'
 import { NextRequest, NextResponse } from 'next/server'
 import { loadPromos, promoFor, oldPriceFor } from '@/lib/price-promo'
-import { loadPricing, basePrice } from '@/lib/price-category'
+import { loadPricing, basePrice, roundOffer, categoryFor } from '@/lib/price-category'
 import {
   calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock,
 } from '@/lib/feed-xml'
@@ -144,9 +144,12 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       const baseName = fp.custom_name ?? p.name
       const name = weightLabel ? `${baseName}, ${weightLabel}` : baseName
       const { price: baseForOffer } = basePrice(p, fp, feed.pricing)
-      const mPrice = fp.custom_price
-        ? baseForOffer
-        : (calcMarketplacePrice(baseForOffer, attrs) ?? baseForOffer)
+      const mPrice = roundOffer(
+        fp.custom_price
+          ? baseForOffer
+          : (calcMarketplacePrice(baseForOffer, attrs) ?? baseForOffer),
+        categoryFor(fp, feed.pricing),
+      )
       const price = mPrice
       if (!price) errors.push(`Немає ціни: ${name || p.sku || p.id}`)
       if (!name) errors.push(`Немає назви: ${p.sku || p.id}`)
@@ -283,8 +286,11 @@ function generateMaudauYML(
         ? Number(customParamPrice)
         : fp.custom_price
           ? Number(fp.custom_price)
-          : (calcMarketplacePrice(baseForOffer, p.attributes as Record<string, string> | null)
-             ?? baseForOffer)
+          : roundOffer(
+              calcMarketplacePrice(baseForOffer, p.attributes as Record<string, string> | null)
+                ?? baseForOffer,
+              categoryFor(fp, feed.pricing),
+            )
 
       // Validate
       const label = nameUa || p.sku || p.id
