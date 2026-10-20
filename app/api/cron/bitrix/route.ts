@@ -21,8 +21,20 @@ export async function GET(request: NextRequest) {
   }
 
   const service = createServiceClient()
-  const since = new Date(Date.now() - 24 * 3600_000).toISOString()
-  const result = await syncSiteOrders(service, { since, maxPages: 20 })
 
-  return NextResponse.json(result, { status: result.error ? 500 : 200 })
+  /**
+   * Вікно — скільки часу назад перечитувати.
+   *
+   * Часті проходи дивляться на останні пів години: за цей час у воронці
+   * змінюється кілька угод, і прохід коштує копійки. Раз на годину йде
+   * широкий — за добу, — щоб підібрати те, що проґавилось під час збою чи
+   * простою.
+   */
+  const minutes = Math.min(Math.max(
+    Number(new URL(request.url).searchParams.get('minutes') ?? 30), 5), 2880)
+
+  const since = new Date(Date.now() - minutes * 60_000).toISOString()
+  const result = await syncSiteOrders(service, { since, maxPages: minutes > 120 ? 20 : 4 })
+
+  return NextResponse.json({ ...result, minutes }, { status: result.error ? 500 : 200 })
 }

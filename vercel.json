@@ -25,16 +25,20 @@
       "schedule": "0 5 * * *"
     },
     {
-      "path": "/api/cron/bitrix",
-      "schedule": "*/15 * * * *"
-    },
-    {
       "path": "/api/cron/customers",
       "schedule": "0 2 * * *"
     },
     {
-      "path": "/api/cron/site-orders",
-      "schedule": "*/10 * * * *"
+      "path": "/api/cron/bitrix?minutes=30",
+      "schedule": "*/3 * * * *"
+    },
+    {
+      "path": "/api/cron/bitrix?minutes=1440",
+      "schedule": "7 * * * *"
+    },
+    {
+      "path": "/api/cron/site-orders?limit=10",
+      "schedule": "*/3 * * * *"
     }
   ]
 }
