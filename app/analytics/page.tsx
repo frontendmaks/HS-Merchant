@@ -178,9 +178,13 @@ export default async function AnalyticsPage({
   for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200))
 
   // Пачки незалежні — питаємо їх разом, а не одну за одною
+  // Із журналу потрібні лише п'ять видів записів — решту не тягнемо
+  const EVENT_TYPES = ['created', 'status', 'ttn', 'cancel', 'cancel_reason']
+
   const eventPages = await Promise.all(chunks.map(chunk => fetchAllRows(() => supabase
     .from('order_events')
     .select('order_id, actor_id, actor_name, type, new_value, created_at')
+    .in('type', EVENT_TYPES)
     .in('order_id', chunk))))
 
   const events = eventPages.flat() as unknown as OperatorEventRow[]
@@ -301,7 +305,13 @@ export default async function AnalyticsPage({
        * Двадцятка відповідала на «хто найбільший», але не на «скільки їх і
        * що з рештою» — а саме це й питають, обираючи період.
        */
-      customers: all,
+      /*
+       * Самого списку тут немає — він іде окремим запитом.
+       *
+       * Тисяча клієнтів з адресами важить чверть мегабайта, а зрізів шість:
+       * сторінка тягла півтора мегабайта заради таблиці, до якої ще треба
+       * догорнути. Підсумки лишаються тут, бо вони на картках угорі.
+       */
       customerSummary: {
         total: all.length,
         repeat: all.filter(c => c.orders > 1).length,

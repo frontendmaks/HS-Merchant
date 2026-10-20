@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useEffect, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import UkraineMap from './UkraineMap'
 import AreaBreakdown, { type AreaStat } from './AreaBreakdown'
@@ -766,7 +766,6 @@ export interface Bundle {
   perDay: DayBucket[]
   products: ProductStat[]
   categories: CategoryStat[]
-  customers: CustomerStat[]
   customerSummary: {
     total: number
     repeat: number
@@ -780,6 +779,67 @@ export interface Bundle {
   zoneLoad: ZoneLoad[]
   operators: OperatorStat[]
   cancels: CancelStats
+}
+
+/**
+ * Таблиця клієнтів, що приходить окремо.
+ *
+ * Список важить більше, ніж уся решта сторінки, і лежить аж унизу — тож
+ * сторінка відкривається без нього, а він доїжджає слідом. Кожен зріз
+ * запам'ятовується, щоб повернення на вкладку не питало вдруге.
+ */
+function LazyCustomers({ from, to, platform, total }: {
+  from: string
+  to: string
+  platform: string
+  total: number
+}) {
+  const [rows, setRows] = useState<CustomerStat[] | null>(null)
+  const [failed, setFailed] = useState(false)
+  const cache = useRef(new Map<string, CustomerStat[]>())
+
+  useEffect(() => {
+    const key = `${from}|${to}|${platform}`
+    const held = cache.current.get(key)
+    if (held) { setRows(held); setFailed(false); return }
+
+    let dropped = false
+    setRows(null)
+    setFailed(false)
+
+    void (async () => {
+      try {
+        const r = await fetch(`/api/analytics/customers?from=${from}&to=${to}&platform=${platform}`)
+        if (!r.ok) throw new Error('не вийшло')
+        const body = await r.json() as { customers: CustomerStat[] }
+        if (dropped) return
+        cache.current.set(key, body.customers)
+        setRows(body.customers)
+      } catch {
+        if (!dropped) setFailed(true)
+      }
+    })()
+
+    return () => { dropped = true }
+  }, [from, to, platform])
+
+  if (failed) {
+    return (
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-5 py-8 text-center text-zinc-500 text-sm">
+        Список клієнтів не завантажився
+      </div>
+    )
+  }
+
+  if (!rows) {
+    return (
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-5 py-8 text-center text-zinc-500 text-sm">
+        Завантажую {total} {total === 1 ? 'клієнта' : 'клієнтів'}…
+      </div>
+    )
+  }
+
+  return <CustomersTable rows={rows} />
 }
 
 export interface PreviousTotals extends Totals {
@@ -834,7 +894,7 @@ export default function AnalyticsClient({
   }
 
   const {
-    totals: t, perDay, products, categories, customers, customerSummary, regions, areas, areasPending, zoneLoad, operators,
+    totals: t, perDay, products, categories, customerSummary, regions, areas, areasPending, zoneLoad, operators,
     cancels,
   } = bundles[platform] ?? bundles.all
 
@@ -990,7 +1050,7 @@ export default function AnalyticsClient({
         />
       </div>
 
-      <CustomersTable rows={customers} />
+      <LazyCustomers from={from} to={to} platform={platform} total={customerSummary.total} />
 
       {/* Operators — no data source yet, stated plainly rather than faked */}
       {!limited && (
