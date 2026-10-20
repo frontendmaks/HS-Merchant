@@ -6,8 +6,9 @@ import UkraineMap from './UkraineMap'
 import AreaBreakdown, { type AreaStat } from './AreaBreakdown'
 import DeliveryMap, { type ZoneLoad } from './DeliveryMap'
 import type {
-  Totals, DayBucket, ProductStat, CategoryStat, CustomerStat, RegionStat,
+  Totals, DayBucket, SourceKey, ProductStat, CategoryStat, CustomerStat, RegionStat,
 } from '@/lib/analytics'
+import { SOURCE_KEYS } from '@/lib/analytics'
 
 import type { OperatorStat, CancelStats, CancelSide } from '@/lib/analytics'
 import { CANCEL_SIDE_LABEL } from '@/lib/analytics'
@@ -54,13 +55,34 @@ function Panel({ title, subtitle, children, right }: {
 
 type ChartMetric = 'count' | 'ordered'
 
+/**
+ * Кольори джерел.
+ *
+ * Сайт лишається фірмовим червоним — це основний потік, і саме його око
+ * шукає першим. Решта відрізняються відтінком, а не яскравістю, щоб
+ * жодне джерело не здавалося «головнішим» за свій колір.
+ */
+const SOURCE_STYLE: Record<SourceKey, { label: string; bar: string; dot: string }> = {
+  site:    { label: 'Сайт',     bar: 'bg-red-600',     dot: 'bg-red-600' },
+  manual:  { label: 'Телефон',  bar: 'bg-amber-500',   dot: 'bg-amber-500' },
+  maudau:  { label: 'MauDau',   bar: 'bg-violet-500',  dot: 'bg-violet-500' },
+  rozetka: { label: 'Rozetka',  bar: 'bg-sky-500',     dot: 'bg-sky-500' },
+  other:   { label: 'Інше',     bar: 'bg-zinc-500',    dot: 'bg-zinc-500' },
+}
+
 /** Bar chart of orders per day, drawn with plain divs. */
 function DailyChart({ data, metric }: { data: DayBucket[]; metric: ChartMetric }) {
   if (!data.length) {
     return <div className="px-5 py-10 text-center text-zinc-600 text-sm">Немає даних</div>
   }
   const valueOf = (d: DayBucket) => metric === 'count' ? d.count : d.ordered
+  const sliceOf = (d: DayBucket, k: SourceKey) =>
+    metric === 'count' ? d.sources[k].count : d.sources[k].ordered
   const max = Math.max(...data.map(valueOf), metric === 'count' ? 1 : 0)
+
+  // Легенда показує лише ті джерела, що за цей період справді були: на
+  // вкладці однієї платформи колір один, і перелічувати решту — шум.
+  const present = SOURCE_KEYS.filter(k => data.some(d => d.sources[k].count > 0))
 
   // Averages ignore empty days — "4.9 per day" should not be diluted by
   // stretches with no orders at all.
@@ -73,24 +95,58 @@ function DailyChart({ data, metric }: { data: DayBucket[]; metric: ChartMetric }
 
   return (
     <div className="p-5">
+      {present.length > 1 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5 mb-3.5">
+          {present.map(k => {
+            const total = data.reduce((s, d) => s + sliceOf(d, k), 0)
+            return (
+              <span key={k} className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
+                <span className={`w-2.5 h-2.5 rounded-sm ${SOURCE_STYLE[k].dot}`} />
+                {SOURCE_STYLE[k].label}
+                <span className="text-zinc-500">{fmtValue(total)}</span>
+              </span>
+            )
+          })}
+        </div>
+      )}
+
       <div className="flex items-end gap-[3px] h-44">
         {data.map(d => {
           const v = valueOf(d)
           const h = max ? (v / max) * 100 : 0
           const empty = d.count === 0
+          // Нижній сегмент лишається заокругленим знизу, верхній — згори,
+          // щоб стовпець читався як один предмет, а не як стос плиток
+          const parts = present
+            .map(k => ({ k, v: sliceOf(d, k) }))
+            .filter(p => d.sources[p.k].count > 0)
           return (
             <div
               key={d.date}
               className="flex-1 min-w-[3px] max-w-[26px] h-full flex flex-col justify-end relative group"
             >
-              <div
-                className={`w-full rounded-t-sm transition-colors ${
-                  empty
-                    ? 'bg-zinc-800 group-hover:bg-zinc-700'
-                    : 'bg-red-600/80 group-hover:bg-red-500'
-                }`}
-                style={{ height: empty ? '2px' : `${Math.max(h, 3)}%` }}
-              />
+              {empty ? (
+                <div className="w-full rounded-t-sm bg-zinc-800 group-hover:bg-zinc-700 transition-colors"
+                     style={{ height: '2px' }} />
+              ) : (
+                <div
+                  className="w-full flex flex-col-reverse overflow-hidden rounded-t-sm transition-opacity group-hover:opacity-80"
+                  style={{ height: `${Math.max(h, 3)}%` }}
+                >
+                  {parts.map(p => (
+                    <div
+                      key={p.k}
+                      className={SOURCE_STYLE[p.k].bar}
+                      style={{
+                        // Частка сегмента в дні, а не в максимумі — висота
+                        // самого стовпця вже враховує масштаб
+                        height: v > 0 ? `${(p.v / v) * 100}%` : '0%',
+                        minHeight: '2px',
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
               <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-10 whitespace-nowrap bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs shadow-xl">
                 <div className="text-white font-medium">{dayMonth(d.date)}</div>
                 {empty ? (
@@ -99,6 +155,21 @@ function DailyChart({ data, metric }: { data: DayBucket[]; metric: ChartMetric }
                   <>
                     <div className="text-zinc-300">{d.count} {orderWord(d.count)}</div>
                     <div className="text-zinc-400">замовили на {moneyShort(d.ordered)}</div>
+                    {parts.length > 1 && (
+                      <div className="mt-1 pt-1 border-t border-zinc-700 space-y-0.5">
+                        {parts.map(p => (
+                          <div key={p.k} className="flex items-center gap-1.5 text-zinc-400">
+                            <span className={`w-2 h-2 rounded-sm ${SOURCE_STYLE[p.k].dot}`} />
+                            <span className="text-zinc-300">{SOURCE_STYLE[p.k].label}</span>
+                            <span className="ml-auto pl-2">
+                              {metric === 'count'
+                                ? `${d.sources[p.k].count} ${orderWord(d.sources[p.k].count)}`
+                                : moneyShort(d.sources[p.k].ordered)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </>
                 )}
               </div>

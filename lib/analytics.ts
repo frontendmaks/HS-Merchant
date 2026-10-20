@@ -225,6 +225,26 @@ export function totals(orders: OrderRow[]): Totals {
   }
 }
 
+/**
+ * Звідки прийшло замовлення — для розбивки стовпця дня на кольори.
+ *
+ * «Сайт» і «телефон» у решті аналітики ходять парою (обидва веде наш склад,
+ * обидва без комісії), але на графіку їх якраз і треба розрізняти: це два
+ * різні способи, якими людина до нас потрапляє.
+ */
+export const SOURCE_KEYS = ['site', 'manual', 'maudau', 'rozetka', 'other'] as const
+export type SourceKey = typeof SOURCE_KEYS[number]
+
+export const sourceOf = (platform: string | null): SourceKey =>
+  (SOURCE_KEYS as readonly string[]).includes(platform ?? '')
+    ? (platform as SourceKey)
+    : 'other'
+
+export interface SourceSlice {
+  count: number
+  ordered: number
+}
+
 export interface DayBucket {
   date: string
   count: number
@@ -232,14 +252,21 @@ export interface DayBucket {
   ordered: number
   /** Of that, what actually got delivered */
   revenue: number
+  /** Той самий день у розрізі джерел — сума збігається з count/ordered */
+  sources: Record<SourceKey, SourceSlice>
 }
+
+const blankSources = (): Record<SourceKey, SourceSlice> =>
+  Object.fromEntries(SOURCE_KEYS.map(k => [k, { count: 0, ordered: 0 }])) as
+    Record<SourceKey, SourceSlice>
 
 /** One bucket per calendar day in [from, to] — days without orders are kept as
  *  zeros so the chart reads as a timeline instead of a row of equal bars. */
 export function ordersPerDay(orders: OrderRow[], from?: string, to?: string): DayBucket[] {
   const map = new Map<string, DayBucket>()
 
-  const blank = (date: string): DayBucket => ({ date, count: 0, ordered: 0, revenue: 0 })
+  const blank = (date: string): DayBucket =>
+    ({ date, count: 0, ordered: 0, revenue: 0, sources: blankSources() })
 
   if (from && to) {
     const cursor = new Date(from + 'T00:00:00')
@@ -256,8 +283,13 @@ export function ordersPerDay(orders: OrderRow[], from?: string, to?: string): Da
   for (const o of orders) {
     if (!o.order_date) continue
     const b = map.get(o.order_date) ?? blank(o.order_date)
+    const src = b.sources[sourceOf(o.platform)]
     b.count++
-    if (!isCanceled(o)) b.ordered += num(o.total)
+    src.count++
+    if (!isCanceled(o)) {
+      b.ordered += num(o.total)
+      src.ordered += num(o.total)
+    }
     if (isDelivered(o)) b.revenue += num(o.total)
     map.set(o.order_date, b)
   }

@@ -17,6 +17,7 @@ import { calcMarketplacePrice } from '@/lib/feed-xml'
 import { WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY } from '@/lib/bitrix-deal'
 import { getSetting } from '@/lib/settings'
 import { platformLabel } from '@/lib/order-source'
+import { ensureLines } from '@/lib/order-lines'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -92,12 +93,16 @@ export async function pushMarketplaceOrder(
 
     if (!order) return { error: 'Замовлення не знайдено' }
 
-    const { data: items } = await service
-      .from('order_items')
-      .select('position, title, unit, price_per_unit, ordered_qty, product_id')
-      .eq('order_id', orderId).eq('removed', false).order('position')
+    /*
+     * Позиції маркетплейсного замовлення до першого відкриття складу живуть
+     * лише в сирій відповіді майданчика. Читати саму таблицю було замало:
+     * замовлення, якого ніхто не відкривав у Мерчанті, виглядало порожнім —
+     * і автопілот відмовлявся його заводити, хоча товари в ньому були.
+     */
+    const lines = (await ensureLines(service, orderId))
+      .filter(l => !l.removed)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
 
-    const lines = items ?? []
     if (!lines.length) return { error: 'У замовленні немає позицій' }
 
     const prices = await feedPrices(service, order.platform as string)
