@@ -52,6 +52,7 @@ export async function PATCH(
 
   const { id } = await params
   const body = await req.json().catch(() => null) as {
+    recheck?: boolean
     address?: string
     warehouse?: string | null
     delivery_date?: string | null
@@ -69,6 +70,17 @@ export async function PATCH(
     return NextResponse.json(
       { error: 'Так правляться лише замовлення з сайту й телефону' }, { status: 409 },
     )
+  }
+
+  /**
+   * Повторна перевірка — коли оператор щойно виправив те, на що скаржився
+   * огляд. Знімаємо позначку, і найближчий прохід візьме замовлення знову.
+   */
+  if (body?.recheck) {
+    await service.from('orders')
+      .update({ auto_done_at: null, auto_problem: null })
+      .eq('id', id)
+    return NextResponse.json({ ok: true, recheck: true })
   }
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
@@ -144,6 +156,14 @@ export async function PATCH(
     changes.lines = lines.length
     changes.total = patch.total
   }
+
+  /**
+   * Правка — привід оглянути заново.
+   *
+   * Оператор щойно виправив адресу чи склад замовлення; попередній висновок
+   * огляду стосувався інших даних і більше нічого не описує.
+   */
+  if (Object.keys(changes).length) patch.auto_done_at = null
 
   await service.from('orders').update(patch).eq('id', id)
   await logOrderEvent(service, id, 'items', { details: changes }, actor)

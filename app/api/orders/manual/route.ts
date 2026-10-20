@@ -14,7 +14,8 @@ import { reserveNumber } from '@/lib/manual-register'
 import { withDelivery } from '@/lib/delivery-fee'
 import { pushOrderToBitrix } from '@/lib/bitrix-deal'
 import { bitrixConfigured } from '@/lib/bitrix'
-import { sendOrderSheet } from '@/lib/bitrix-chat'
+import { PICKING_STAGE } from '@/lib/bitrix-chat'
+import { changeOrderStatus } from '@/lib/order-status-change'
 
 /**
  * POST /api/orders/manual — прийняти замовлення по телефону.
@@ -113,7 +114,9 @@ export async function POST(req: NextRequest) {
       customer_name: name,
       customer_phone: phone,
       address,
-      status: 'Прийнято',
+      // Той самий словник, що й у сайтових: замовлення живе в одній воронці
+      // Бітрікса, і два слова про один стан нікому не допомагають
+      status: 'В обробці',
       total,
       commission: 0,
       weight,
@@ -185,14 +188,38 @@ export async function POST(req: NextRequest) {
     : { error: 'Бітрікс не налаштовано' }
 
   /**
-   * Бланк — у чат складу.
+   * Телефонне замовлення одразу йде на комплектацію.
    *
-   * Склад уже вирахувано з адреси, а в кожного складу свій чат: посилання
-   * доїжджає туди, де замовлення збиратимуть, без пересилань руками.
+   * Його не треба перевіряти так, як сайтове: оператор щойно склав його сам,
+   * з клієнтом на лінії, і склад може братись до роботи. Статус ставимо
+   * окремим кроком, а не при створенні, щоб бланк пішов у чат тим самим
+   * шляхом, що й у сайтових — із переведення на «Комплектується», а не з
+   * окремої гілки, яка колись розійдеться з ним.
    */
-  const chat = bitrixConfigured()
-    ? await sendOrderSheet(service, created.id)
-    : { error: 'Бітрікс не налаштовано' }
+  let chat: { ok: true } | { error: string } = { error: 'Бітрікс не налаштовано' }
+
+  if (bitrixConfigured()) {
+    const moved = await changeOrderStatus({
+      id: created.id,
+      status: PICKING_STAGE,
+      platform: MANUAL_PLATFORM,
+      external_id: created.external_id,
+      actor,
+    })
+
+    if (moved.ok) {
+      // Бланк пішов усередині зміни статусу — звіряємось із замовленням
+      const { data: sent } = await service
+        .from('orders').select('chat_sent_at, chat_error').eq('id', created.id).single()
+
+      chat = sent?.chat_sent_at
+        ? { ok: true }
+        : { error: (sent?.chat_error as string) ?? 'бланк не надіслано' }
+    } else {
+      const body = await moved.json().catch(() => ({})) as { error?: string }
+      chat = { error: body.error ?? 'не вдалося перевести на комплектацію' }
+    }
+  }
 
   return NextResponse.json({
     ok: true,

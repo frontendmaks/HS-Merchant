@@ -48,19 +48,46 @@ interface Row {
  * тут — що з ним має зробити оператор. «Нове» це те, чого система ще не
  * оглянула; «Перевірено» — оглянуте без хиб, із номером ящика й бланком.
  */
-const FUNNEL: { key: string; label: string; match: (o: Row) => boolean }[] = [
-  { key: 'new',      label: 'Нові',            match: o => !o.auto_done_at && o.status !== PREORDER },
-  { key: 'checked',  label: 'Перевірено',      match: o => !!o.auto_done_at && !o.auto_problem
-                                                            && o.status !== PREORDER
-                                                            && o.status !== PICKING },
-  { key: 'problem',  label: 'Потребує уваги',  match: o => !!o.auto_problem },
-  { key: 'preorder', label: 'Передзамовлення', match: o => o.status === PREORDER },
-  { key: 'picking',  label: 'Комплектується',  match: o => o.status === PICKING },
-  { key: 'all',      label: 'Усі',             match: () => true },
-]
-
 const PREORDER = 'ПЕРЕДЗАМОВЛЕННЯ'
 const PICKING = 'Комплектується'
+const PROCESSING = 'В обробці'
+const CANCELED = 'Скасовано'
+
+/**
+ * Етапи опрацювання — те, що оператор має зробити далі.
+ *
+ * Не стадії Бітрікса: там стадія каже, де замовлення в житті. Тут кожен
+ * етап — питання «чи зроблено з ним те, що мало бути зроблено», і
+ * замовлення стоїть рівно в одному з них.
+ *
+ * «Нове» — щойно приїхало й ще не оглянуте.
+ * «Перевірено» — оглянуте без хиб: номер ящика є, зона й поля на місці.
+ *   Чекає, поки його відправлять на комплектацію.
+ * «Потребує уваги» — оглянуте, але чогось бракує; що саме, написано в рядку.
+ * «Комплектується» — переведене й бланк уже в чаті складу.
+ */
+const FUNNEL: { key: string; label: string; match: (o: Row) => boolean }[] = [
+  {
+    key: 'new', label: 'Нові',
+    match: o => o.status === PROCESSING && !o.auto_done_at,
+  },
+  {
+    key: 'checked', label: 'Перевірено',
+    match: o => o.status === PROCESSING && !!o.auto_done_at && !o.auto_problem
+      && o.manual_number != null,
+  },
+  {
+    key: 'problem', label: 'Потребує уваги',
+    match: o => !!o.auto_problem && o.status !== CANCELED,
+  },
+  { key: 'preorder', label: 'Передзамовлення', match: o => o.status === PREORDER },
+  {
+    key: 'picking', label: 'Комплектується',
+    match: o => o.status === PICKING && !!o.chat_sent_at,
+  },
+  { key: 'canceled', label: 'Скасовано', match: o => o.status === CANCELED },
+  { key: 'all', label: 'Усі', match: () => true },
+]
 
 export default async function SiteOrdersPage({
   searchParams,
@@ -166,15 +193,13 @@ export default async function SiteOrdersPage({
                         не з журналу
                       </span>
                     )}
-                    {o.auto_problem && (
-                      <span className="block text-amber-500 text-xs" title={o.auto_problem}>
-                        потребує уваги
-                      </span>
-                    )}
                     {o.chat_sent_at && (
                       <span className="block text-emerald-600 text-xs" title="Бланк надіслано в чат складу">
                         бланк у чаті
                       </span>
+                    )}
+                    {!o.auto_done_at && !o.auto_problem && (
+                      <span className="block text-zinc-600 text-xs">не оглянуто</span>
                     )}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">
@@ -195,7 +220,14 @@ export default async function SiteOrdersPage({
                   </td>
                   <td className="px-3 py-2 text-zinc-300">{o.customer_name || '—'}</td>
                   <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{o.customer_phone || '—'}</td>
-                  <td className="px-3 py-2 text-zinc-400 text-xs max-w-[18rem]">{o.address || '—'}</td>
+                  <td className="px-3 py-2 text-zinc-400 text-xs max-w-[18rem]">
+                    {o.address || '—'}
+                    {o.auto_problem && (
+                      <span className="block text-amber-500 mt-0.5">
+                        ⚠ бракує: {o.auto_problem}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-right text-white tabular-nums whitespace-nowrap">
                     {money(o.total)}
                   </td>
@@ -209,7 +241,7 @@ export default async function SiteOrdersPage({
                     />
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">
-                    <EditButton id={o.id} warehouses={warehouses} />
+                    <EditButton id={o.id} warehouses={warehouses} recheck={!!o.auto_problem} />
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     {o.share_token && (
