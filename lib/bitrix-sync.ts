@@ -12,6 +12,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
 import { WAREHOUSE_ID, SLOT_ID, CATEGORY_ID } from '@/lib/bitrix-deal'
 import { onStatusChanged } from '@/lib/bitrix-chat'
+import { broadcastOrderChange } from '@/lib/order-broadcast'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -212,6 +213,8 @@ export async function syncSiteOrders(
           // Статус міняють здебільшого в CRM — бланк має піти й тоді
           if (existing.status !== status) {
             await onStatusChanged(service, existing.id as string, status)
+            // Відкриті вкладки мають побачити це без перезавантаження
+            await broadcastOrderChange(existing.id as string, 'status')
           }
           result.updated++
         } else {
@@ -228,6 +231,7 @@ export async function syncSiteOrders(
             .select('id').single()
           if (created) {
             await saveRows(service, created.id as string, rows)
+            await broadcastOrderChange(created.id as string, 'sync')
             result.created++
           }
         }

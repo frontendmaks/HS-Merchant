@@ -14,6 +14,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { resolveAddress, GeocoderUnavailable, areaFromDisplay } from '@/lib/delivery-zones'
 import { reserveNumber } from '@/lib/manual-register'
 import { bitrix } from '@/lib/bitrix'
+import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { CLOSED_STAGES } from '@/lib/bitrix-stages'
 
 type Service = ReturnType<typeof createServiceClient>
@@ -210,6 +211,8 @@ export async function autoProcessSiteOrders(
       patch.auto_done_at = new Date().toISOString()
 
       await service.from('orders').update(patch).eq('id', order.id)
+      // Огляд щойно щось вирішив — хай це побачать відкриті вкладки
+      await broadcastOrderChange(order.id, 'items')
       if (problems.length) result.problems++
     }
   } catch (e) {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { isPhoneComplete, phoneKey } from '@/lib/phone'
 import { deliveryFeeFor } from '@/lib/delivery-fee'
+import ZonePicker, { type ZoneShape } from '@/components/ZonePicker'
 import Overlay, { ProductPicker, field, money, type Line } from '@/components/OrderLinesPicker'
 import Settings from './Settings'
 
@@ -22,13 +23,14 @@ interface Customer {
 
 
 export default function ManualOrdersClient({
-  recent, warehouses, initial, canSetChats, buffer,
+  recent, warehouses, initial, canSetChats, buffer, zones,
 }: {
   recent: Recent[]
   warehouses: string[]
   initial: { date: string; slot: string; slots: SlotOption[] }
   canSetChats?: boolean
   buffer: number
+  zones: ZoneShape[]
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -100,6 +102,7 @@ export default function ManualOrdersClient({
       {open && (
         <NewOrder
           warehouses={warehouses}
+          zones={zones}
           initial={initial}
           onClose={() => setOpen(false)}
           onCreated={() => { setOpen(false); router.refresh() }}
@@ -116,8 +119,9 @@ export default function ManualOrdersClient({
  * бо операторка заповнює його під час розмови й читає з того самого місця,
  * що й раніше. Склад і період стоять після адреси, бо саме вона їх визначає.
  */
-function NewOrder({ warehouses, initial, onClose, onCreated }: {
+function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
   warehouses: string[]
+  zones: ZoneShape[]
   initial: { date: string; slot: string; slots: SlotOption[] }
   onClose: () => void
   onCreated: () => void
@@ -129,6 +133,7 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
 
   const [warehouse, setWarehouse] = useState<string>('')
   const [zone, setZone] = useState<string | null>(null)
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [zoneNote, setZoneNote] = useState<string | null>(null)
   const [resolving, setResolving] = useState(false)
 
@@ -267,6 +272,7 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
       setSlots(d.slots ?? [])
       setZone(d.zone ?? null)
       setZoneNote(d.note ?? null)
+      setCoords(d.coordinates ?? null)
       if (d.warehouse) setWarehouse(d.warehouse)
       // Якщо обраний період закрився, пересуваємось на перший доступний
       const free = (d.slots ?? []).find((s: SlotOption) => s.available)
@@ -505,6 +511,19 @@ function NewOrder({ warehouses, initial, onClose, onCreated }: {
               {warehouses.map(w => <option key={w} value={w}>{w}</option>)}
             </select>
             {zoneNote && <div className="text-amber-400 text-xs mt-1">{zoneNote}</div>}
+
+            {/* Склад не визначився сам — показуємо карту: вулицю на ній
+                видно краще, ніж її назву в довіднику */}
+            {zoneNote && address.trim().length > 4 && (
+              <div className="mt-2">
+                <ZonePicker
+                  point={coords}
+                  zones={zones}
+                  warehouse={warehouse}
+                  onPick={(w, z) => { setWarehouse(w); setZone(z); setZoneNote(null) }}
+                />
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">

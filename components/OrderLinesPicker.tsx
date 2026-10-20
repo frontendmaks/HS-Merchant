@@ -309,12 +309,12 @@ export function ProductPicker({ lines, onChange, total }: {
                     </>
                   )}
                   <span className="text-zinc-600 text-xs">×</span>
-                  <NumField
-                    value={l.price_per_unit}
-                    onChange={v => patch(l.key, { price_per_unit: v })}
-                    className="w-20 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
-                               text-white text-xs focus:outline-none focus:border-red-500"
-                  />
+                  {/* Ціна — з каталогу й не редагується: замовлення не місце
+                      для торгу, а розбіжність із сайтом потім нікому не
+                      пояснити */}
+                  <span className="text-zinc-300 text-xs tabular-nums">
+                    {l.price_per_unit} ₴
+                  </span>
                   <span className="text-white text-xs ml-auto tabular-nums">
                     {money(l.qty * l.price_per_unit)}
                   </span>

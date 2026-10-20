@@ -23,7 +23,7 @@ export default async function ManualOrdersPage() {
       .eq('platform', 'manual')
       .order('created_at', { ascending: false })
       .limit(30),
-    service.from('delivery_zones').select('code, warehouse').order('code'),
+    service.from('delivery_zones').select('code, warehouse, polygon').order('code'),
   ])
 
   // Склади для ручного вибору, коли адресу не вдалось розпізнати
@@ -38,6 +38,11 @@ export default async function ManualOrdersPage() {
       // відповідає за налаштування, а не кожен, хто приймає замовлення
       canSetChats={role === 'super_admin' || role === 'admin'}
       buffer={buffer}
+      zones={(zones ?? []).map(z => ({
+        code: z.code as string,
+        warehouse: z.warehouse as string,
+        polygon: (z.polygon as { lat: number; lng: number }[]) ?? [],
+      }))}
     />
   )
 }

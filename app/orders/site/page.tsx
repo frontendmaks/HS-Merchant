@@ -50,6 +50,8 @@ interface Row {
  */
 const PREORDER = 'ПЕРЕДЗАМОВЛЕННЯ'
 const PICKING = 'Комплектується'
+/** Спаковано — та сама робота складу, лише на крок далі */
+const PACKED = 'Спаковано'
 const PROCESSING = 'В обробці'
 const CANCELED = 'Скасовано'
 
@@ -90,7 +92,7 @@ const FUNNEL: { key: string; label: string; match: (o: Row) => boolean }[] = [
   { key: 'preorder', label: 'Передзамовлення', match: o => o.status === PREORDER },
   {
     key: 'picking', label: 'Комплектується',
-    match: o => o.status === PICKING && !!o.chat_sent_at,
+    match: o => o.status === PICKING || o.status === PACKED,
   },
   { key: 'canceled', label: 'Скасовано', match: o => o.status === CANCELED },
   { key: 'all', label: 'Усі', match: () => true },
