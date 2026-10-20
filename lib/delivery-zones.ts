@@ -110,7 +110,11 @@ export async function zoneForPoint(
 const GEOCODER_UA =
   'HS-Merchant/1.0 (order intake; https://hs-merchant.vercel.app)'
 
-export interface Geocoded extends Point { display_name: string | null }
+export interface Geocoded extends Point {
+  display_name: string | null
+  /** Збіг «десь тут»: вулиця без номера або сам населений пункт */
+  approximate?: boolean
+}
 
 /**
  * Район Львова або село — з того, що відповів геокодер.
@@ -209,9 +213,18 @@ export function tidyAddress(raw: string): string {
     .map(p => p
       // Крапка або пробіл обов'язкові: інакше «Мшана» лишається «шана»
       .replace(/^(м|с|смт|сщ)\.\s*|^(м|с|смт)\s+/i, '')
-      // «Малечковичі вул.Степана Чарнецького» — геокодер хоче кому між
-      // населеним пунктом і вулицею
-      .replace(/\s+(вул|вулиця|просп|проспект|пров|провулок)\.?\s*/giu, ', $1. ')
+      /**
+       * «Малечковичі вул.Степана Чарнецького» — геокодер хоче кому між
+       * населеним пунктом і вулицею.
+       *
+       * Лише коли слово «вул.» вводить назву, тобто за ним одразу йде сама
+       * назва. Інакше правило спрацьовувало й на «Стрийська вул.», де тип
+       * стоїть після назви, — виходило «Стрийська, вул.», і геокодер читав
+       * це як дві різні частини адреси. Будинок 111Д так опинявся на іншому
+       * кінці вулиці, у чужій зоні доставки.
+       */
+      .replace(/\s+(вул|вулиця|просп|проспект|пров|провулок)\.?\s*(?=[А-ЯІЇЄҐA-Z])/giu,
+               ', $1. ')
       // «Село Мшана» — слово зайве, назва самодостатня; «будинок бічна» теж
       .replace(/^(село|селище|місто)\s+/iu, '')
       .replace(/^будинок\s+(?!\d)/iu, '')
@@ -239,7 +252,9 @@ export function tidyAddress(raw: string): string {
  * знаходило Дрогобич, бо вулиця Петлюри є і там. Місто важливіше за область:
  * ми возимо по Львову й околицях, тож питаємо спершу про Львів.
  */
-function queryVariants(address: string): string[] {
+interface Variant { query: string; approximate?: boolean }
+
+function queryVariants(address: string): Variant[] {
   const a = tidyAddress(address)
   const mentionsCity = /львів|брюховичі|винники|сокільники|зимна вода|рудно|малехів|солонка|пустомити|сихів/i.test(a)
 
@@ -279,16 +294,37 @@ function queryVariants(address: string): string[] {
     .filter(n => parts.length > n)
     .map(n => parts.slice(0, n).join(', '))
 
-  return [...new Set([
+  /**
+   * Точні прочитання йдуть першими, приблизні — наприкінці.
+   *
+   * Вулиця без номера й сам населений пункт відповідають «десь тут», а не
+   * «тут»: довга вулиця перетинає кілька зон доставки, і точка на її початку
+   * вкаже чужий склад. Такі збіги позначаємо, щоб вони не перебивали склад,
+   * обраний людиною.
+   */
+  const exact = [
     city(a),
     a,
     ...(withoutLetter !== a ? [city(withoutLetter)] : []),
     ...(cyrillic && cyrillic !== a ? [city(cyrillic), cyrillic] : []),
     ...shorter.map(city),
+  ]
+  const rough = [
     ...(streetOnly && streetOnly !== a ? [city(streetOnly)] : []),
     `Львівська область, ${a}`,
     ...(settlement && settlement !== a ? [`${settlement}, Львівська область`] : []),
-  ].filter(q => q.replace(/[^\p{L}]/gu, '').length >= 4))]
+  ]
+
+  const seen = new Set<string>()
+  const out: Variant[] = []
+  for (const [list, approximate] of [[exact, false], [rough, true]] as const) {
+    for (const query of list) {
+      if (query.replace(/[^\p{L}]/gu, '').length < 4 || seen.has(query)) continue
+      seen.add(query)
+      out.push({ query, approximate })
+    }
+  }
+  return out
 }
 
 /**
@@ -298,7 +334,7 @@ function queryVariants(address: string): string[] {
  * записи кешу з нижчою версією перепитуються, замість того щоб вічно
  * повертати координати, знайдені за старим правилом.
  */
-const RESOLVER_VERSION = 6
+const RESOLVER_VERSION = 7
 
 async function remember(
   service: Service,
@@ -310,6 +346,7 @@ async function remember(
     lat: point?.lat ?? null,
     lng: point?.lng ?? null,
     display_name: point?.display_name ?? null,
+    approximate: point?.approximate ?? false,
     resolver: RESOLVER_VERSION,
   }, { onConflict: 'query' })
 }
@@ -322,7 +359,8 @@ export async function geocode(
   if (query.length < 5) return null
 
   const { data: cached } = await service
-    .from('geocode_cache').select('lat, lng, display_name, resolver').eq('query', query).maybeSingle()
+    .from('geocode_cache').select('lat, lng, display_name, approximate, resolver')
+    .eq('query', query).maybeSingle()
 
   // Кеш старої версії не використовуємо: він пам'ятає відповідь, а не спосіб,
   // яким її отримали, і після зміни способу тихо скасовував би виправлення —
@@ -331,6 +369,7 @@ export async function geocode(
     return cached.lat == null ? null : {
       lat: Number(cached.lat), lng: Number(cached.lng),
       display_name: cached.display_name as string,
+      approximate: !!cached.approximate,
     }
   }
 
@@ -346,7 +385,7 @@ export async function geocode(
   const zones = await loadZones(service)
 
   for (const variant of queryVariants(query)) {
-    const answer = await ask(variant)
+    const answer = await ask(variant.query)
 
     if (answer.kind === 'unavailable') {
       // Сервіс не відповів — це не відповідь про адресу. Припиняємо й нічого
@@ -356,10 +395,11 @@ export async function geocode(
     }
 
     if (answer.kind === 'found') {
-      firstHit ??= answer.point
-      if (zoneAt(answer.point, zones)) {
-        await remember(service, query, answer.point)
-        return answer.point
+      const point = { ...answer.point, approximate: variant.approximate }
+      firstHit ??= point
+      if (zoneAt(point, zones)) {
+        await remember(service, query, point)
+        return point
       }
     }
 
@@ -408,5 +448,12 @@ export async function resolveAddress(
     }
   }
 
-  return { point, zone: hit.zone, warehouse: hit.warehouse, note: null }
+  return {
+    point,
+    zone: hit.zone,
+    warehouse: hit.warehouse,
+    note: point.approximate
+      ? 'Зона визначена за вулицею, без номера будинку — перевірте склад'
+      : null,
+  }
 }

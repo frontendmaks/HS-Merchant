@@ -150,9 +150,21 @@ export async function autoProcessSiteOrders(
           const zone = await resolveAddress(service, order.address)
           // Район або село — для аналітики доставок
           patch.area = areaFromDisplay(zone.point?.display_name) ?? null
+
           if (zone.zone) {
             patch.delivery_zone = zone.zone
-            if (zone.warehouse && zone.warehouse !== order.warehouse) {
+
+            /**
+             * Склад міняємо лише за точним збігом.
+             *
+             * Приблизний — це вулиця без номера будинку, а довга вулиця
+             * перетинає кілька зон: переставити за ним склад означає
+             * відправити замовлення в інший кінець міста з виглядом
+             * упевненості.
+             */
+            if (zone.point?.approximate) {
+              problems.push(zone.note ?? 'зона приблизна — перевірте склад')
+            } else if (zone.warehouse && zone.warehouse !== order.warehouse) {
               patch.warehouse = zone.warehouse
               crm[FIELD.warehouse] = WAREHOUSE_ID[zone.warehouse] ?? ''
               result.rezoned++
