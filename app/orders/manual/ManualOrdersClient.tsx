@@ -24,6 +24,7 @@ interface Customer {
 
 export default function ManualOrdersClient({
   recent, warehouses, initial, canSetChats, buffer, zones,
+  marketplaceAuto, marketplaceWarehouse,
 }: {
   recent: Recent[]
   warehouses: string[]
@@ -31,6 +32,8 @@ export default function ManualOrdersClient({
   canSetChats?: boolean
   buffer: number
   zones: ZoneShape[]
+  marketplaceAuto?: boolean
+  marketplaceWarehouse?: string
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -53,7 +56,14 @@ export default function ManualOrdersClient({
         </button>
       </div>
 
-      {canSetChats && <Settings buffer={buffer} />}
+      {canSetChats && (
+        <Settings
+          buffer={buffer}
+          marketplace={marketplaceAuto}
+          warehouses={warehouses}
+          warehouse={marketplaceWarehouse}
+        />
+      )}
 
       {recent.length === 0 ? (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-6 py-12 text-center">

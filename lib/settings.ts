@@ -14,6 +14,15 @@ export const DEFAULTS = {
   delivery_buffer_minutes: 20,
   /** Самостійне опрацювання замовлень із сайту */
   auto_process_site_orders: true,
+  /**
+   * Самостійне опрацювання маркетплейсних замовлень.
+   *
+   * Вимкнене за замовчуванням: прийняти замовлення на майданчику — це
+   * обіцянка покупцеві, і вмикати її має людина.
+   */
+  marketplace_autoprocess: false,
+  /** З якого складу відвантажують маркетплейсні замовлення */
+  marketplace_warehouse: 'Гуртівня онлайн' as string,
 } as const
 
 export type SettingKey = keyof typeof DEFAULTS

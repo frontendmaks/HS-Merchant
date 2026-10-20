@@ -39,6 +39,10 @@
     {
       "path": "/api/cron/site-orders?limit=10",
       "schedule": "*/3 * * * *"
+    },
+    {
+      "path": "/api/cron/marketplace-orders?limit=10",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

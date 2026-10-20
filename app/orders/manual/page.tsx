@@ -13,7 +13,11 @@ export default async function ManualOrdersPage() {
   if (role === 'viewer') redirect('/orders')
 
   const service = createServiceClient()
-  const buffer = await getSetting(service, 'delivery_buffer_minutes')
+  const [buffer, marketplaceAuto, marketplaceWarehouse] = await Promise.all([
+    getSetting(service, 'delivery_buffer_minutes'),
+    getSetting(service, 'marketplace_autoprocess'),
+    getSetting(service, 'marketplace_warehouse'),
+  ])
   const start = firstAvailable(buffer)
 
   const [{ data: recent }, { data: zones }] = await Promise.all([
@@ -38,6 +42,8 @@ export default async function ManualOrdersPage() {
       // відповідає за налаштування, а не кожен, хто приймає замовлення
       canSetChats={role === 'super_admin' || role === 'admin'}
       buffer={buffer}
+      marketplaceAuto={marketplaceAuto}
+      marketplaceWarehouse={marketplaceWarehouse}
       zones={(zones ?? []).map(z => ({
         code: z.code as string,
         warehouse: z.warehouse as string,
