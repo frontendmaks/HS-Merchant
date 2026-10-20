@@ -44,6 +44,25 @@ function phonesIn(text: string): string[] {
   return [...out]
 }
 
+/**
+ * Адреса у вигляді, придатному для звіряння.
+ *
+ * Сайт, Бітрікс і картка пишуть ту саму адресу по-різному: «вулиця» і
+ * «вул.», «буд. №» і просто число, кома то є, то немає. Лишаємо самі
+ * літери й цифри в нижньому регістрі — решта в адресі не несе змісту.
+ */
+function addressKey(raw: string | null | undefined): string {
+  return (raw ?? '')
+    .toLowerCase()
+    // Межі слова тут через \p{L}, а не \b: ASCII-межа між двома
+    // кириличними літерами не спрацьовує, і правило мовчки нічого не робить
+    .replace(
+      /(?<![\p{L}])(вулиця|вул|проспект|просп|провулок|пров|будинок|буд|місто|м|село|с)(?![\p{L}])\.?/gu,
+      ' ',
+    )
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
 const NUMBER_AT_START = /^\s*№\s*\d+/u
 
 /** Те, що ми дописали минулого разу, прибираємо — блок перепишеться начисто */
@@ -51,6 +70,7 @@ const stripOurs = (desc: string) => desc.split(MARK)[0].trimEnd()
 
 interface OrderRow {
   id: string
+  platform: string
   manual_number: number | null
   delivery_date: string | null
   delivery_slot: string | null
@@ -69,29 +89,39 @@ interface OrderRow {
  * замовленням: картка з правильними полями, але чужою адресою — гірша за
  * картку з порожньою адресою, бо виглядає справною.
  */
+const isMarketplace = (o: OrderRow) => o.platform === 'maudau' || o.platform === 'rozetka'
+
 function issuesOf(card: TrelloCard, order: OrderRow): string[] {
   const out: string[] = []
   const text = `${card.name}\n${card.desc}`
 
-  const cardDate = dateFromDesc(card.desc)
-  if (!cardDate) out.push('у картці немає дати доставки')
-  else if (order.delivery_date && cardDate !== order.delivery_date) {
-    out.push(`дата в картці ${cardDate}, у замовленні ${order.delivery_date}`)
+  // Маркетплейсне замовлення везе пошта: ні дня доставки, ні періоду,
+  // ні ящика в ньому немає й не має бути — вимагати їх було б вигадкою
+  if (!isMarketplace(order)) {
+    const cardDate = dateFromDesc(card.desc)
+    if (!cardDate) out.push('у картці немає дати доставки')
+    else if (order.delivery_date && cardDate !== order.delivery_date) {
+      out.push(`дата в картці ${cardDate}, у замовленні ${order.delivery_date}`)
+    }
+
+    if (!/Період доставки\s*\*{0,2}\d{1,2}[:.]\d{2}/u.test(card.desc)) {
+      out.push('у картці немає періоду доставки')
+    }
+
+    if (!order.warehouse) out.push('у замовленні не визначено склад')
+    if (!order.delivery_slot) out.push('у замовленні не вказано період')
   }
 
-  if (!/Період доставки\s*\*{0,2}\d{1,2}[:.]\d{2}/u.test(card.desc)) {
-    out.push('у картці немає періоду доставки')
-  }
-
-  if (!order.warehouse) out.push('у замовленні не визначено склад')
-  if (!order.delivery_slot) out.push('у замовленні не вказано період')
   if (!order.address?.trim()) out.push('у замовленні немає адреси')
 
   if (/Клієнт:?\s*\*{0,2}Не вказано/iu.test(text)) out.push('у картці не вказано клієнта')
 
   const phones = phonesIn(text)
-  if (!phones.length) out.push('у картці немає телефону')
-  else if (order.customer_phone && !phones.includes(phoneKey(order.customer_phone))) {
+  if (!phones.length) {
+    out.push(order.customer_phone
+      ? `у картці немає телефону, у замовленні ${order.customer_phone}`
+      : 'ні в картці, ні в замовленні немає телефону')
+  } else if (order.customer_phone && !phones.includes(phoneKey(order.customer_phone))) {
     out.push('телефон у картці не збігається із замовленням')
   }
 
@@ -106,6 +136,9 @@ function ourBlock(order: OrderRow, issues: string[]): string {
     order.share_token ? `Бланк: ${base}/zamovlennya/${order.share_token}` : 'Бланк ще не створено',
   ]
   if (order.warehouse) lines.push(`Склад: ${order.warehouse}`)
+  if (isMarketplace(order)) {
+    lines.push(`Маркетплейс: ${order.platform === 'maudau' ? 'MauDau' : 'Rozetka'} — везе пошта, ящика немає`)
+  }
   if (issues.length) lines.push('', '⚠️ Перевірити:', ...issues.map(i => `• ${i}`))
   return lines.join('\n')
 }
@@ -134,14 +167,25 @@ export async function enrichNewCards(
     const day = (shift: number) =>
       new Date(Date.now() + shift * 86_400_000).toISOString().slice(0, 10)
 
-    const { data } = await service
-      .from('orders')
-      .select('id, manual_number, delivery_date, delivery_slot, address, customer_name, customer_phone, warehouse, share_token, status')
-      .in('platform', ['site', 'manual'])
-      .gte('delivery_date', day(-10))
-      .lte('delivery_date', day(4))
+    const COLUMNS = 'id, platform, manual_number, delivery_date, delivery_slot, address, customer_name, customer_phone, warehouse, share_token, status'
 
-    const orders = (data ?? []) as unknown as OrderRow[]
+    /*
+     * Маркетплейсні замовлення теж потрапляють у цей список.
+     *
+     * У них немає ні дня доставки, ні періоду, ні номера ящика — їх везе
+     * пошта, а не наш кур'єр. Тому й шукаємо їх за датою замовлення, а не
+     * за датою доставки, якої в них просто немає.
+     */
+    const [{ data: ours }, { data: markets }] = await Promise.all([
+      service.from('orders').select(COLUMNS)
+        .in('platform', ['site', 'manual'])
+        .gte('delivery_date', day(-10)).lte('delivery_date', day(4)),
+      service.from('orders').select(COLUMNS)
+        .in('platform', ['maudau', 'rozetka'])
+        .gte('order_date', day(-14)).lte('order_date', day(1)),
+    ])
+
+    const orders = [...(ours ?? []), ...(markets ?? [])] as unknown as OrderRow[]
 
     // Ключ — телефон і день: одна людина за тиждень замовляє двічі, і без
     // дня картка причепилась би до чужої доставки
@@ -151,25 +195,48 @@ export async function enrichNewCards(
       if (key && o.delivery_date) byPhoneDay.set(`${key}|${o.delivery_date}`, o)
     }
 
+    /*
+     * Запасний ключ — адреса.
+     *
+     * Частина карток приходить без телефону й без клієнта: інтеграція
+     * створила їх, коли в угоді ще нічого не було. Телефон у них уже не
+     * з'явиться, а зчепити їх якось треба — лишається адреса.
+     *
+     * Беремо її лише тоді, коли вона веде рівно до одного замовлення.
+     * Два замовлення на одну адресу — це або та сама людина двічі, або
+     * сусіди, і вгадувати між ними означало б дати комусь чужий ящик.
+     */
+    const byAddress = new Map<string, OrderRow[]>()
+    for (const o of orders) {
+      const key = addressKey(o.address)
+      if (key) byAddress.set(key, [...(byAddress.get(key) ?? []), o])
+    }
+
+    const soleByAddress = (cardText: string, date: string | null): OrderRow | null => {
+      for (const [key, found] of byAddress) {
+        if (!key || !cardText.includes(key)) continue
+        const narrowed = date ? found.filter(o => o.delivery_date === date) : found
+        if (narrowed.length === 1) return narrowed[0]
+      }
+      return null
+    }
+
     for (const card of cards) {
       const text = `${card.name}\n${card.desc}`
       const date = dateFromDesc(card.desc)
       const phones = phonesIn(text)
 
-      if (!phones.length) {
-        result.unmatched.push({ card: card.name.slice(0, 60), why: 'у картці немає телефону' })
-        continue
-      }
-      if (!date) {
-        result.unmatched.push({ card: card.name.slice(0, 60), why: 'у картці немає дати доставки' })
-        continue
-      }
+      const order = (date
+        ? phones.map(p => byPhoneDay.get(`${p}|${date}`)).find(Boolean)
+        : undefined)
+        ?? soleByAddress(addressKey(card.name + ' ' + card.desc), date)
 
-      const order = phones.map(p => byPhoneDay.get(`${p}|${date}`)).find(Boolean)
       if (!order) {
         result.unmatched.push({
           card: card.name.slice(0, 60),
-          why: `замовлення на ${date} за цим телефоном не знайдено`,
+          why: phones.length
+            ? `замовлення на ${date ?? 'цю дату'} за цим телефоном не знайдено`
+            : 'ні телефону, ні єдиного замовлення за адресою',
         })
         continue
       }

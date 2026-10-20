@@ -14,6 +14,7 @@ import { WAREHOUSE_ID, SLOT_ID, CATEGORY_ID } from '@/lib/bitrix-deal'
 import { onStatusChanged } from '@/lib/bitrix-chat'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { moveNumber } from '@/lib/manual-register'
+import { splitPersona } from '@/lib/phone'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -183,6 +184,14 @@ export async function syncSiteOrders(
         const status = stageName(deal.STAGE_ID) ?? deal.STAGE_ID
         const rows = rowsByDeal.get(deal.ID) ?? []
 
+        /*
+         * Контакта в угоді може не бути зовсім — тоді ім'я, телефон і
+         * пошта стоять одним рядком у полі «отримувач». Без розбору
+         * замовлення лишалось без телефону, а отже без клієнта, без
+         * історії покупок і без картки в Trello, яку нема за чим зчепити.
+         */
+        const persona = splitPersona(deal.UF_DEST_PERSONA)
+
         const fields = {
           external_id: `BX-${deal.ID}`,
           platform: 'site',
@@ -191,8 +200,8 @@ export async function syncSiteOrders(
           delivery_date: deal.UF_CRM_1606047095?.slice(0, 10) ?? null,
           delivery_slot: SLOT_BY_ID.get(deal.UF_CRM_1606047143435 ?? '') ?? null,
           warehouse: WAREHOUSE_BY_ID.get(deal.UF_BILL_ADRESS_LIST ?? '') ?? null,
-          customer_name: person?.name || deal.UF_DEST_PERSONA || deal.TITLE,
-          customer_phone: person?.phone ?? null,
+          customer_name: person?.name || persona.name || deal.TITLE,
+          customer_phone: person?.phone ?? persona.phone,
           address: deal.UF_CRM_1606294264905 ?? null,
           status,
           total: Number(deal.OPPORTUNITY ?? 0),
