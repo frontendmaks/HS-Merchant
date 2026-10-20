@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { syncSiteOrders } from '@/lib/bitrix-sync'
 import { bitrixConfigured } from '@/lib/bitrix'
+import { logCronRun } from '@/lib/cron-log'
 
 /**
  * Замовлення з сайту — що змінилось за останню добу.
@@ -33,8 +34,10 @@ export async function GET(request: NextRequest) {
   const minutes = Math.min(Math.max(
     Number(new URL(request.url).searchParams.get('minutes') ?? 30), 5), 2880)
 
+  const startedAt = Date.now()
   const since = new Date(Date.now() - minutes * 60_000).toISOString()
   const result = await syncSiteOrders(service, { since, maxPages: minutes > 120 ? 20 : 4 })
 
+  await logCronRun(service, 'bitrix-sync', startedAt, { ...result, minutes }, result.error)
   return NextResponse.json({ ...result, minutes }, { status: result.error ? 500 : 200 })
 }

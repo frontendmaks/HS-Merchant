@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation'
  * Розклад і так забирає зміни кожні чверть години, але оператор, який щойно
  * щось поправив у CRM, не має чекати чверть години, щоб у це повірити.
  */
-export default function SyncButton() {
+export default function SyncButton({ last }: { last?: string | null }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
@@ -35,6 +35,16 @@ export default function SyncButton() {
     }
   }
 
+  /** «Востаннє перевіряли» — щоб не гадати, чи розклад живий */
+  const ago = (() => {
+    if (!last) return null
+    const mins = Math.round((Date.now() - new Date(last).getTime()) / 60_000)
+    if (mins < 1) return 'щойно'
+    if (mins < 60) return `${mins} хв тому`
+    const hours = Math.round(mins / 60)
+    return hours < 24 ? `${hours} год тому` : 'давно'
+  })()
+
   return (
     <div className="text-right">
       <button
@@ -45,7 +55,9 @@ export default function SyncButton() {
       >
         {busy ? 'Оновлюємо…' : '↻ З Бітрікса'}
       </button>
-      {note && <div className="text-zinc-500 text-xs mt-1">{note}</div>}
+      <div className="text-zinc-600 text-xs mt-1">
+        {note || (ago ? `перевіряли ${ago}` : 'розклад ще не ходив')}
+      </div>
     </div>
   )
 }

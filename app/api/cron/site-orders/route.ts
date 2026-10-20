@@ -5,6 +5,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { autoProcessSiteOrders } from '@/lib/site-autopilot'
 import { getSetting } from '@/lib/settings'
 import { bitrixConfigured } from '@/lib/bitrix'
+import { logCronRun } from '@/lib/cron-log'
 
 /**
  * Огляд замовлень із сайту — окремо від синхронізації.
@@ -30,6 +31,9 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(Math.max(
     Number(new URL(request.url).searchParams.get('limit') ?? 30), 1), 60)
 
+  const startedAt = Date.now()
   const result = await autoProcessSiteOrders(service, { limit })
+
+  await logCronRun(service, 'site-autopilot', startedAt, result, result.error)
   return NextResponse.json(result, { status: result.error ? 500 : 200 })
 }

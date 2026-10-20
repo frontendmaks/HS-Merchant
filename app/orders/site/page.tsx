@@ -9,6 +9,7 @@ import StatusSelect from '../StatusSelect'
 import WideScroll from '../WideScroll'
 import SyncButton from './SyncButton'
 import SiteFilters from './SiteFilters'
+import { lastCronRun } from '@/lib/cron-log'
 import EditButton from './EditButton'
 
 /**
@@ -74,6 +75,7 @@ export default async function SiteOrdersPage({
   const date = dateParam || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' })
 
   const supabase = createServiceClient()
+  const lastSync = await lastCronRun(supabase, 'bitrix-sync')
   const { data: zones } = await supabase.from('delivery_zones').select('warehouse')
   const warehouses = [...new Set((zones ?? []).map(z => z.warehouse as string))].sort()
 
@@ -104,7 +106,7 @@ export default async function SiteOrdersPage({
           </p>
         </div>
         <div className="flex items-start gap-2">
-          <SyncButton />
+          <SyncButton last={lastSync?.ran_at ?? null} />
           <Link
             href="/orders/manual"
             className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium
