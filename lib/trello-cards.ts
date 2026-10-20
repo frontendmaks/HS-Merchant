@@ -65,6 +65,9 @@ function addressKey(raw: string | null | undefined): string {
 
 const NUMBER_AT_START = /^\s*№\s*\d+/u
 
+/** Коротша адреса як ключ ненадійна — надто легко трапляється підрядком */
+const MIN_ADDRESS_KEY = 14
+
 /** Те, що ми дописали минулого разу, прибираємо — блок перепишеться начисто */
 const stripOurs = (desc: string) => desc.split(MARK)[0].trimEnd()
 
@@ -209,16 +212,24 @@ export async function enrichNewCards(
     const byAddress = new Map<string, OrderRow[]>()
     for (const o of orders) {
       const key = addressKey(o.address)
-      if (key) byAddress.set(key, [...(byAddress.get(key) ?? []), o])
+      // Короткі ключі не беремо: «львів» трапляється підрядком у десятку
+      // чужих карток, і картка діставала б чужий номер
+      if (key.length >= MIN_ADDRESS_KEY) {
+        byAddress.set(key, [...(byAddress.get(key) ?? []), o])
+      }
     }
 
     const soleByAddress = (cardText: string, date: string | null): OrderRow | null => {
+      // Збираємо всі збіги, а не перший-ліпший: кілька різних адрес у
+      // тексті однієї картки означають, що ми не знаємо, котра з них її
+      const hits: OrderRow[] = []
       for (const [key, found] of byAddress) {
-        if (!key || !cardText.includes(key)) continue
-        const narrowed = date ? found.filter(o => o.delivery_date === date) : found
-        if (narrowed.length === 1) return narrowed[0]
+        if (!cardText.includes(key)) continue
+        hits.push(...(date ? found.filter(o => o.delivery_date === date) : found))
       }
-      return null
+
+      const distinct = new Map(hits.map(o => [o.id, o]))
+      return distinct.size === 1 ? [...distinct.values()][0] : null
     }
 
     for (const card of cards) {

@@ -218,7 +218,7 @@ export async function syncSiteOrders(
 
         const { data: existing } = await service
           .from('orders')
-          .select('id, platform, status, address, delivery_date, manual_number, number_source')
+          .select('id, platform, status, address, delivery_date, manual_number, number_source, customer_phone, auto_problem')
           .eq('bitrix_deal_id', Number(deal.ID)).maybeSingle()
 
         if (existing) {
@@ -231,8 +231,18 @@ export async function syncSiteOrders(
            */
           const ours = existing.platform === 'manual'
 
-          // Адресу поправили — отже, зону й склад варто перерахувати заново
-          const readdressed = !ours && existing.address !== fields.address
+          /*
+           * Привід оглянути замовлення ще раз.
+           *
+           * Адресу поправили — зону й склад треба перерахувати. Або
+           * з'явився телефон там, де його бракувало: огляд устиг
+           * записати «бракує телефону» й закрити замовлення, і без
+           * повторного огляду воно так і лишилось би без номера.
+           */
+          const gainedPhone = !existing.customer_phone && !!fields.customer_phone
+          const readdressed = !ours
+            && (existing.address !== fields.address
+              || (!!existing.auto_problem && gainedPhone))
 
           await service.from('orders')
             .update(ours
