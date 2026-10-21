@@ -27,6 +27,8 @@ export const DEFAULTS = {
   trello_board: 'dIKowaNK' as string,
   /** Список, у який чинна інтеграція кладе свіжі картки */
   trello_new_list: '64071869483b7c6f5991699c' as string,
+  /** Куди відкладати маркетплейсні замовлення — їх везе пошта, не кур'єр */
+  trello_marketplace_list: '6ad85d88e8cb921c90f8e3cc' as string,
   /** Чи дописувати в картки номер ящика й бланк */
   trello_enrich: true,
 } as const

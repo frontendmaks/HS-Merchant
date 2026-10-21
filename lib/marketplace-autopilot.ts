@@ -13,7 +13,10 @@ import { changeOrderStatus } from '@/lib/order-status-change'
 import { pushMarketplaceOrder } from '@/lib/marketplace-bitrix'
 import { currentActor } from '@/lib/order-events'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
-import { isNew } from '@/lib/order-statuses'
+import { isNew, PAYMENT_STAGE_STATUSES } from '@/lib/order-statuses'
+import { stageId, stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
+import { onStatusChanged } from '@/lib/bitrix-chat'
+import { bitrix } from '@/lib/bitrix'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -27,6 +30,8 @@ export interface MarketplaceResult {
   looked: number
   accepted: number
   pushed: number
+  /** Скільки оплачених узгоджених замовлень пішло на комплектацію */
+  picking: number
   problems: { order: string; error: string }[]
   error?: string
 }
@@ -35,7 +40,9 @@ export async function processMarketplaceOrders(
   service: Service,
   { limit = 20 }: { limit?: number } = {},
 ): Promise<MarketplaceResult> {
-  const result: MarketplaceResult = { looked: 0, accepted: 0, pushed: 0, problems: [] }
+  const result: MarketplaceResult = {
+    looked: 0, accepted: 0, pushed: 0, picking: 0, problems: [],
+  }
 
   try {
     // Система діє від свого імені: у журналі замовлення має бути видно, що
@@ -89,9 +96,58 @@ export async function processMarketplaceOrders(
         await broadcastOrderChange(order.id as string, 'sync')
       }
     }
+    await startPicking(service, result)
   } catch (e) {
     result.error = e instanceof Error ? e.message : String(e)
   }
 
   return result
+}
+
+/**
+ * Оплачене й узгоджене — на комплектацію.
+ *
+ * Маркетплейс свого «комплектується» не має: для нього замовлення узгоджене
+ * й на тому все. Збирає ж його наш склад, і дізнається він про це з
+ * Бітрікса. Поки стадію не переставили, оплачене замовлення просто лежало.
+ *
+ * Оплата тут вирішальна: маркетплейсні замовлення йдуть передоплатою повз
+ * майданчик, і зібрати неоплачене означає відправити посилку за свій
+ * рахунок.
+ */
+const PICKING = 'Комплектується'
+
+async function startPicking(service: Service, result: MarketplaceResult): Promise<void> {
+  const { data } = await service
+    .from('orders')
+    .select('id, external_id, platform, status, bitrix_deal_id')
+    .in('platform', ['maudau', 'rozetka'])
+    .not('bitrix_deal_id', 'is', null)
+    .eq('is_paid', true)
+    .in('status', PAYMENT_STAGE_STATUSES)
+    .gte('order_date', new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10))
+    .limit(30)
+
+  const orders = data ?? []
+  if (!orders.length) return
+
+  const target = stageId(PICKING)
+  if (!target) return
+
+  for (const order of orders) {
+    const dealId = Number(order.bitrix_deal_id)
+
+    // Питаємо стадію, щоб не переставляти її щопроходу: Бітрікс пише в
+    // стрічку угоди кожну зміну, і склад читав би ту саму новину двічі
+    const deal = await bitrix<{ STAGE_ID?: string }>('crm.deal.get', { id: dealId })
+    if (deal?.STAGE_ID === target) continue
+    if (deal?.STAGE_ID && CLOSED_STAGES.includes(stageName(deal.STAGE_ID) ?? '')) continue
+
+    await bitrix('crm.deal.update', { id: dealId, fields: { STAGE_ID: target } })
+
+    // Бланк у чат складу — те саме, що відбувається для замовлень із сайту
+    await onStatusChanged(service, order.id as string, PICKING)
+    await broadcastOrderChange(order.id as string, 'sync')
+    result.picking++
+  }
 }

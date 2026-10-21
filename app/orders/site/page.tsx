@@ -101,11 +101,16 @@ const FUNNEL: { key: string; label: string; match: (o: Row) => boolean }[] = [
 export default async function SiteOrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; stage?: string }>
+  searchParams: Promise<{
+    date?: string; stage?: string
+    wh?: string; slot?: string; src?: string; q?: string
+  }>
 }) {
   const role = await getCurrentRole()
   const readOnly = role === 'viewer'
-  const { date: dateParam, stage = 'new' } = await searchParams
+  const {
+    date: dateParam, stage = 'new', wh = '', slot = '', src = '', q = '',
+  } = await searchParams
 
   // За замовчуванням — сьогодні: саме сьогоднішні замовлення возять
   const date = dateParam || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' })
@@ -135,13 +140,35 @@ export default async function SiteOrdersPage({
     .limit(500)
 
   const forDay = (data ?? []) as Row[]
+
+  /*
+   * Зріз дня: склад, період, джерело, пошук.
+   *
+   * Лічильники на вкладках рахуються вже по зрізу, а не по всьому дню.
+   * Інакше вийшло б, що обрано «Панська Гора», а на вкладці стоїть
+   * тридцять — і незрозуміло, тридцять чого.
+   */
+  const needle = q.trim().toLowerCase()
+  const scoped = forDay.filter(o =>
+    (!wh || o.warehouse === wh)
+    && (!slot || o.delivery_slot === slot)
+    && (!src || o.platform === src)
+    && (!needle || [o.customer_name, o.customer_phone, o.address, o.external_id,
+      o.manual_number != null ? `№${o.manual_number}` : null]
+      .some(v => (v ?? '').toLowerCase().includes(needle))))
+
   const tabs = FUNNEL.map(f => ({
-    key: f.key, label: f.label, count: forDay.filter(f.match).length,
+    key: f.key, label: f.label, count: scoped.filter(f.match).length,
   }))
 
   const matcher = FUNNEL.find(f => f.key === stage) ?? FUNNEL[0]
-  const orders = forDay.filter(matcher.match)
-  const active = forDay.filter(o => isInProgress(o.status))
+  const orders = scoped.filter(matcher.match)
+  const active = scoped.filter(o => isInProgress(o.status))
+
+  // Пропонуємо лише те, що цього дня справді є: порожній варіант у списку
+  // обіцяє замовлення, яких немає
+  const slotsToday = [...new Set(forDay.map(o => o.delivery_slot).filter(Boolean))].sort() as string[]
+  const warehousesToday = [...new Set(forDay.map(o => o.warehouse).filter(Boolean))].sort() as string[]
 
   return (
     <div className="bg-zinc-950 text-white space-y-4">
@@ -168,7 +195,15 @@ export default async function SiteOrdersPage({
         </div>
       </div>
 
-      <SiteFilters date={date} stage={matcher.key} tabs={tabs} />
+      <SiteFilters
+        date={date}
+        stage={matcher.key}
+        tabs={tabs}
+        warehouses={warehousesToday}
+        slots={slotsToday}
+        picked={{ wh, slot, src, q }}
+        total={forDay.length}
+      />
 
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-800">

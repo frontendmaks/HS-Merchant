@@ -1,6 +1,6 @@
 'use client'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useTransition } from 'react'
+import { useRef, useTransition } from 'react'
 import { useOrderUpdatesThrottled } from '@/lib/use-order-updates'
 
 export interface FunnelTab { key: string; label: string; count: number }
@@ -13,14 +13,23 @@ export interface FunnelTab { key: string; label: string; count: number }
  * сьогоднішні замовлення возять; інші дні відкриваються, коли по них
  * питають.
  */
-export default function SiteFilters({ date, stage, tabs }: {
+export default function SiteFilters({
+  date, stage, tabs, warehouses, slots, picked, total,
+}: {
   date: string
   stage: string
   tabs: FunnelTab[]
+  /** Склади й періоди, які цього дня справді трапляються */
+  warehouses: string[]
+  slots: string[]
+  picked: { wh: string; slot: string; src: string; q: string }
+  /** Скільки всього замовлень цього дня — щоб було видно, що зріз вужчий */
+  total: number
 }) {
   const router = useRouter()
   const params = useSearchParams()
   const [, start] = useTransition()
+  const typing = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // Зміна в будь-якому замовленні — привід перечитати список: оператор
   // дивиться в екран і не має натискати оновлення, щоб побачити нове.
@@ -42,6 +51,9 @@ export default function SiteFilters({ date, stage, tabs }: {
   }
 
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' })
+
+  const narrowed = !!(picked.wh || picked.slot || picked.src || picked.q)
+  const field = 'bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-red-500'
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -88,6 +100,48 @@ export default function SiteFilters({ date, stage, tabs }: {
             </button>
           )
         })}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 w-full">
+        <input
+          type="search"
+          defaultValue={picked.q}
+          placeholder="Клієнт, телефон, адреса, номер"
+          onChange={e => {
+            const value = e.target.value
+            // Чекаємо, поки людина допише: запит на кожну літеру змушував
+            // би сторінку перечитуватись швидше, ніж вона встигає
+            clearTimeout(typing.current)
+            typing.current = setTimeout(() => go({ q: value }), 350)
+          }}
+          className={`${field} min-w-[220px] flex-1 max-w-xs`}
+        />
+
+        <select value={picked.wh} onChange={e => go({ wh: e.target.value })} className={field}>
+          <option value="">Усі склади</option>
+          {warehouses.map(w => <option key={w} value={w}>{w}</option>)}
+        </select>
+
+        <select value={picked.slot} onChange={e => go({ slot: e.target.value })} className={field}>
+          <option value="">Будь-який період</option>
+          {slots.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+
+        <select value={picked.src} onChange={e => go({ src: e.target.value })} className={field}>
+          <option value="">Сайт і телефон</option>
+          <option value="site">Лише сайт</option>
+          <option value="manual">Лише телефон</option>
+        </select>
+
+        {narrowed && (
+          <button
+            onClick={() => go({ wh: '', slot: '', src: '', q: '' })}
+            className="px-2.5 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-400
+                       hover:text-white transition-colors"
+          >
+            Скинути · з {total}
+          </button>
+        )}
       </div>
     </div>
   )

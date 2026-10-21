@@ -23,6 +23,7 @@ export interface CardResult {
   looked: number
   numbered: number
   linked: number
+  moved: number
   unmatched: { card: string; why: string }[]
   problems: { card: string; number: number | null; issues: string[] }[]
   error?: string
@@ -150,13 +151,16 @@ export async function enrichNewCards(
   service: Service,
   { limit = 40 }: { limit?: number } = {},
 ): Promise<CardResult> {
-  const result: CardResult = { looked: 0, numbered: 0, linked: 0, unmatched: [], problems: [] }
+  const result: CardResult = {
+    looked: 0, numbered: 0, linked: 0, moved: 0, unmatched: [], problems: [],
+  }
 
   if (!trelloConfigured()) return { ...result, error: 'TRELLO_KEY/TRELLO_TOKEN не налаштовано' }
   if (!await getSetting(service, 'trello_enrich')) return { ...result, error: 'Вимкнено' }
 
   try {
     const listId = await getSetting(service, 'trello_new_list')
+    const marketList = await getSetting(service, 'trello_marketplace_list')
     const cards = (await listCards(listId)).slice(0, limit)
     result.looked = cards.length
     if (!cards.length) return result
@@ -257,7 +261,19 @@ export async function enrichNewCards(
         result.problems.push({ card: card.name.slice(0, 60), number: order.manual_number, issues })
       }
 
-      const fields: { name?: string; desc?: string } = {}
+      const fields: { name?: string; desc?: string; idList?: string } = {}
+
+      /*
+       * Маркетплейсне замовлення відкладаємо в окремий список.
+       *
+       * Серед карток кур'єрської доставки воно збиває з пантелику: у ньому
+       * немає ні дня, ні періоду, ні ящика, і виглядає воно як недороблене.
+       * Насправді його просто везе пошта — і краще, щоб це було видно з
+       * того, де картка лежить, а не з дрібного підпису в описі.
+       */
+      if (isMarketplace(order) && marketList && card.idList !== marketList) {
+        fields.idList = marketList
+      }
 
       // Номер ящика попереду назви — склад шукає картку саме за ним
       if (order.manual_number != null && !NUMBER_AT_START.test(card.name)) {
@@ -272,6 +288,7 @@ export async function enrichNewCards(
       await updateCard(card.id, fields)
       if (fields.name) result.numbered++
       if (fields.desc) result.linked++
+      if (fields.idList) result.moved++
     }
 
     return result

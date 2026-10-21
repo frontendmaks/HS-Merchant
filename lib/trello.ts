@@ -45,8 +45,10 @@ export interface TrelloCard {
 export const listCards = (listId: string) =>
   call<TrelloCard[]>('GET', `/lists/${listId}/cards`, { fields: 'name,desc,idList,shortUrl' })
 
-export const updateCard = (cardId: string, fields: { name?: string; desc?: string }) =>
-  call<TrelloCard>('PUT', `/cards/${cardId}`, fields as Record<string, string>)
+export const updateCard = (
+  cardId: string,
+  fields: { name?: string; desc?: string; idList?: string },
+) => call<TrelloCard>('PUT', `/cards/${cardId}`, fields as Record<string, string>)
 
 export interface TrelloList {
   id: string
