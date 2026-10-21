@@ -338,6 +338,16 @@ const stripNoise = (s: string) => s
   .replace(/онлайн|комплектується|комплектация/g, ' ')
   .replace(/[^\p{L}\p{N}]+/gu, '')
 
+/**
+ * Склади, які збирають не зі свого списку.
+ *
+ * «МЕ ТТ Іскра» власного списку на дошці не має й не потребує: ці
+ * замовлення збирає АС-2. Без цього запису картка зависала б у «Нових».
+ */
+const ALIAS: Record<string, string> = {
+  ттіскра: 'ас2',
+}
+
 /** «11:00-14:00» → «1114»: так само виглядає й назва роздільника */
 const slotKey = (slot: string) => slot.replace(/[^\d]/g, '').replace(/00/g, '')
 
@@ -407,7 +417,8 @@ export async function spreadToPicking(
   const lists = await pickingLists(boardId)
 
   for (const { card, order } of ready) {
-    const dest = lists.get(stripNoise(order.warehouse as string))
+    const key = stripNoise(order.warehouse as string)
+    const dest = lists.get(ALIAS[key] ?? key)
     if (!dest) {
       result.problems.push({
         card: card.name.slice(0, 50),

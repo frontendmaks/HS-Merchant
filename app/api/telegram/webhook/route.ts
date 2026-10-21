@@ -6,7 +6,7 @@ import {
 import { integrationConfig } from '@/lib/integrations'
 import {
   MENU, CANCEL_REASONS, screenStart, screenOrders, screenNewOrder,
-  screenPromos, screenPromo, screenHelp, screenCancelReasons, siteLink,
+  screenHelp, screenCancelReasons, siteLink,
 } from '@/lib/telegram-bot'
 import { sitePromos } from '@/lib/site-promos'
 import { getSetting } from '@/lib/settings'
@@ -144,8 +144,7 @@ async function route(
     return show(service, token, chat, await screenOrders(service, phone, { open: false }))
   }
   if (t.includes('акці') || t.startsWith('/promos')) {
-    await showPromoCards(service, token, chat)
-    return show(service, token, chat, await screenPromos(service))
+    return showPromoCards(service, token, chat)
   }
   if (t.includes('допомог') || t.startsWith('/help')) {
     return show(service, token, chat, await screenHelp(service))
@@ -188,19 +187,68 @@ async function showPromoCards(service: Service, token: string, chat: string): Pr
   const utm = await getSetting(service, 'site_utm')
   const promos = await sitePromos(service, site)
 
+  if (!promos.length) {
+    await show(service, token, chat, {
+      text: 'Зараз акцій немає. Щойно з\u2019являться — ми напишемо.',
+      keyboard: [[{ text: '\u{1F6D2} Замовити на сайті', url: await siteLink(service) }]],
+    })
+    return
+  }
+
   for (const promo of promos.slice(0, 4)) {
     const url = `${promo.url}${utm ? `?${utm}` : ''}`
-    const caption = [promo.title, promo.description?.slice(0, 700)]
-      .filter(Boolean).join('\n\n')
+    const caption = [
+      promo.title,
+      promo.dates ? `Діє ${promo.dates}` : null,
+      promo.items.length
+        ? `${promo.items.length} ${promo.items.length === 1 ? 'товар' : 'товарів'} за акційною ціною`
+        : null,
+    ].filter(Boolean).join('\n')
 
-    const button = [[{ text: 'Детальніше', url }]]
+    const buttons = [
+      ...(promo.items.length
+        ? [[{ text: '\u{1F4CB} Товари акції', callback_data: `sitepromo:${promo.slug}` }]]
+        : []),
+      [{ text: 'Детальніше на сайті', url }],
+    ]
 
-    if (promo.image) {
-      await sendPhoto(token, chat, promo.image, caption, button)
-    } else {
-      await sendScreen(token, chat, { text: caption, keyboard: button }, MENU)
-    }
+    if (promo.image) await sendPhoto(token, chat, promo.image, caption, buttons)
+    else await sendScreen(token, chat, { text: caption, keyboard: buttons }, MENU)
   }
+}
+
+/** Товари однієї акції — назви, ціни й посилання */
+async function showPromoItems(
+  service: Service,
+  token: string,
+  chat: string,
+  slug: string,
+): Promise<void> {
+  const site = await getSetting(service, 'site_url')
+  const utm = await getSetting(service, 'site_utm')
+  const promo = (await sitePromos(service, site)).find(p => p.slug === slug)
+
+  if (!promo?.items.length) {
+    await show(service, token, chat, { text: 'Товарів цієї акції не знайшов.', menu: true })
+    return
+  }
+
+  const rows = promo.items.slice(0, 30).map(i => {
+    const price = i.price != null
+      ? ` — ${Math.round(i.price).toLocaleString('uk-UA')} ${i.unit ?? '₴'}`
+      : ''
+    return `• ${i.name}${price}`
+  })
+
+  await sendScreen(token, chat, {
+    text: `\u{1F3F7} ${promo.title}\n${promo.dates ? `Діє ${promo.dates}\n` : ''}\n`
+      + rows.join('\n')
+      + (promo.items.length > 30 ? `\n…та ще ${promo.items.length - 30}` : ''),
+    keyboard: [[{
+      text: 'Усі товари акції на сайті',
+      url: `${promo.url}${utm ? `?${utm}` : ''}`,
+    }]],
+  }, MENU)
 }
 
 async function show(
@@ -227,12 +275,10 @@ async function onButton(
     return show(service, token, chat, await screenStart(service, null, !!phone))
   }
 
-  if (data === 'promos') {
-    return show(service, token, chat, await screenPromos(service))
-  }
+  if (data === 'promos') return showPromoCards(service, token, chat)
 
-  if (data.startsWith('promo:')) {
-    return show(service, token, chat, await screenPromo(service, Number(data.slice(6))))
+  if (data.startsWith('sitepromo:')) {
+    return showPromoItems(service, token, chat, data.slice('sitepromo:'.length))
   }
 
   if (data.startsWith('cancel:')) {

@@ -20,6 +20,8 @@ type Service = ReturnType<typeof createServiceClient>
 export interface Button { text: string; callback_data?: string; url?: string }
 export interface Screen {
   text: string
+  /** Текст містить розмітку — зокрема посилання на телефон */
+  html?: boolean
   keyboard?: Button[][]
   /** Постійні кнопки внизу — головне меню */
   menu?: boolean
@@ -46,6 +48,16 @@ export const CANCEL_REASONS: { code: string; label: string; reason: string }[] =
   { code: 'r4', label: 'Замовив в іншому місці', reason: 'гість: замовив в іншому магазині' },
   { code: 'r5', label: 'Інша причина', reason: 'гість: інша причина' },
 ]
+
+/**
+ * Телефон, на який можна натиснути.
+ *
+ * Telegram сам розпізнає номери не завжди — «0 800 300 262» з пробілами
+ * лишається текстом. Посилання `tel:` працює напевно, і людині не треба
+ * переписувати цифри вручну.
+ */
+export const telLink = (phone: string) =>
+  `<a href="tel:${phone.replace(/[^\d+]/g, '')}">${phone}</a>`
 
 const money = (n: number | null) =>
   `${Math.round(Number(n) || 0).toLocaleString('uk-UA')} ₴`
@@ -204,114 +216,19 @@ export async function screenNewOrder(service: Service): Promise<Screen> {
   ])
 
   return {
+    /*
+     * Текст короткий, бо кнопка тут головна.
+     *
+     * Людина натиснула «замовити» — вона хоче на сайт, а не читати про
+     * нас. Усе інше, що колись стояло в цьому екрані, вона й так
+     * побачить, коли туди потрапить.
+     */
     text: 'Доставка від «Галицької Свіжини»\n\n'
-      + '\u{1F6D2} Замовити можна такими способами:\n'
-      + `• на сайті — ${link}\n`
-      + `• через дзвінок — ${phone}\n\n`
       + 'Швидка доставка по Львову та околицях. Вартість доставки 1 грн '
-      + '(при оформленні замовлення на суму 1000 грн).\n\n'
-      + 'Широка лінія якісного та свіжого асортименту. Стабільні та '
-      + 'конкурентні цінові пропозиції для усіх наших клієнтів.',
-    keyboard: [[{ text: 'Відкрити сайт', url: link }]],
-  }
-}
-
-/**
- * Акції — справжні, з сайту.
- *
- * Беремо товари, у яких стара ціна більша за теперішню. Наші внутрішні
- * правила націнки для фідів сюди не потрапляють і не мають: вони про те,
- * як ми виглядаємо на маркетплейсі, а не про те, що економить покупець.
- *
- * Групуємо за категорією: «ковбаса дешевша на 24%» — це новина, а список
- * із двадцяти дев'яти позицій поспіль — ні, його ніхто не дочитає.
- */
-export interface Promo {
-  category: string
-  items: { name: string; slug: string | null; price: number; old: number }[]
-  maxOff: number
-}
-
-export async function loadPromos(service: Service): Promise<Promo[]> {
-  const { data } = await service
-    .from('products')
-    .select('name, slug, price, price_old, category_name')
-    .not('price_old', 'is', null)
-    .gt('price_old', 0)
-    .limit(500)
-
-  const byCategory = new Map<string, Promo>()
-
-  for (const p of data ?? []) {
-    const price = Number(p.price)
-    const old = Number(p.price_old)
-    if (!(old > price) || !(price > 0)) continue
-
-    const category = (p.category_name as string) || 'Інше'
-    const promo = byCategory.get(category) ?? { category, items: [], maxOff: 0 }
-    promo.items.push({
-      name: p.name as string,
-      slug: (p.slug as string | null) ?? null,
-      price,
-      old,
-    })
-    promo.maxOff = Math.max(promo.maxOff, Math.round((1 - price / old) * 100))
-    byCategory.set(category, promo)
-  }
-
-  // Найбільша знижка нагорі: саме її й шукають, відкриваючи акції
-  return [...byCategory.values()].sort((a, b) => b.maxOff - a.maxOff)
-}
-
-export async function screenPromos(service: Service): Promise<Screen> {
-  const link = await siteLink(service)
-  const promos = await loadPromos(service)
-  const total = promos.reduce((n, p) => n + p.items.length, 0)
-
-  if (!total) {
-    return {
-      text: 'Зараз знижених цін немає. Щойно з\u2019являться — ми напишемо.',
-      keyboard: [[{ text: '\u{1F6D2} Замовити на сайті', url: link }]],
-    }
-  }
-
-  return {
-    text: `\u{1F3F7} Знижені ціни — ${total} ${total === 1 ? 'позиція' : 'позицій'} `
-      + `у ${promos.length} категоріях.\n\nОберіть, що подивитись:`,
-    keyboard: [
-      ...promos.slice(0, 12).map((p, i) => [{
-        text: `${p.category} · ${p.items.length} · до −${p.maxOff}%`,
-        callback_data: `promo:${i}`,
-      }]),
-      [{ text: '\u{1F6D2} Замовити на сайті', url: link }],
-    ],
-  }
-}
-
-/** Одна акція: позиції, ціни й посилання на кожну */
-export async function screenPromo(service: Service, index: number): Promise<Screen> {
-  const promos = await loadPromos(service)
-  const promo = promos[index]
-  if (!promo) return screenPromos(service)
-
-  const site = await getSetting(service, 'site_url')
-  const utm = await getSetting(service, 'site_utm')
-  const url = (slug: string) => `${site}/${slug}/${utm ? `?${utm}` : ''}`
-
-  const rows = promo.items.map(i => {
-    const off = Math.round((1 - i.price / i.old) * 100)
-    return `• ${i.name}\n   ${money(i.price)} замість ${money(i.old)}`
-      + (off > 0 ? `  −${off}%` : '')
-  })
-
-  return {
-    text: `\u{1F3F7} ${promo.category}\n\n${rows.join('\n')}`,
-    keyboard: [
-      ...promo.items.slice(0, 8)
-        .filter(i => i.slug)
-        .map(i => [{ text: i.name.slice(0, 60), url: url(i.slug as string) }]),
-      [{ text: '\u2190 Усі акції', callback_data: 'promos' }],
-    ],
+      + 'при замовленні від 1000 грн.\n\n'
+      + `Або телефоном: ${telLink(phone)}`,
+    html: true,
+    keyboard: [[{ text: '\u{1F6D2} Замовити на сайті', url: link }]],
   }
 }
 
@@ -325,7 +242,8 @@ export async function screenHelp(service: Service): Promise<Screen> {
       + '/history — усі ваші замовлення\n'
       + '/new — як зробити нове замовлення\n'
       + '/promos — акції\n\n'
-      + `Якщо потрібна допомога — телефонуйте: ${phone}`,
+      + `Якщо потрібна допомога — телефонуйте: ${telLink(phone)}`,
+    html: true,
     menu: true,
   }
 }

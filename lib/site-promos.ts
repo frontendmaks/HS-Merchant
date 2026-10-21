@@ -1,86 +1,133 @@
 /**
  * Акції з сайту.
  *
- * На сайті акція — окрема сторінка з банером і описом: «Тільки онлайн»,
- * «Акція тижня». Ні переліку товарів, ні цін на ній немає, тож вигадувати
- * зв'язок «ця акція — ці товари» ми не будемо: покажемо саму акцію так,
- * як вона виглядає на сайті, а знижені ціни візьмемо з нашого каталогу,
- * де вони справді є.
+ * На сайті для них є окремий розділ `/promotion/`: кожна акція — сторінка
+ * з банером, строком дії та переліком товарів, у яких є ціна. Саме це ми
+ * й показуємо, а не вигадуємо акції з наших внутрішніх правил націнки.
  *
- * Список акцій читаємо з головної сторінки — там вони й живуть. Окремого
- * API для них сайт не дає, тож це розбір сторінки: крихко, але чесно, і
- * нова акція з'явиться в боті сама, щойно її опублікують.
+ * Окремого API сайт не дає, тож це розбір сторінок. Крихко, але чесно: нова
+ * акція з'явиться в боті сама, щойно її опублікують, а якщо верстка
+ * зміниться — ми отримаємо порожній список, а не вигадані дані.
  */
 import { createServiceClient } from '@/lib/supabase/service'
 
 type Service = ReturnType<typeof createServiceClient>
 
+export interface PromoItem {
+  name: string
+  url: string
+  price: number | null
+  unit: string | null
+}
+
 export interface SitePromo {
   slug: string
   url: string
   title: string
-  description: string | null
+  dates: string | null
   image: string | null
+  items: PromoItem[]
 }
 
 const CACHE_KEY = 'site_promos'
-/** Акції міняють раз на тиждень, тож пів дня витримки нікого не образить */
+/** Акції міняють раз на тиждень, тож пів доби витримки нікого не образить */
 const TTL_MS = 12 * 3600_000
-
-const meta = (html: string, property: string): string | null => {
-  const m = html.match(
-    new RegExp(`<meta[^>]+property=["']og:${property}["'][^>]+content=["']([^"']*)`, 'i'),
-  )
-  return m ? decode(m[1]) : null
-}
 
 const decode = (s: string) => s
   .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'")
+  .replace(/&laquo;/g, '«').replace(/&raquo;/g, '»')
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
+  .replace(/<[^>]+>/g, ' ')
   .replace(/\s+/g, ' ').trim()
 
+const get = async (url: string) => {
+  const res = await fetch(url, { signal: AbortSignal.timeout(20_000) })
+  return res.ok ? await res.text() : null
+}
+
+/**
+ * Банер акції — з переліку, а не зі сторінки.
+ *
+ * На самій сторінці банер лежить у стилях теми, а в переліку він стоїть
+ * звичайною картинкою. Webp оминаємо: Telegram показує його не завжди,
+ * а поруч майже завжди є той самий кадр у jpg.
+ */
+function bannerFor(listing: string, slug: string): string | null {
+  const block = listing.match(
+    new RegExp(`<a[^>]+href="[^"]*/promotion/${slug}/"[^>]*>([\\s\\S]{0,3000}?)</a>`),
+  )
+  const scope = block?.[1] ?? ''
+  const images = [...scope.matchAll(/(?:src|srcset)="([^" ]+uploads[^" ]+\.(?:jpe?g|png|webp))/g)]
+    .map(m => m[1])
+    .filter(u => !/logo|zrobleno/i.test(u))
+
+  return images.find(u => !u.endsWith('.webp')) ?? images[0] ?? null
+}
+
+/** Товари акції: назва, посилання й ціна — усе зі сторінки самої акції */
+function itemsFrom(page: string): PromoItem[] {
+  const items: PromoItem[] = []
+
+  for (const block of page.split('class="product-entry').slice(1)) {
+    const link = block.match(/href="(https:\/\/[^"]+\/[a-z0-9-]{4,}\/)"/)?.[1]
+    const name = block.match(/alt="([^"]+)"/)?.[1]
+    const price = block.match(/itemprop="price"[^>]*content="([\d.]+)"/)?.[1]
+    const unit = block.match(/(грн\/кг|грн\/шт|грн)/)?.[1]
+
+    if (!link || !name) continue
+    items.push({
+      name: decode(name),
+      url: link,
+      price: price ? Number(price) : null,
+      unit: unit ?? null,
+    })
+  }
+
+  return items
+}
+
 async function fetchPromos(site: string): Promise<SitePromo[]> {
-  const home = await fetch(site, { signal: AbortSignal.timeout(20_000) })
-  if (!home.ok) return []
+  const listing = await get(`${site}/promotion/`)
+  if (!listing) return []
 
-  const html = await home.text()
-  const slugs = [...new Set(
-    [...html.matchAll(/\/promotion\/([a-z0-9-]+)\//g)].map(m => m[1]),
-  )]
-
+  const slugs = [...new Set([...listing.matchAll(/\/promotion\/([a-z0-9-]+)\//g)].map(m => m[1]))]
   const promos: SitePromo[] = []
 
   for (const slug of slugs.slice(0, 8)) {
     const url = `${site}/promotion/${slug}/`
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(20_000) })
-      if (!res.ok) continue
-      const page = await res.text()
+    const page = await get(url)
+    if (!page) continue
 
-      const title = (meta(page, 'title') ?? slug)
-        // «Тільки онлайн - Галицька Cвіжина» — другу половину клієнт і так знає
-        .replace(/\s*[-–|]\s*Галицька.*$/i, '')
+    // Назва й строк стоять у шапці сторінки, одразу під хлібними крихтами
+    const head = page.match(/<div class="banner style-2">([\s\S]{0,800}?)<\/div>\s*<\/div>/)?.[1] ?? ''
+    const title = decode(head.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)?.[1] ?? slug)
+    const dates = decode(head.match(/<h5[^>]*>([\s\S]*?)<\/h5>/)?.[1] ?? '') || null
 
-      promos.push({
-        slug,
-        url,
-        title,
-        description: meta(page, 'description'),
-        image: meta(page, 'image'),
-      })
-    } catch { /* одна недоступна сторінка не має ламати решту */ }
+    promos.push({
+      slug,
+      url,
+      title: title || slug,
+      dates,
+      image: bannerFor(listing, slug),
+      items: itemsFrom(page),
+    })
   }
 
   return promos
 }
 
-/** Акції з витримкою: сторінку сайту смикаємо не частіше, ніж двічі на добу */
-export async function sitePromos(service: Service, site: string): Promise<SitePromo[]> {
+/** Акції з витримкою: сторінки сайту смикаємо не частіше, ніж двічі на добу */
+export async function sitePromos(
+  service: Service,
+  site: string,
+  { force = false }: { force?: boolean } = {},
+): Promise<SitePromo[]> {
   const { data } = await service
     .from('app_settings').select('value').eq('key', CACHE_KEY).maybeSingle()
 
   const cached = data?.value as { at?: string; promos?: SitePromo[] } | null
-  const fresh = cached?.at && Date.now() - new Date(cached.at).getTime() < TTL_MS
+  const fresh = !force && cached?.at
+    && Date.now() - new Date(cached.at).getTime() < TTL_MS
 
   if (fresh && cached?.promos?.length) return cached.promos
 

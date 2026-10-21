@@ -57,12 +57,18 @@ export async function dropWebhook(token: string) {
 export async function sendScreen(
   token: string,
   chatId: string,
-  screen: { text: string; keyboard?: { text: string; callback_data?: string; url?: string }[][]; menu?: boolean },
+  screen: {
+    text: string
+    keyboard?: { text: string; callback_data?: string; url?: string }[][]
+    menu?: boolean
+    html?: boolean
+  },
   menuRows: string[][],
 ) {
   return await call(token, 'sendMessage', {
     chat_id: chatId,
     text: screen.text,
+    ...(screen.html ? { parse_mode: 'HTML' } : {}),
     link_preview_options: { is_disabled: true },
     reply_markup: screen.keyboard
       ? { inline_keyboard: screen.keyboard }
