@@ -10,6 +10,7 @@
  * ніж мати потім розбіжність у журналі, яку видно й можна виправити.
  */
 import { createServiceClient } from '@/lib/supabase/service'
+import { takeNumber, freeNumber, nextFreeNumber } from '@/lib/number-register'
 import { readRange, writeCell, sheetsConfigured } from '@/lib/google-sheets'
 import { nextManualNumber } from '@/lib/manual-orders'
 
@@ -30,6 +31,22 @@ async function registerFor(service: Service, date: string): Promise<string | nul
     .eq('month', monthOf(date))
     .maybeSingle()
   return (data?.spreadsheet_id as string) ?? null
+}
+
+/**
+ * Той самий запис, але в нашому журналі.
+ *
+ * Пишемо в обидва місця: таблиця лишається головною для складу, а наш
+ * журнал пам'ятає, хто взяв номер, коли й за яким замовленням — у
+ * таблиці цього не спитати.
+ */
+async function noteTaken(
+  service: Service,
+  date: string,
+  number: number,
+  customerName: string,
+): Promise<void> {
+  await takeNumber(service, { date, number, orderId: null, customerName })
 }
 
 export interface ReservedNumber {
@@ -109,11 +126,19 @@ export async function reserveNumber(
   date: string,
   customerName: string,
 ): Promise<ReservedNumber> {
-  const fallback = async (note: string): Promise<ReservedNumber> => ({
-    number: await nextManualNumber(service, date),
-    source: 'local',
-    note,
-  })
+  /*
+   * Таблиця не відповіла — видаємо номер за власним журналом.
+   *
+   * Він веде ті самі правила, тож номер виходить той самий, який дала б
+   * таблиця. Позначаємо його «не з журналу», бо в аркуші складу його поки
+   * немає, і це треба звести руками.
+   */
+  const fallback = async (note: string): Promise<ReservedNumber> => {
+    const own = await nextFreeNumber(service, date)
+    const number = own ?? await nextManualNumber(service, date)
+    if (own != null) await noteTaken(service, date, own, customerName)
+    return { number, source: 'local', note }
+  }
 
   if (!sheetsConfigured()) {
     return fallback('Доступ до Google-таблиці не налаштовано')
@@ -146,6 +171,7 @@ export async function reserveNumber(
     const written = await writeCell(spreadsheetId, `'${tab}'!B${targetRow}`, customerName)
     if (!written) return fallback('Не вдалося записати в таблицю')
 
+    await noteTaken(service, date, number, customerName)
     return { number, source: 'sheet', note }
   }
 
@@ -219,6 +245,9 @@ export async function moveNumber(
   )
   if (!written) return { ...same, note: 'Не вдалося записати в журнал' }
 
+  await noteTaken(service, toDate, target.number, customerName)
+  await freeNumber(service, { number, date: fromDate, reason: `переїхав на ${toDate}` })
+
   // Старий рядок звільняємо після запису нового: якщо щось піде не так,
   // замовлення лишиться видимим бодай в одному дні
   const fromRows = await readRange(fromSheet, `'${tabNameFor(fromDate)}'!A1:B300`)
@@ -266,7 +295,9 @@ export async function releaseNumber(
 
   for (let i = 1; i < rows.length; i++) {
     if (Number((rows[i]?.[0] ?? '').toString().trim()) === number) {
-      return await writeCell(spreadsheetId, `'${tab}'!B${i + 1}`, '')
+      const cleared = await writeCell(spreadsheetId, `'${tab}'!B${i + 1}`, '')
+      if (cleared) await freeNumber(service, { number, date, reason: 'рядок звільнено' })
+      return cleared
     }
   }
   return false

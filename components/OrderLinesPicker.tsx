@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 /**
  * Вибір товарів для замовлення.
@@ -146,6 +146,40 @@ function UnitToggle({ line, onPick }: { line: Line; onPick: (u: 'кг' | 'шт')
   )
 }
 
+/**
+ * Назва товару у вигляді, придатному для пошуку.
+ *
+ * Лапки, коми й скісні риски в назвах є, а в тому, що набирають, — ні.
+ * «Ковбаса "Дрогобицька" в/г, упак, 700 г» і «ковб дро» мають зійтись.
+ */
+const normalise = (s: string) =>
+  s.toLowerCase()
+    .replace(/[\u2019'"«»„“”`]/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+
+/**
+ * Збіг за кількома уривками слів.
+ *
+ * Оператор набирає на слух і скорочує: «ковб дро», «сир укр трад». Пошук
+ * одним суцільним рядком такого не знаходить — у назві між цими уривками
+ * стоять інші слова. Тому кожен уривок шукається окремо, а товар підходить,
+ * коли знайшлися всі.
+ *
+ * Збіг із початку слова важить більше за збіг усередині: «дро» в
+ * «Дрогобицька» — те, що мали на увазі, а в «Ядро» — випадковість.
+ */
+function scoreOf(haystack: string, tokens: string[]): number | null {
+  let score = 0
+  for (const token of tokens) {
+    const at = haystack.indexOf(token)
+    if (at === -1) return null
+    const atWordStart = at === 0 || haystack[at - 1] === ' '
+    score += atWordStart ? 2 : 1
+  }
+  return score
+}
+
 export function ProductPicker({ lines, onChange, total }: {
   lines: Line[]
   onChange: (lines: Line[]) => void
@@ -173,20 +207,35 @@ export function ProductPicker({ lines, onChange, total }: {
     return () => { alive = false }
   }, [])
 
-  const needle = query.trim().toLowerCase()
-  const found = needle.length < 2 || !catalogue ? [] : (() => {
-    const hits: Product[] = []
-    for (const p of catalogue) {
-      if (p.name.toLowerCase().includes(needle)
-        || p.sku?.toLowerCase().includes(needle)
-        || p.code_1c?.toLowerCase().includes(needle)) {
-        hits.push(p)
-        if (hits.length === 40) break
-      }
+  /* Готуємо рядок для пошуку раз на каталог, а не на кожну літеру */
+  const index = useMemo(
+    () => (catalogue ?? []).map(p => ({
+      product: p,
+      haystack: normalise([p.name, p.sku, p.code_1c].filter(Boolean).join(' ')),
+    })),
+    [catalogue],
+  )
+
+  const tokens = useMemo(
+    () => normalise(query).split(' ').filter(t => t.length >= 2),
+    [query],
+  )
+
+  const found = useMemo(() => {
+    if (!tokens.length || !catalogue) return []
+    const hits: { product: Product; score: number }[] = []
+
+    for (const entry of index) {
+      const score = scoreOf(entry.haystack, tokens)
+      if (score != null) hits.push({ product: entry.product, score })
     }
-    return hits
-  })()
-  const searching = needle.length >= 2 && !catalogue
+
+    // Коротша назва за однакового збігу ближча до того, що шукали:
+    // «Ковбаса "Дрогобицька"» перед «Ковбаса "Дрогобицька" нарізка в/у»
+    hits.sort((a, b) => b.score - a.score || a.product.name.length - b.product.name.length)
+    return hits.slice(0, 40).map(h => h.product)
+  }, [index, tokens, catalogue])
+  const searching = tokens.length > 0 && !catalogue
 
   function add(p: Product) {
     // Ваговий товар додається одним фасуванням, штучний — однією штукою:
