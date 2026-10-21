@@ -48,8 +48,15 @@ export const listCards = (listId: string) =>
 
 export const updateCard = (
   cardId: string,
-  fields: { name?: string; desc?: string; idList?: string; pos?: number | string },
-) => call<TrelloCard>('PUT', `/cards/${cardId}`, fields as Record<string, string>)
+  fields: {
+    name?: string
+    desc?: string
+    idList?: string
+    pos?: number | string
+    /** closed: true — картка їде в архів дошки */
+    closed?: boolean
+  },
+) => call<TrelloCard>('PUT', `/cards/${cardId}`, fields as unknown as Record<string, string>)
 
 export interface TrelloList {
   id: string

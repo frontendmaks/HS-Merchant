@@ -55,6 +55,8 @@ export interface AutopilotResult {
   problems: number
   /** Замовлення, відкладені через мовчання геокодера */
   postponed: number
+  /** Скільки карток одразу поїхало на дошку */
+  carded?: number
   error?: string
 }
 
@@ -84,6 +86,8 @@ export async function autoProcessSiteOrders(
   }
   // Одне сповіщення наприкінці — див. те саме міркування в синхронізації
   let touched: string | null = null
+  /** Що пройшло огляд без хиб — їхні картки можна рушати на дошці */
+  const reviewed: string[] = []
 
   try {
     /**
@@ -249,6 +253,28 @@ export async function autoProcessSiteOrders(
       await service.from('orders').update(patch).eq('id', order.id)
       touched = order.id
       if (problems.length) result.problems++
+      else reviewed.push(order.id)
+    }
+
+    /*
+     * Оглянуте одразу їде на дошку.
+     *
+     * Склад і період у нього вже є, отже картка може стати в чергу
+     * комплектації просто зараз. Чекати на окремий прохід Trello — це
+     * три хвилини, протягом яких замовлення лежить у «Нових» і складу
+     * невидиме.
+     *
+     * Невдача тут нічого не ламає: той самий прохід підбере картку
+     * пізніше, тому мовчки ловимо помилку й рушаємо далі.
+     */
+    if (reviewed.length) {
+      try {
+        const { enrichNewCards } = await import('@/lib/trello-cards')
+        const cards = await enrichNewCards(service, { orderIds: reviewed })
+        result.carded = cards.moved
+      } catch (e) {
+        console.error('trello after review:', e instanceof Error ? e.message : e)
+      }
     }
   } catch (e) {
     result.error = e instanceof Error ? e.message : String(e)

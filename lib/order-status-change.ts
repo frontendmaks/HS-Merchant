@@ -201,6 +201,20 @@ export async function changeOrderStatus(
     } catch (e) {
       console.error('notify canceled failed:', e instanceof Error ? e.message : e)
     }
+
+    /*
+     * Картка на дошці теж має піти з роботи.
+     *
+     * Скасоване замовлення, що лишилось серед робочих карток, — це ящик,
+     * який хтось таки збере. Складу воно коштує дорожче, ніж нам зайвий
+     * виклик до Trello.
+     */
+    try {
+      const { cardCanceled } = await import('@/lib/trello-cards')
+      await cardCanceled(supabase, id)
+    } catch (e) {
+      console.error('trello cancel failed:', e instanceof Error ? e.message : e)
+    }
   }
 
   return NextResponse.json({ success: true })

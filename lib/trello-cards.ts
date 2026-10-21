@@ -151,7 +151,7 @@ function ourBlock(order: OrderRow, issues: string[]): string {
 
 export async function enrichNewCards(
   service: Service,
-  { limit = 40 }: { limit?: number } = {},
+  { limit = 40, orderIds }: { limit?: number; orderIds?: string[] } = {},
 ): Promise<CardResult> {
   const result: CardResult = {
     looked: 0, numbered: 0, linked: 0, moved: 0, unmatched: [], problems: [],
@@ -196,7 +196,16 @@ export async function enrichNewCards(
         .gte('order_date', day(-14)).lte('order_date', day(1)),
     ])
 
-    const orders = [...(ours ?? []), ...(markets ?? [])] as unknown as OrderRow[]
+    const all = [...(ours ?? []), ...(markets ?? [])] as unknown as OrderRow[]
+
+    /*
+     * Коли нас покликали через конкретні замовлення, рештою не займаємось.
+     *
+     * Так виклик після огляду коштує один запит до Trello замість сорока,
+     * і картка переїжджає за секунди, а не за три хвилини до наступного
+     * проходу.
+     */
+    const orders = orderIds?.length ? all.filter(o => orderIds.includes(o.id)) : all
 
     // Ключ — телефон і день: одна людина за тиждень замовляє двічі, і без
     // дня картка причепилась би до чужої доставки
@@ -445,4 +454,64 @@ export async function spreadToPicking(
   }
 
   return result
+}
+
+/**
+ * Скасоване замовлення на дошці.
+ *
+ * Картка, що лишилась серед робочих, — це ящик, який хтось таки збере.
+ * Тому кладемо її в «Не доставлено»: там її видно, і при розборі дня
+ * зрозуміло, чому замовлення не поїхало. Якщо такого списку немає —
+ * ховаємо в архів, бо лишати на видноті гірше.
+ */
+export async function cardCanceled(
+  service: Service,
+  orderId: string,
+): Promise<{ ok: boolean; note?: string }> {
+  if (!trelloConfigured()) return { ok: false, note: 'Trello не налаштовано' }
+
+  try {
+    const { data: order } = await service
+      .from('orders')
+      .select('manual_number, customer_phone, delivery_date, address')
+      .eq('id', orderId).maybeSingle()
+
+    if (!order) return { ok: false, note: 'Замовлення не знайдено' }
+
+    const board = await getSetting(service, 'trello_board')
+    const lists = await boardLists(board)
+
+    const failed = lists.find(l => /не\s*достав/i.test(l.name))
+    const phone = phoneKey(order.customer_phone as string | null)
+    const number = order.manual_number != null ? `№${order.manual_number}` : null
+
+    /*
+     * Шукаємо картку по всіх робочих списках, а не лише в «Нових»:
+     * скасувати можуть і те, що вже поїхало на склад.
+     */
+    for (const list of lists) {
+      if (failed && list.id === failed.id) continue
+      if (/достав|архів/i.test(list.name) && list.id !== failed?.id) continue
+
+      const cards = await listCards(list.id)
+      const found = cards.find(c => {
+        const text = `${c.name}\n${c.desc}`
+        if (number && c.name.trim().startsWith(number)) return true
+        return !!phone && phonesIn(text).includes(phone)
+          && (!order.address || addressKey(text).includes(addressKey(order.address as string)))
+      })
+
+      if (!found) continue
+
+      await updateCard(found.id, failed
+        ? { idList: failed.id }
+        : { closed: true })
+
+      return { ok: true, note: failed ? `у «${failed.name}»` : 'в архів' }
+    }
+
+    return { ok: false, note: 'картку на дошці не знайшов' }
+  } catch (e) {
+    return { ok: false, note: e instanceof Error ? e.message : 'помилка Trello' }
+  }
 }
