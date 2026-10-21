@@ -54,12 +54,34 @@ export async function sendMessage(
   return { ok: answer.ok, detail: answer.description ?? 'ok' }
 }
 
+/**
+ * Посилання, за яким клієнт підписується одним дотиком.
+ *
+ * Telegram передає боту все, що стоїть після `?start=`, — і це єдиний
+ * спосіб дізнатись, хто саме натиснув. Інакше в нас був би чат без імені:
+ * повідомлення є, а кому воно належить — невідомо.
+ *
+ * Кладемо туди номер телефону в стійкому вигляді. Нічого таємного в ньому
+ * немає — людина й так свій номер знає, — але підставити чужий не вийде:
+ * посилання вона отримує в бланку свого ж замовлення.
+ */
+export const subscribeLink = (botUsername: string, phone: string) =>
+  `https://t.me/${botUsername}?start=${phoneKey(phone)}`
+
 /** Запам'ятовує того, хто написав боту */
 export async function rememberChat(
   service: Service,
-  { chatId, name, phone }: { chatId: string; name?: string | null; phone?: string | null },
+  { chatId, name, phone, payload }: {
+    chatId: string
+    name?: string | null
+    phone?: string | null
+    /** Те, що стояло після /start — наш власний ключ клієнта */
+    payload?: string | null
+  },
 ): Promise<void> {
-  const key = phoneKey(phone)
+  // Контакт, яким поділились, головніший за посилання: його Telegram
+  // підтвердив сам, а посилання могли переслати комусь іншому
+  const key = phoneKey(phone) || phoneKey(payload)
   await service.from('telegram_chats').upsert({
     chat_id: chatId,
     name: name ?? null,

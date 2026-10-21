@@ -11,6 +11,7 @@ import { rememberChat } from '@/lib/telegram'
 export async function POST(request: NextRequest) {
   const update = await request.json().catch(() => null) as {
     message?: {
+      text?: string
       chat?: { id?: number | string }
       from?: { first_name?: string; last_name?: string }
       contact?: { phone_number?: string }
@@ -42,6 +43,9 @@ export async function POST(request: NextRequest) {
       name: [update.message?.from?.first_name, update.message?.from?.last_name]
         .filter(Boolean).join(' ') || null,
       phone: update.message?.contact?.phone_number ?? null,
+      // «/start 0671234567» — так ми дізнаємось, чий це чат, ще до того
+      // як людина щось напише
+      payload: update.message?.text?.match(/^\/start\s+(\S+)/)?.[1] ?? null,
     })
   }
 
