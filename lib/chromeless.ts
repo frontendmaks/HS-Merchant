@@ -8,4 +8,5 @@ export function isChromeless(path: string): boolean {
   return path === '/login'
     || path === '/set-password'
     || path.startsWith('/zamovlennya/')
+    || path.startsWith('/vidhuk/')
 }

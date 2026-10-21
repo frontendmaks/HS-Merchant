@@ -16,6 +16,9 @@ export async function middleware(request: NextRequest) {
     // замовлення отримати мусить. Захищає довгий випадковий токен у самій
     // адресі — сторінка перевіряє його й без нього нічого не показує.
     pathname.startsWith('/zamovlennya/') ||
+    // Сторінка відгуку: її відкриває покупець, і акаунта в нього немає
+    // й не буде. Захист той самий — токен у самій адресі.
+    pathname.startsWith('/vidhuk/') ||
     // These use the service-role key and check the caller themselves
     pathname.startsWith('/api/')
   ) {
