@@ -54,6 +54,15 @@ const day = (date: string | null) => date
   ? new Date(`${date}T12:00:00`).toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })
   : null
 
+/**
+ * Скільки днів замовлення лишається «активним».
+ *
+ * Те, що мало приїхати тиждень тому й досі висить у роботі, — наша
+ * недоробка, а не його очікування. Показувати таке покупцеві означає
+ * щодня нагадувати йому про борг, якого він не питав.
+ */
+const ACTIVE_DAYS = 3
+
 /** Замовлення, яке ще можна скасувати самому */
 const CANCELLABLE = ['В обробці', 'Очікування оплати', 'ПЕРЕДЗАМОВЛЕННЯ']
 
@@ -81,9 +90,13 @@ async function ordersFor(
     // Звіряємось за останніми дев'ятьма цифрами, як і всюди в Мерчанті
     .like('customer_phone', `%${phone}`)
 
-  query = open
-    ? query.not('status', 'in', `(${CLOSED_STAGES.map(s => `"${s}"`).join(',')})`)
-    : query
+  if (open) {
+    const since = new Date(Date.now() - ACTIVE_DAYS * 86_400_000)
+      .toISOString().slice(0, 10)
+    query = query
+      .not('status', 'in', `(${CLOSED_STAGES.map(s => `"${s}"`).join(',')})`)
+      .gte('delivery_date', since)
+  }
 
   const { data } = await query
     .order('delivery_date', { ascending: false, nullsFirst: false })
@@ -161,59 +174,132 @@ export async function screenOrders(
   }
 }
 
-export async function screenNewOrder(service: Service): Promise<Screen> {
-  const [site, phone] = await Promise.all([
+/** Сайт із міткою — щоб у статистиці було видно, кого привів бот */
+export async function siteLink(service: Service): Promise<string> {
+  const [site, utm] = await Promise.all([
     getSetting(service, 'site_url'),
+    getSetting(service, 'site_utm'),
+  ])
+  if (!utm) return site
+  return `${site}${site.includes('?') ? '&' : '?'}${utm}`
+}
+
+export async function screenNewOrder(service: Service): Promise<Screen> {
+  const [link, phone] = await Promise.all([
+    siteLink(service),
     getSetting(service, 'delivery_phone'),
   ])
 
   return {
-    text: '\u{1F6D2} Замовити можна двома способами:\n\n'
-      + `• на сайті — ${site}\n`
-      + `• телефоном — ${phone}\n\n`
-      + 'Доставляємо Львовом і околицями. Оплата при отриманні.',
-    keyboard: [[{ text: 'Відкрити сайт', url: site }]],
+    text: 'Доставка від «Галицької Свіжини»\n\n'
+      + '\u{1F6D2} Замовити можна такими способами:\n'
+      + `• на сайті — ${link}\n`
+      + `• через дзвінок — ${phone}\n\n`
+      + 'Швидка доставка по Львову та околицях. Вартість доставки 1 грн '
+      + '(при оформленні замовлення на суму 1000 грн).\n\n'
+      + 'Широка лінія якісного та свіжого асортименту. Стабільні та '
+      + 'конкурентні цінові пропозиції для усіх наших клієнтів.',
+    keyboard: [[{ text: 'Відкрити сайт', url: link }]],
   }
 }
 
 /**
  * Акції — справжні, з сайту.
  *
- * Беремо ті товари, у яких стара ціна більша за теперішню. Наші внутрішні
+ * Беремо товари, у яких стара ціна більша за теперішню. Наші внутрішні
  * правила націнки для фідів сюди не потрапляють і не мають: вони про те,
- * як ми виглядаємо на маркетплейсі, а не про те, що покупець економить.
+ * як ми виглядаємо на маркетплейсі, а не про те, що економить покупець.
+ *
+ * Групуємо за категорією: «ковбаса дешевша на 24%» — це новина, а список
+ * із двадцяти дев'яти позицій поспіль — ні, його ніхто не дочитає.
  */
-export async function screenPromos(service: Service): Promise<Screen> {
-  const site = await getSetting(service, 'site_url')
+export interface Promo {
+  category: string
+  items: { name: string; slug: string | null; price: number; old: number }[]
+  maxOff: number
+}
 
+export async function loadPromos(service: Service): Promise<Promo[]> {
   const { data } = await service
     .from('products')
-    .select('name, slug, price, price_old')
+    .select('name, slug, price, price_old, category_name')
     .not('price_old', 'is', null)
     .gt('price_old', 0)
-    .order('price_old', { ascending: false })
-    .limit(60)
+    .limit(500)
 
-  const onSale = (data ?? [])
-    .filter(p => Number(p.price_old) > Number(p.price))
-    .slice(0, 10)
+  const byCategory = new Map<string, Promo>()
 
-  if (!onSale.length) {
+  for (const p of data ?? []) {
+    const price = Number(p.price)
+    const old = Number(p.price_old)
+    if (!(old > price) || !(price > 0)) continue
+
+    const category = (p.category_name as string) || 'Інше'
+    const promo = byCategory.get(category) ?? { category, items: [], maxOff: 0 }
+    promo.items.push({
+      name: p.name as string,
+      slug: (p.slug as string | null) ?? null,
+      price,
+      old,
+    })
+    promo.maxOff = Math.max(promo.maxOff, Math.round((1 - price / old) * 100))
+    byCategory.set(category, promo)
+  }
+
+  // Найбільша знижка нагорі: саме її й шукають, відкриваючи акції
+  return [...byCategory.values()].sort((a, b) => b.maxOff - a.maxOff)
+}
+
+export async function screenPromos(service: Service): Promise<Screen> {
+  const link = await siteLink(service)
+  const promos = await loadPromos(service)
+
+  if (!promos.length) {
     return {
-      text: 'Зараз акцій немає. Щойно з’являться — ми напишемо.',
-      keyboard: [[{ text: 'Дивитись каталог', url: site }]],
+      text: 'Зараз акцій немає. Щойно з\u2019являться — ми напишемо.',
+      keyboard: [[{ text: 'Дивитись каталог', url: link }]],
     }
   }
 
-  const rows = onSale.map(p => {
-    const off = Math.round((1 - Number(p.price) / Number(p.price_old)) * 100)
-    return `• ${p.name}\n   ${money(Number(p.price))} замість ${money(Number(p.price_old))}`
+  const total = promos.reduce((n, p) => n + p.items.length, 0)
+
+  return {
+    text: `\u{1F3F7} Акції — ${total} ${total === 1 ? 'позиція' : 'позицій'} `
+      + `у ${promos.length} категоріях.\n\nОберіть, що подивитись:`,
+    keyboard: [
+      ...promos.slice(0, 12).map((p, i) => [{
+        text: `${p.category} · ${p.items.length} · до −${p.maxOff}%`,
+        callback_data: `promo:${i}`,
+      }]),
+      [{ text: 'Усі товари на сайті', url: link }],
+    ],
+  }
+}
+
+/** Одна акція: позиції, ціни й посилання на кожну */
+export async function screenPromo(service: Service, index: number): Promise<Screen> {
+  const promos = await loadPromos(service)
+  const promo = promos[index]
+  if (!promo) return screenPromos(service)
+
+  const site = await getSetting(service, 'site_url')
+  const utm = await getSetting(service, 'site_utm')
+  const url = (slug: string) => `${site}/${slug}/${utm ? `?${utm}` : ''}`
+
+  const rows = promo.items.map(i => {
+    const off = Math.round((1 - i.price / i.old) * 100)
+    return `• ${i.name}\n   ${money(i.price)} замість ${money(i.old)}`
       + (off > 0 ? `  −${off}%` : '')
   })
 
   return {
-    text: `\u{1F3F7} Акції тижня:\n\n${rows.join('\n')}`,
-    keyboard: [[{ text: 'Усі акції на сайті', url: `${site}/katalog-nashoyi-produkcziyi/` }]],
+    text: `\u{1F3F7} ${promo.category}\n\n${rows.join('\n')}`,
+    keyboard: [
+      ...promo.items.slice(0, 8)
+        .filter(i => i.slug)
+        .map(i => [{ text: i.name.slice(0, 60), url: url(i.slug as string) }]),
+      [{ text: '\u2190 Усі акції', callback_data: 'promos' }],
+    ],
   }
 }
 
@@ -227,7 +313,7 @@ export async function screenHelp(service: Service): Promise<Screen> {
       + '/history — усі ваші замовлення\n'
       + '/new — як зробити нове замовлення\n'
       + '/promos — акції\n\n'
-      + `Якщо потрібна людина — телефонуйте: ${phone}`,
+      + `Якщо потрібна допомога — телефонуйте: ${phone}`,
     menu: true,
   }
 }

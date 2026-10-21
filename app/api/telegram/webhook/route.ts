@@ -6,7 +6,7 @@ import {
 import { integrationConfig } from '@/lib/integrations'
 import {
   MENU, CANCEL_REASONS, screenStart, screenOrders, screenNewOrder,
-  screenPromos, screenHelp, screenCancelReasons,
+  screenPromos, screenPromo, screenHelp, screenCancelReasons,
 } from '@/lib/telegram-bot'
 import { changeOrderStatus } from '@/lib/order-status-change'
 import { phoneKey } from '@/lib/phone'
@@ -194,6 +194,14 @@ async function onButton(
   if (data === 'menu') {
     const phone = await phoneOf(service, chat)
     return show(service, token, chat, await screenStart(null, !!phone))
+  }
+
+  if (data === 'promos') {
+    return show(service, token, chat, await screenPromos(service))
+  }
+
+  if (data.startsWith('promo:')) {
+    return show(service, token, chat, await screenPromo(service, Number(data.slice(6))))
   }
 
   if (data.startsWith('cancel:')) {

@@ -34,7 +34,9 @@ export const DEFAULTS = {
   /** Сайт магазину — бот кличе туди по нове замовлення */
   site_url: 'https://halytska-svizhyna.ua' as string,
   /** Телефон відділу доставки — його бот дає клієнтові */
-  delivery_phone: '+380 (32) 232-32-32' as string,
+  delivery_phone: '0 800 300 262' as string,
+  /** Мітка, з якою бот приводить людей на сайт — щоб бачити, скільки їх */
+  site_utm: 'utm_source=telegram&utm_medium=bot&utm_campaign=hs_delivery_bot' as string,
 } as const
 
 export type SettingKey = keyof typeof DEFAULTS
