@@ -30,9 +30,14 @@ export default async function IntegrationsPage() {
       managed: c.managed,
       fields: c.fields ?? [],
       connected: c.managed === 'env' ? !!c.present?.() : !!row?.enabled,
-      status: c.managed === 'env'
-        ? (c.present?.() ? 'налаштовано у змінних оточення' : 'не налаштовано')
-        : row?.status ?? null,
+      // Токен є, але зв'язок вимкнено — окремий стан, бо повернути його
+      // можна одним рухом, а виглядало б це як «не під'єднано»
+      dormant: c.managed === 'panel' && !row?.enabled
+        && !!(row?.config ?? {})[c.fields?.[0]?.name ?? 'token'],
+      status: row?.status
+        ?? (c.managed === 'env'
+          ? (c.present?.() ? 'налаштовано у змінних оточення' : 'не налаштовано')
+          : null),
       checkedAt: row?.checked_at ?? null,
       masked: c.fields?.length
         ? maskSecret((row?.config ?? {})[c.fields[0].name])
