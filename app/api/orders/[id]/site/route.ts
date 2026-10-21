@@ -7,6 +7,7 @@ import { isValidSlot } from '@/lib/delivery-slots'
 import { resolveAddress } from '@/lib/delivery-zones'
 import { withDelivery } from '@/lib/delivery-fee'
 import { moveNumber } from '@/lib/manual-register'
+import { sendOrderSheet } from '@/lib/bitrix-chat'
 import { orderTotal, lineTotal, manualWeight, type ManualLine } from '@/lib/manual-orders'
 import { pushOrderToBitrix } from '@/lib/bitrix-deal'
 import { bitrixConfigured } from '@/lib/bitrix'
@@ -63,7 +64,7 @@ export async function PATCH(
 
   const service = createServiceClient()
   const { data: order } = await service
-    .from('orders').select('id, platform, address, warehouse, delivery_zone, delivery_date, delivery_slot, bitrix_deal_id, manual_number, number_source, customer_name')
+    .from('orders').select('id, platform, address, warehouse, delivery_zone, delivery_date, delivery_slot, bitrix_deal_id, manual_number, number_source, customer_name, status, chat_sent_at')
     .eq('id', id).single()
 
   if (!order) return NextResponse.json({ error: 'Замовлення не знайдено' }, { status: 404 })
@@ -110,6 +111,27 @@ export async function PATCH(
   if (body?.warehouse !== undefined && body.warehouse !== order.warehouse) {
     patch.warehouse = body.warehouse
     changes.warehouse = body.warehouse
+
+    /*
+     * Вибір людини закріплюється.
+     *
+     * Інакше огляд, який запускається після правки, перераховує склад з
+     * адреси й повертає свій — і виглядає це так, ніби склад не
+     * зберігається. Оператор бачить те, чого не бачить геокодер.
+     */
+    patch.warehouse_pinned = true
+
+    /*
+     * Бланк має піти на новий склад.
+     *
+     * Старий його вже отримав, і там замовлення чекатимуть дарма — але
+     * мовчання для нового складу гірше: він про замовлення не дізнається
+     * узагалі.
+     */
+    if (order.chat_sent_at) {
+      patch.chat_sent_at = null
+      changes.chat_resend = true
+    }
   }
 
   let numberNote: string | null = null
@@ -203,6 +225,10 @@ export async function PATCH(
   const crm = bitrixConfigured() && order.bitrix_deal_id
     ? await pushOrderToBitrix(service, id)
     : null
+
+  // Склад змінився, а бланк уже був надісланий — новий склад має його
+  // отримати зараз, а не чекати на наступну зміну статусу
+  if (changes.chat_resend) await sendOrderSheet(service, id)
 
   await broadcastOrderChange(id, 'items')
   await notifyIntegrations(id, 'order.items_changed', service)

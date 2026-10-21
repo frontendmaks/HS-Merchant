@@ -35,6 +35,7 @@ interface Row {
   address: string | null
   warehouse: string | null
   delivery_zone: string | null
+  warehouse_pinned: boolean | null
   delivery_date: string | null
   delivery_slot: string | null
   manual_number: number | null
@@ -99,7 +100,7 @@ export async function autoProcessSiteOrders(
 
     let query = service
       .from('orders')
-      .select('id, external_id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, manual_number, number_source, status')
+      .select('id, external_id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, warehouse_pinned, delivery_zone, delivery_date, delivery_slot, manual_number, number_source, status')
       .eq('platform', 'site')
       .is('auto_done_at', null)
       .gte('delivery_date', horizon)
@@ -164,7 +165,19 @@ export async function autoProcessSiteOrders(
              * відправити замовлення в інший кінець міста з виглядом
              * упевненості.
              */
-            if (zone.point?.approximate) {
+            if (order.warehouse_pinned) {
+              /*
+               * Склад обрала людина — огляд його не чіпає.
+               *
+               * Оператор бачить те, чого не бачить геокодер: що кав'ярня за
+               * цією адресою обслуговується з іншого складу, що сьогодні там
+               * ремонт, що клієнт домовився окремо. Переставити його вибір
+               * назад означає сперечатися з людиною, яка знає більше.
+               */
+              if (zone.warehouse && zone.warehouse !== order.warehouse) {
+                problems.push(`за адресою вийшов би ${zone.warehouse}, лишаємо обраний`)
+              }
+            } else if (zone.point?.approximate) {
               problems.push(zone.note ?? 'зона приблизна — перевірте склад')
             } else if (zone.warehouse && zone.warehouse !== order.warehouse) {
               patch.warehouse = zone.warehouse
