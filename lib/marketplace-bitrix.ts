@@ -5,10 +5,14 @@
  * Відрізняється тільки походження — його й виносимо в назву угоди, щоб
  * комірник одразу знав, що це доставка з майданчика, а не з сайту.
  *
- * Ціну беремо з фіда: саме її бачив покупець на майданчику, і саме вона має
- * стояти в угоді. Там, де товар не вдалося зіставити з каталогом, лишаємо
- * ціну, яку порахував сам майданчик — вона теж правдива, просто прийшла з
- * іншого боку.
+ * Ціна в угоді — та, яку заплатив покупець.
+ *
+ * Спершу ми брали її з фіда, вважаючи, що фід і є те, що покупець бачив.
+ * На практиці вони розходяться: фід живе далі й міняється, а замовлення
+ * лишається з ціною того дня. Угода на 711,55 ₴ проти 813 ₴ у MauDau — це
+ * розбіжність і з майданчиком, і з комісією, і з оголошеною цінністю в
+ * накладній. Тож беремо ціну із замовлення, а фід лишаємо на випадок, коли
+ * ціни в рядку немає зовсім.
  */
 import { bitrix } from '@/lib/bitrix'
 import { createServiceClient } from '@/lib/supabase/service'
@@ -140,8 +144,11 @@ export async function pushMarketplaceOrder(
 
     let matched = 0
     const rows = lines.map(l => {
+      const own = Number(l.price_per_unit ?? 0)
       const fromFeed = l.product_id ? prices.get(l.product_id as string) : undefined
-      if (fromFeed != null) priced++
+      // Фід — лише запасний варіант: ціна рядка головніша
+      const price = own > 0 ? own : fromFeed ?? 0
+      if (own <= 0 && fromFeed != null) priced++
 
       const uid = l.product_id ? uidByOurId.get(l.product_id as string) : undefined
       const id = uid ? bitrixByUid.get(uid) : undefined
@@ -152,7 +159,7 @@ export async function pushMarketplaceOrder(
         // те саме, тільки сума угоди такий рядок не враховує
         ...(id ? { PRODUCT_ID: id } : {}),
         PRODUCT_NAME: l.title,
-        PRICE: fromFeed ?? Number(l.price_per_unit ?? 0),
+        PRICE: price,
         QUANTITY: Number(l.ordered_qty ?? 1),
       }
     })
