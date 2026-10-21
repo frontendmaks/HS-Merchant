@@ -114,6 +114,8 @@ export interface Geocoded extends Point {
   display_name: string | null
   /** Збіг «десь тут»: вулиця без номера або сам населений пункт */
   approximate?: boolean
+  /** Наскільки саме «десь тут» — щоб підпис не вигадував */
+  vague?: 'street' | 'area'
 }
 
 /**
@@ -252,7 +254,93 @@ export function tidyAddress(raw: string): string {
  * знаходило Дрогобич, бо вулиця Петлюри є і там. Місто важливіше за область:
  * ми возимо по Львову й околицях, тож питаємо спершу про Львів.
  */
-interface Variant { query: string; approximate?: boolean }
+/**
+ * Ті самі вулиці, записані інакше.
+ *
+ * Львівські назви живуть у двох редакціях одночасно. Сайт пише «Верхня
+ * Зимова», а в мапі вона «Зимова Горішня»: і прикметник інший, і стоїть він
+ * з іншого боку. Геокодер від цього не знаходить нічого — хоча будинок у
+ * нього є, за три кілометри від того місця, куди ми врешті цілились.
+ *
+ * Тому перебираємо обидві редакції: і синоніми, і зворотний порядок слів.
+ * Усі вони лишаються точними прочитаннями — номер будинку в них є.
+ */
+const ADJ_SYNONYMS: Record<string, string> = {
+  'верхня': 'горішня', 'горішня': 'верхня',
+  'верхній': 'горішній', 'горішній': 'верхній',
+  'нижня': 'долішня', 'долішня': 'нижня',
+  'нижній': 'долішній', 'долішній': 'нижній',
+}
+
+/**
+ * Прикметники, що стоять у назві то спереду, то ззаду.
+ *
+ * Перебирати порядок слів у кожній назві було б марно: «Степана Бандери»
+ * задом наперед не існує, а кожне зайве прочитання — ще один запит до
+ * геокодера, який нас і так обмежує. Міняємо місцями лише там, де
+ * розходження справді трапляється.
+ */
+const SWAPPABLE = new Set([
+  'верхня', 'горішня', 'нижня', 'долішня',
+  'верхній', 'горішній', 'нижній', 'долішній',
+  'велика', 'мала', 'нова', 'стара', 'великий', 'малий', 'новий', 'старий',
+])
+
+const STREET_WORD = /^(вул|вулиця|просп|проспект|пров|провулок)\.?$/iu
+
+/** «горішня» → «Горішня»: кеш і журнал читаються людьми */
+const matchCase = (word: string, sample: string) =>
+  /^\p{Lu}/u.test(sample) ? word.charAt(0).toUpperCase() + word.slice(1) : word
+
+/** Інші написання кожної частини адреси, що схожа на назву вулиці */
+export function streetSpellings(address: string): string[] {
+  const parts = address.split(',').map(p => p.trim())
+  const out = new Set<string>()
+
+  parts.forEach((part, index) => {
+    const words = part.split(/\s+/).filter(Boolean)
+    const type = words.length && STREET_WORD.test(words[0]) ? words[0] : null
+    const name = type ? words.slice(1) : words
+
+    // Назва з двох слів, одне з яких — прикметник: рівно той випадок, де
+    // редакції розходяться
+    if (name.length !== 2) return
+    if (!name.some(w => SWAPPABLE.has(w.toLowerCase()))) return
+
+    const spellings = new Set<string>()
+    const swapped = [name[1], name[0]]
+    spellings.add(swapped.join(' '))
+
+    for (const order of [name, swapped]) {
+      const synonym = order.map(w => {
+        const other = ADJ_SYNONYMS[w.toLowerCase()]
+        return other ? matchCase(other, w) : w
+      })
+      if (synonym.join(' ') !== order.join(' ')) spellings.add(synonym.join(' '))
+    }
+
+    for (const spelling of spellings) {
+      const rebuilt = [...parts]
+      rebuilt[index] = [type, spelling].filter(Boolean).join(' ')
+      const whole = rebuilt.join(', ')
+      if (whole !== address) out.add(whole)
+    }
+  })
+
+  return [...out]
+}
+
+/**
+ * Чому цей збіг приблизний — своїми словами, а не загальною фразою.
+ *
+ * Раніше будь-яке приблизне прочитання діставало підпис «зона визначена за
+ * вулицею, без номера будинку». Для адреси, яку геокодер звузив усього лише
+ * до міста, це була неправда — і оператор довіряв складу, обраному за
+ * центром Львова.
+ */
+type Vagueness = 'street' | 'area'
+
+interface Variant { query: string; approximate?: boolean; vague?: Vagueness }
 
 function queryVariants(address: string): Variant[] {
   const a = tidyAddress(address)
@@ -307,23 +395,32 @@ function queryVariants(address: string): Variant[] {
     a,
     ...(withoutLetter !== a ? [city(withoutLetter)] : []),
     ...(cyrillic && cyrillic !== a ? [city(cyrillic), cyrillic] : []),
+    ...streetSpellings(a).map(city),
+    ...streetSpellings(withoutLetter).map(city),
     ...shorter.map(city),
   ]
-  const rough = [
-    ...(streetOnly && streetOnly !== a ? [city(streetOnly)] : []),
-    `Львівська область, ${a}`,
-    ...(settlement && settlement !== a ? [`${settlement}, Львівська область`] : []),
+  const rough: Variant[] = [
+    ...(streetOnly && streetOnly !== a
+      ? [{ query: city(streetOnly), vague: 'street' as const }] : []),
+    { query: `Львівська область, ${a}`, vague: 'area' as const },
+    ...(settlement && settlement !== a
+      ? [{ query: `${settlement}, Львівська область`, vague: 'area' as const }] : []),
   ]
 
   const seen = new Set<string>()
   const out: Variant[] = []
-  for (const [list, approximate] of [[exact, false], [rough, true]] as const) {
-    for (const query of list) {
-      if (query.replace(/[^\p{L}]/gu, '').length < 4 || seen.has(query)) continue
-      seen.add(query)
-      out.push({ query, approximate })
-    }
+
+  for (const query of exact) {
+    if (query.replace(/[^\p{L}]/gu, '').length < 4 || seen.has(query)) continue
+    seen.add(query)
+    out.push({ query, approximate: false })
   }
+  for (const variant of rough) {
+    if (variant.query.replace(/[^\p{L}]/gu, '').length < 4 || seen.has(variant.query)) continue
+    seen.add(variant.query)
+    out.push({ ...variant, approximate: true })
+  }
+
   return out
 }
 
@@ -334,7 +431,7 @@ function queryVariants(address: string): Variant[] {
  * записи кешу з нижчою версією перепитуються, замість того щоб вічно
  * повертати координати, знайдені за старим правилом.
  */
-const RESOLVER_VERSION = 7
+const RESOLVER_VERSION = 8
 
 async function remember(
   service: Service,
@@ -347,6 +444,7 @@ async function remember(
     lng: point?.lng ?? null,
     display_name: point?.display_name ?? null,
     approximate: point?.approximate ?? false,
+    vague: point?.vague ?? null,
     resolver: RESOLVER_VERSION,
   }, { onConflict: 'query' })
 }
@@ -359,7 +457,7 @@ export async function geocode(
   if (query.length < 5) return null
 
   const { data: cached } = await service
-    .from('geocode_cache').select('lat, lng, display_name, approximate, resolver')
+    .from('geocode_cache').select('lat, lng, display_name, approximate, vague, resolver')
     .eq('query', query).maybeSingle()
 
   // Кеш старої версії не використовуємо: він пам'ятає відповідь, а не спосіб,
@@ -370,6 +468,7 @@ export async function geocode(
       lat: Number(cached.lat), lng: Number(cached.lng),
       display_name: cached.display_name as string,
       approximate: !!cached.approximate,
+      vague: (cached.vague as 'street' | 'area' | null) ?? undefined,
     }
   }
 
@@ -395,7 +494,7 @@ export async function geocode(
     }
 
     if (answer.kind === 'found') {
-      const point = { ...answer.point, approximate: variant.approximate }
+      const point = { ...answer.point, approximate: variant.approximate, vague: variant.vague }
       firstHit ??= point
       if (zoneAt(point, zones)) {
         await remember(service, query, point)
@@ -452,8 +551,10 @@ export async function resolveAddress(
     point,
     zone: hit.zone,
     warehouse: hit.warehouse,
-    note: point.approximate
-      ? 'Зона визначена за вулицею, без номера будинку — перевірте склад'
-      : null,
+    note: point.vague === 'area'
+      ? 'Адресу розпізнано лише до міста — вулиці геокодер не знає, перевірте склад'
+      : point.approximate
+        ? 'Зона визначена за вулицею, без номера будинку — перевірте склад'
+        : null,
   }
 }
