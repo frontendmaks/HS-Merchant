@@ -47,18 +47,6 @@
     {
       "path": "/api/cron/trello?limit=40",
       "schedule": "*/3 * * * *"
-    },
-    {
-      "path": "/api/cron/blanks",
-      "schedule": "5 2 * * *"
-    },
-    {
-      "path": "/api/cron/blanks",
-      "schedule": "5 3 * * *"
-    },
-    {
-      "path": "/api/cron/blanks",
-      "schedule": "5 6 * * *"
     }
   ]
 }
