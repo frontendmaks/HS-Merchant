@@ -189,6 +189,10 @@ export async function autoProcessSiteOrders(
               crm[FIELD.warehouse] = WAREHOUSE_ID[zone.warehouse] ?? ''
               result.rezoned++
             }
+          } else if (order.warehouse_pinned && order.warehouse) {
+            // Склад уже обрано людиною, тож «оберіть склад вручну» тут
+            // не порада, а плутанина: питання не до складу, а до адреси
+            problems.push('адреса не впізнана в межах зон — перевірте її написання')
           } else {
             problems.push(zone.note ?? 'зона доставки не визначена')
           }
