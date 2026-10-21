@@ -14,8 +14,6 @@ import { reserveNumber } from '@/lib/manual-register'
 import { withDelivery } from '@/lib/delivery-fee'
 import { pushOrderToBitrix } from '@/lib/bitrix-deal'
 import { bitrixConfigured } from '@/lib/bitrix'
-import { PICKING_STAGE } from '@/lib/bitrix-chat'
-import { changeOrderStatus } from '@/lib/order-status-change'
 
 /**
  * POST /api/orders/manual — прийняти замовлення по телефону.
@@ -189,46 +187,25 @@ export async function POST(req: NextRequest) {
     ? await pushOrderToBitrix(service, created.id)
     : { error: 'Бітрікс не налаштовано' }
 
-  /**
-   * Телефонне замовлення одразу йде на комплектацію.
+  /*
+   * Далі замовлення чекає людину.
    *
-   * Його не треба перевіряти так, як сайтове: оператор щойно склав його сам,
-   * з клієнтом на лінії, і склад може братись до роботи. Статус ставимо
-   * окремим кроком, а не при створенні, щоб бланк пішов у чат тим самим
-   * шляхом, що й у сайтових — із переведення на «Комплектується», а не з
-   * окремої гілки, яка колись розійдеться з ним.
+   * Раніше воно одразу йшло на комплектацію: вважалось, що оператор склав
+   * його з клієнтом на лінії й перевіряти нема чого. Але огляд устигає
+   * знайти те, чого оператор не бачить, — переплутану назву села, адресу
+   * поза зонами, склад, який не збігається з адресою, — а бланк, посланий
+   * одразу, забирає цю можливість: склад уже збирає.
+   *
+   * Тож телефонне замовлення йде тим самим шляхом, що й сайтове: огляд,
+   * вкладка «Перевірено», і лише тоді людина переводить його далі. Бланк
+   * піде з тієї самої зміни статусу.
    */
-  let chat: { ok: true } | { error: string } = { error: 'Бітрікс не налаштовано' }
-
-  if (bitrixConfigured()) {
-    const moved = await changeOrderStatus({
-      id: created.id,
-      status: PICKING_STAGE,
-      platform: MANUAL_PLATFORM,
-      external_id: created.external_id,
-      actor,
-    })
-
-    if (moved.ok) {
-      // Бланк пішов усередині зміни статусу — звіряємось із замовленням
-      const { data: sent } = await service
-        .from('orders').select('chat_sent_at, chat_error').eq('id', created.id).single()
-
-      chat = sent?.chat_sent_at
-        ? { ok: true }
-        : { error: (sent?.chat_error as string) ?? 'бланк не надіслано' }
-    } else {
-      const body = await moved.json().catch(() => ({})) as { error?: string }
-      chat = { error: body.error ?? 'не вдалося перевести на комплектацію' }
-    }
-  }
 
   return NextResponse.json({
     ok: true,
     id: created.id,
     deal_id: 'dealId' in crm ? crm.dealId : null,
     crm_error: 'error' in crm ? crm.error : null,
-    chat_error: 'error' in chat ? chat.error : null,
     number: created.manual_number,
     number_source: reserved.source,
     number_note: reserved.note,

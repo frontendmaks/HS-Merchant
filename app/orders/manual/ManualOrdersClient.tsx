@@ -160,7 +160,6 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
     note?: string | null
     deal_id?: number | null
     crm_error?: string | null
-    chat_error?: string | null
   } | null>(null)
 
   // Клієнти з минулих замовлень.
@@ -347,7 +346,6 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
         number: d.number,
         source: d.number_source, note: d.number_note,
         deal_id: d.deal_id ?? null, crm_error: d.crm_error ?? null,
-        chat_error: d.chat_error ?? null,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -384,14 +382,12 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
               Замовлення прийняте — передайте його в CRM вручну.
             </div>
           )}
-          {done.chat_error ? (
-            <div className="mt-2 bg-amber-950/40 border border-amber-900 rounded-lg
-                            px-3 py-2 text-amber-400 text-xs">
-              Бланк у чат складу не пішов: {done.chat_error}
-            </div>
-          ) : (
-            <div className="mt-2 text-emerald-500 text-xs">Бланк надіслано в чат складу</div>
-          )}
+          {/* Бланк піде, коли замовлення переведуть на комплектацію —
+              так само, як у сайтових. Доти воно чекає огляду */}
+          <div className="mt-2 text-zinc-400 text-xs">
+            Чекає огляду. Бланк піде в чат складу, коли замовлення
+            переведуть на «Комплектується».
+          </div>
           <button onClick={onCreated}
             className="mt-5 bg-red-600 hover:bg-red-500 text-white text-sm px-4 py-2 rounded-lg">
             Готово
