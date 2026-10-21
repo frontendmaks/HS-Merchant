@@ -6,8 +6,8 @@ import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { isValidSlot } from '@/lib/delivery-slots'
 import { resolveAddress } from '@/lib/delivery-zones'
 import { withDelivery } from '@/lib/delivery-fee'
-import { moveNumber } from '@/lib/manual-register'
 import { sendOrderSheet } from '@/lib/bitrix-chat'
+import { relocateOrder } from '@/lib/order-relocate'
 import { orderTotal, lineTotal, manualWeight, type ManualLine } from '@/lib/manual-orders'
 import { pushOrderToBitrix } from '@/lib/bitrix-deal'
 import { bitrixConfigured } from '@/lib/bitrix'
@@ -134,37 +134,6 @@ export async function PATCH(
     }
   }
 
-  let numberNote: string | null = null
-
-  if (body?.delivery_date && body.delivery_date !== order.delivery_date) {
-    patch.delivery_date = body.delivery_date
-    changes.delivery_date = body.delivery_date
-
-    /**
-     * Номер їде разом із замовленням.
-     *
-     * На складі його знають під цим числом, і міняти число при перенесенні
-     * означає плутанину там, де її не було. Переносимо лише свої номери —
-     * ті, які ми самі взяли з журналу.
-     */
-    if (order.manual_number != null && order.number_source === 'sheet' && order.delivery_date) {
-      const moved = await moveNumber(service, {
-        number: Number(order.manual_number),
-        fromDate: order.delivery_date as string,
-        toDate: body.delivery_date,
-        customerName: (order.customer_name as string) || 'замовлення',
-      })
-      numberNote = moved.note
-
-      // Номер міг змінитись: на новому дні старе число бувало зайняте.
-      // Записуємо те, під яким замовлення справді стало в журнал, —
-      // інакше склад шукатиме ящик, якого немає
-      if (moved.ok && moved.number !== Number(order.manual_number)) {
-        patch.manual_number = moved.number
-        changes.manual_number = moved.number
-      }
-    }
-  }
   if (body?.delivery_slot && body.delivery_slot !== order.delivery_slot) {
     if (!isValidSlot(body.delivery_slot)) {
       return NextResponse.json({ error: 'Невідомий період доставки' }, { status: 400 })
@@ -230,13 +199,45 @@ export async function PATCH(
   // отримати зараз, а не чекати на наступну зміну статусу
   if (changes.chat_resend) await sendOrderSheet(service, id)
 
+  /*
+   * Перенесення на інший день — не правка, а переїзд.
+   *
+   * Змінена дата в тій самій угоді для 1С не існує: вона забирає
+   * замовлення один раз, і комплектувальники нового дня його не бачать.
+   * Тому на новий день народжується окреме замовлення зі своїм номером і
+   * своєю угодою, а старе закривається.
+   *
+   * Робиться це останнім, уже після решти правок: людина часто міняє
+   * дату разом з адресою чи складом, і нове замовлення має поїхати з
+   * виправленими даними, а не з тими, що були до правки.
+   */
+  if (body?.delivery_date && body.delivery_date !== order.delivery_date) {
+    const moved = await relocateOrder(service, { orderId: id, toDate: body.delivery_date })
+    if ('error' in moved) {
+      return NextResponse.json({
+        error: `Правки збережено, але перенести не вдалося: ${moved.error}`,
+      }, { status: 409 })
+    }
+
+    await logOrderEvent(service, id, 'items', {
+      details: { moved_to: body.delivery_date, number: moved.number },
+    }, actor)
+    await broadcastOrderChange(moved.orderId, 'sync')
+
+    return NextResponse.json({
+      ok: true,
+      changes,
+      moved: { order_id: moved.orderId, number: moved.number, date: body.delivery_date },
+      number_note: moved.note,
+    })
+  }
+
   await broadcastOrderChange(id, 'items')
   await notifyIntegrations(id, 'order.items_changed', service)
 
   return NextResponse.json({
     ok: true,
     changes,
-    number_note: numberNote,
     crm_error: crm && 'error' in crm ? crm.error : null,
   })
 }

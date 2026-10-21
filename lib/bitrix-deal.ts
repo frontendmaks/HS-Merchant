@@ -37,7 +37,7 @@ export const SLOT_ID: Record<string, number> = {
   '17:00-20:00': 345,
 }
 
-const FIELD = {
+export const FIELD = {
   boxNumber: 'UF_CRM_1607510002583',   // НОМЕР ЯЩИКА — номер із журналу
   warehouse: 'UF_BILL_ADRESS_LIST',
   deliveryDate: 'UF_CRM_1606047095',

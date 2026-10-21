@@ -244,3 +244,30 @@ export async function registerStatus(service: Service, date: string) {
     ? { ready: true, note: null }
     : { ready: false, note: `Вкладки ${tabNameFor(date)} немає або немає доступу` }
 }
+
+/**
+ * Звільняє рядок журналу — коли замовлення того дня більше не буде.
+ *
+ * Стирається лише ім'я, а не номер: номер належить аркушу, і рядок має
+ * лишитись вільним для наступного замовлення, а не зникнути.
+ */
+export async function releaseNumber(
+  service: Service,
+  { number, date }: { number: number; date: string },
+): Promise<boolean> {
+  if (!sheetsConfigured()) return false
+
+  const spreadsheetId = await registerFor(service, date)
+  if (!spreadsheetId) return false
+
+  const tab = tabNameFor(date)
+  const rows = await readRange(spreadsheetId, `'${tab}'!A1:B300`)
+  if (!rows) return false
+
+  for (let i = 1; i < rows.length; i++) {
+    if (Number((rows[i]?.[0] ?? '').toString().trim()) === number) {
+      return await writeCell(spreadsheetId, `'${tab}'!B${i + 1}`, '')
+    }
+  }
+  return false
+}

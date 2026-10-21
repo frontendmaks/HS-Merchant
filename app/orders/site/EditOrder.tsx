@@ -87,9 +87,20 @@ export default function EditOrder({ id, warehouses, onClose }: {
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'Не вдалося зберегти')
+      if (d.moved) {
+        /*
+         * Замовлення переїхало: на новий день це вже інше замовлення з
+         * іншим номером. Кажемо який — його шукатимуть на складі саме за
+         * ним, — і лише тоді закриваємо.
+         */
+        const note = d.number_note ? ` ${d.number_note}` : ''
+        alert(`Перенесено на ${d.moved.date}. Новий номер — №${d.moved.number}.${note}`)
+        router.refresh()
+        onClose()
+        return
+      }
       if (d.number_note) {
-        // Номер не переїхав — замовлення збережене, але людина має знати
-        setError(`Збережено. Номер лишився старий: ${d.number_note}`)
+        setError(`Збережено. ${d.number_note}`)
         setSaving(false)
         router.refresh()
         return

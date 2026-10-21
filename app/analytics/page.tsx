@@ -121,7 +121,7 @@ export default async function AnalyticsPage({
       fetchAllRows(() => supabase.from('orders')
         // The raw marketplace payload is large and mostly irrelevant here, so
         // Postgres digs out the three geography fields instead of sending it all
-        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, area, delivery_zone, warehouse, items, total, commission, status, cancel_reason, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code, md_placed:raw->>created_at, rz_placed:raw->>created')
+        .select('id, external_id, platform, order_date, customer_name, customer_phone, address, area, delivery_zone, warehouse, items, total, commission, status, cancel_reason, moved_to_order_id, created_at, rz_city:raw->delivery->city, md_city:raw->delivery_address->city->>name, md_postal:raw->delivery_address->warehouse->>postal_code, md_placed:raw->>created_at, rz_placed:raw->>created')
         .gte('order_date', from).lte('order_date', to)
         .order('order_date', { ascending: false })),
       /**
@@ -143,7 +143,15 @@ export default async function AnalyticsPage({
   // Полігони зон — для географії доставок наших власних замовлень
   const { data: zoneRows } = await zonesPromise
 
-  const orders = (orderRows ?? []) as unknown as OrderWithId[]
+  /*
+   * Перенесені на інший день не рахуємо.
+   *
+   * Замовлення, яке переїхало, живе далі під новим номером — і якщо
+   * рахувати обидва, той самий покупець і та сама сума потраплять у
+   * підсумок двічі, а закрите старе ще й прикинеться скасуванням.
+   */
+  const orders = ((orderRows ?? []) as unknown as OrderWithId[])
+    .filter(o => !(o as unknown as { moved_to_order_id?: string | null }).moved_to_order_id)
   const previous = (previousRows ?? []) as unknown as OrderWithId[]
 
   /** Підсумки минулого відрізка плюс скільки там було різних покупців */
