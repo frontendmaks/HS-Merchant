@@ -100,20 +100,34 @@ export async function relocateOrder(
     [FIELD.address]: order.address ?? '',
   }
 
-  const dealId = Number(await bitrix<number>('crm.deal.add', {
-    fields, params: { REGISTER_SONET_EVENT: 'N' },
-  }))
+  /*
+   * Якщо угода не створиться, номер треба повернути.
+   *
+   * Інакше в журналі лишиться зайнятий рядок із іменем, за яким немає
+   * замовлення, — і наступне замовлення дістане номер на один більший,
+   * ніж мало б, назавжди.
+   */
+  let dealId: number
+  try {
+    dealId = Number(await bitrix<number>('crm.deal.add', {
+      fields, params: { REGISTER_SONET_EVENT: 'N' },
+    }))
+    if (!dealId) throw new Error('Бітрікс не повернув номер угоди')
 
-  if (rows.length) {
-    await bitrix('crm.deal.productrows.set', {
-      id: dealId,
-      rows: rows.map(r => ({
-        ...(r.PRODUCT_ID ? { PRODUCT_ID: r.PRODUCT_ID } : {}),
-        PRODUCT_NAME: r.PRODUCT_NAME,
-        PRICE: r.PRICE,
-        QUANTITY: r.QUANTITY,
-      })),
-    })
+    if (rows.length) {
+      await bitrix('crm.deal.productrows.set', {
+        id: dealId,
+        rows: rows.map(r => ({
+          ...(r.PRODUCT_ID ? { PRODUCT_ID: r.PRODUCT_ID } : {}),
+          PRODUCT_NAME: r.PRODUCT_NAME,
+          PRICE: r.PRICE,
+          QUANTITY: r.QUANTITY,
+        })),
+      })
+    }
+  } catch (e) {
+    await releaseNumber(service, { number: reserved.number, date: toDate })
+    return { error: `Угоду створити не вдалося: ${e instanceof Error ? e.message : e}` }
   }
 
   /*
@@ -150,7 +164,12 @@ export async function relocateOrder(
   }).select('id').single()
 
   if (error || !created) {
-    return { error: `Угоду створено (#${dealId}), але замовлення — ні: ${error?.message}` }
+    // Угода вже є, тож номер лишається за нею — інакше склад шукав би
+    // ящик, якого немає в журналі. Але людина має дізнатись про розрив
+    return {
+      error: `Угоду створено (#${dealId}) з номером ${reserved.number}, `
+        + `але замовлення в Мерчанті — ні: ${error?.message}`,
+    }
   }
 
   // Позиції — копією, щоб бланк нового дня не залежав від старого запису
