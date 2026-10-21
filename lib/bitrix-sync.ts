@@ -18,6 +18,9 @@ import { splitPersona } from '@/lib/phone'
 
 type Service = ReturnType<typeof createServiceClient>
 
+/** Чиї замовлення веде майданчик, а не ми */
+const MARKETPLACE_PLATFORMS = new Set(['maudau', 'rozetka'])
+
 const WAREHOUSE_BY_ID = new Map(
   Object.entries(WAREHOUSE_ID).map(([name, id]) => [String(id), name]),
 )
@@ -120,6 +123,8 @@ export interface SyncResult {
   nextPage?: number | null
   /** Номери, які не вдалося перенести в журналі — щоб це не губилось мовчки */
   notes?: string[]
+  /** Угоди маркетплейсних замовлень — їх веде майданчик, ми їх не чіпаємо */
+  skipped?: number
   error?: string
 }
 
@@ -222,6 +227,20 @@ export async function syncSiteOrders(
           .eq('bitrix_deal_id', Number(deal.ID)).maybeSingle()
 
         if (existing) {
+          /*
+           * Маркетплейсне замовлення цій синхронізації не належить зовсім.
+           *
+           * Угоду для нього завели ми самі, щоб склад його побачив, — але
+           * господар даних там майданчик: і позиції, і суми, і статуси в
+           * нього свої. Перечитувати їх з угоди означало класти другий
+           * комплект позицій поверх першого (замовлення на 813 ₴ ставало
+           * на 1626 ₴) і писати в статус слова з чужого словника.
+           */
+          if (MARKETPLACE_PLATFORMS.has(existing.platform as string)) {
+            result.skipped = (result.skipped ?? 0) + 1
+            continue
+          }
+
           /**
            * Ручне замовлення ми ведемо самі.
            *
