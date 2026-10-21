@@ -11,7 +11,9 @@
  * інтеграція чи людина.
  */
 import { createServiceClient } from '@/lib/supabase/service'
-import { listCards, updateCard, trelloConfigured, type TrelloCard } from '@/lib/trello'
+import {
+  listCards, updateCard, boardLists, trelloConfigured, type TrelloCard,
+} from '@/lib/trello'
 import { getSetting } from '@/lib/settings'
 import { phoneKey } from '@/lib/phone'
 
@@ -161,6 +163,8 @@ export async function enrichNewCards(
   try {
     const listId = await getSetting(service, 'trello_new_list')
     const marketList = await getSetting(service, 'trello_marketplace_list')
+    const board = await getSetting(service, 'trello_board')
+    const matched: { card: TrelloCard; order: OrderRow }[] = []
     const cards = (await listCards(listId)).slice(0, limit)
     result.looked = cards.length
     if (!cards.length) return result
@@ -283,16 +287,151 @@ export async function enrichNewCards(
       const desc = `${stripOurs(card.desc)}\n\n${ourBlock(order, issues)}`
       if (desc.trim() !== card.desc.trim()) fields.desc = desc
 
-      if (!Object.keys(fields).length) continue
 
-      await updateCard(card.id, fields)
-      if (fields.name) result.numbered++
-      if (fields.desc) result.linked++
-      if (fields.idList) result.moved++
+      if (Object.keys(fields).length) {
+        await updateCard(card.id, fields)
+        if (fields.name) result.numbered++
+        if (fields.desc) result.linked++
+        if (fields.idList) result.moved++
+      }
+
+      // Маркетплейсні вже переїхали у свій список — їх не розкладаємо
+      if (!fields.idList) matched.push({ card, order })
     }
+
+    /*
+     * Розкладання — після дописування.
+     *
+     * Номер і бланк мають бути в картці до того, як вона поїде на склад:
+     * комірник відкриває її вже там, і картка без номера для нього
+     * безіменна.
+     */
+    const spread = await spreadToPicking(service, matched, board)
+    result.moved += spread.moved
+    result.problems.push(...spread.problems.map(p => ({
+      card: p.card, number: null, issues: [p.why],
+    })))
 
     return result
   } catch (e) {
     return { ...result, error: e instanceof Error ? e.message : 'помилка Trello' }
   }
+}
+
+/**
+ * Розкладання карток по складах і періодах.
+ *
+ * На дошці в кожного складу свій список комплектації, а всередині —
+ * картки-роздільники «11-14», «14-17», «17-20». Комірник читає список
+ * згори вниз і збирає те, що стоїть під потрібною годиною, тож картка
+ * має лягти саме під свій роздільник, а не в кінець списку.
+ *
+ * Назви складів у нас і на дошці не збігаються дослівно: «МЕ ЦУМ онлайн»
+ * проти «ЦУМ комплектується». Зводимо їх, прибираючи те, що нічого не
+ * розрізняє, — «МЕ», «онлайн», «комплектується», дефіси й пробіли.
+ */
+const stripNoise = (s: string) => s
+  .toLowerCase()
+  // Межі слова через \p{L}, а не \b: ASCII-межа між кириличними літерами
+  // не спрацьовує, і «МЕ» лишалось у назві — «мецум» не збігався з «цум»
+  .replace(/(?<![\p{L}])ме(?![\p{L}])/gu, ' ')
+  .replace(/онлайн|комплектується|комплектация/g, ' ')
+  .replace(/[^\p{L}\p{N}]+/gu, '')
+
+/** «11:00-14:00» → «1114»: так само виглядає й назва роздільника */
+const slotKey = (slot: string) => slot.replace(/[^\d]/g, '').replace(/00/g, '')
+
+interface Destination {
+  listId: string
+  /** Роздільник періоду: під нього й кладемо */
+  separators: Map<string, { id: string; pos: number }>
+  cards: TrelloCard[]
+}
+
+async function pickingLists(boardId: string): Promise<Map<string, Destination>> {
+  const lists = await boardLists(boardId)
+  const out = new Map<string, Destination>()
+
+  for (const list of lists) {
+    if (!/комплект/i.test(list.name)) continue
+
+    const cards = await listCards(list.id)
+    const separators = new Map<string, { id: string; pos: number }>()
+
+    for (const card of cards) {
+      const key = slotKey(card.name)
+      // Роздільник — коротка картка, у назві якої лише години
+      if (card.name.trim().length <= 8 && /^\d{2}-\d{2}$/.test(card.name.trim())) {
+        separators.set(key, { id: card.id, pos: card.pos })
+      }
+    }
+
+    if (separators.size) out.set(stripNoise(list.name), { listId: list.id, separators, cards })
+  }
+
+  return out
+}
+
+/**
+ * Куди саме покласти картку всередині списку.
+ *
+ * Між роздільником і тим, що стоїть одразу за ним. Нове замовлення так
+ * опиняється першим у своєму періоді — комірник бачить його відразу, а
+ * не домотує до кінця дня.
+ */
+function positionUnder(dest: Destination, separator: { pos: number }): number {
+  const after = dest.cards
+    .filter(c => c.pos > separator.pos)
+    .sort((a, b) => a.pos - b.pos)[0]
+
+  return after ? (separator.pos + after.pos) / 2 : separator.pos + 1000
+}
+
+export interface SpreadResult {
+  moved: number
+  problems: { card: string; why: string }[]
+}
+
+export async function spreadToPicking(
+  service: Service,
+  cards: { card: TrelloCard; order: OrderRow }[],
+  boardId: string,
+): Promise<SpreadResult> {
+  const result: SpreadResult = { moved: 0, problems: [] }
+  const ready = cards.filter(({ order }) =>
+    order.warehouse && order.delivery_slot && !isMarketplace(order)
+    && order.status !== 'Скасовано')
+
+  if (!ready.length) return result
+
+  const lists = await pickingLists(boardId)
+
+  for (const { card, order } of ready) {
+    const dest = lists.get(stripNoise(order.warehouse as string))
+    if (!dest) {
+      result.problems.push({
+        card: card.name.slice(0, 50),
+        why: `на дошці немає списку для складу «${order.warehouse}»`,
+      })
+      continue
+    }
+
+    const separator = dest.separators.get(slotKey(order.delivery_slot as string))
+    if (!separator) {
+      result.problems.push({
+        card: card.name.slice(0, 50),
+        why: `у списку немає періоду ${order.delivery_slot}`,
+      })
+      continue
+    }
+
+    const pos = positionUnder(dest, separator)
+    await updateCard(card.id, { idList: dest.listId, pos })
+
+    // Наступну картку цього ж періоду кладемо вже з урахуванням цієї
+    dest.cards.push({ ...card, idList: dest.listId, pos })
+    result.moved++
+  }
+
+  return result
 }
