@@ -94,6 +94,8 @@ export const PAGE_ROLES = {
   users:     ['super_admin', 'admin', 'manager', 'analyst', 'viewer'],
   /** Токени чужих сервісів — лише ті, хто відповідає за систему */
   integrations: ['super_admin', 'admin'],
+  /** Листування з покупцями — хто й так з ними розмовляє */
+  chats: ['super_admin', 'admin', 'manager', 'operator'],
   /** Operators plan their own week here; management approves it */
   schedule:  ['super_admin', 'admin', 'manager', 'operator'],
   /** The change journal exposes who did what — management only */

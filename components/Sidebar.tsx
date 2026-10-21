@@ -35,6 +35,7 @@ const nav = [
     ],
   },
   { href: '/customers', label: 'Клієнти',       icon: '☻', roles: PAGE_ROLES.customers },
+  { href: '/chats',    label: 'Листування',     icon: '✉', roles: PAGE_ROLES.chats },
   { href: '/news',     label: 'Новини',         icon: '◫', roles: PAGE_ROLES.news },
   {
     href: '/requests', label: 'Запити', icon: '✉', roles: PAGE_ROLES.requests,
