@@ -17,6 +17,8 @@ type Service = ReturnType<typeof createServiceClient>
 
 /** Подія, про яку повідомляємо. Одна на замовлення — більше дратує. */
 export const ORDER_RECEIVED = 'order_received'
+/** Склад узявся збирати — клієнтові варто знати, що воно рушило */
+export const ORDER_PICKING = 'order_picking'
 
 const CHANNEL_PHRASE: Record<string, string> = {
   site: 'на сайті',
@@ -113,6 +115,55 @@ export function orderReceivedText(
   return lines.join('\n')
 }
 
+/**
+ * Склад почав збирати.
+ *
+ * Друге й останнє повідомлення в житті замовлення. Більше поки не шлемо:
+ * кожне зайве — привід натиснути «блокувати», а заблокованому вже не
+ * скажеш нічого.
+ */
+export function orderPickingText(order: OrderRow): string {
+  const name = greetingName(order.customer_name)
+  const when = order.delivery_date ? day(order.delivery_date) : null
+  const slot = order.delivery_slot ? `, ${order.delivery_slot}` : ''
+
+  const lines = [`${name}, ваше замовлення вже збирають.`]
+
+  if (when) lines.push('', `Привеземо ${when}${slot}.`)
+  lines.push('', 'Кур\u2019єр зателефонує перед доставкою.')
+
+  return lines.join('\n')
+}
+
+/**
+ * Пише клієнтові про початок комплектації — якщо ще не писали.
+ *
+ * Викликається зі зміни статусу, тож може спрацювати двічі на одне
+ * замовлення: статус міняють і руками, і синхронізацією. Журнал
+ * повідомлень і є тим запобіжником.
+ */
+export async function notifyPicking(
+  service: Service,
+  orderId: string,
+): Promise<void> {
+  const { data: order } = await service
+    .from('orders')
+    .select('id, platform, customer_name, customer_phone, address, delivery_date, delivery_slot, total, share_token')
+    .eq('id', orderId).maybeSingle()
+
+  if (!order?.customer_phone) return
+
+  const { count } = await service
+    .from('customer_messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('order_id', orderId).eq('event', ORDER_PICKING)
+
+  if (count) return
+
+  await deliver(service, order as unknown as OrderRow,
+    orderPickingText(order as unknown as OrderRow), ORDER_PICKING)
+}
+
 export interface NotifyResult {
   looked: number
   sent: number
@@ -192,6 +243,7 @@ async function deliver(
   service: Service,
   order: OrderRow,
   text: string,
+  event: string = ORDER_RECEIVED,
 ): Promise<'sent' | 'unknown' | 'failed'> {
   const key = phoneKey(order.customer_phone)
 
@@ -208,7 +260,7 @@ async function deliver(
         channel: 'telegram',
         order_id: order.id,
         phone: key,
-        event: ORDER_RECEIVED,
+        event,
         body: text,
         sent_at: r.ok ? new Date().toISOString() : null,
         error: r.ok ? null : r.detail,
@@ -221,7 +273,7 @@ async function deliver(
     phone: order.customer_phone,
     text,
     orderId: order.id,
-    event: ORDER_RECEIVED,
+    event,
   })
 
   if (viber.ok) return 'sent'

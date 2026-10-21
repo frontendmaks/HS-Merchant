@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { rememberChat } from '@/lib/telegram'
+import { rememberChat, sendWelcome } from '@/lib/telegram'
+import { integrationConfig } from '@/lib/integrations'
 
 /**
  * Події від Telegram.
@@ -38,15 +39,34 @@ export async function POST(request: NextRequest) {
 
   const chatId = update.message?.chat?.id
   if (chatId != null) {
+    const contact = update.message?.contact?.phone_number ?? null
+    // «/start 0671234567» — так ми дізнаємось, чий це чат, ще до того
+    // як людина щось напише
+    const payload = update.message?.text?.match(/^\/start(?:\s+(\S+))?/)
+
     await rememberChat(service, {
       chatId: String(chatId),
       name: [update.message?.from?.first_name, update.message?.from?.last_name]
         .filter(Boolean).join(' ') || null,
-      phone: update.message?.contact?.phone_number ?? null,
-      // «/start 0671234567» — так ми дізнаємось, чий це чат, ще до того
-      // як людина щось напише
-      payload: update.message?.text?.match(/^\/start\s+(\S+)/)?.[1] ?? null,
+      phone: contact,
+      payload: payload?.[1] ?? null,
     })
+
+    /*
+     * Відповідаємо на «Почати» й на надісланий контакт.
+     *
+     * Мовчання тут гірше за будь-який текст: людина натиснула кнопку й не
+     * побачила нічого, а отже вирішила, що бот не працює.
+     */
+    if (payload || contact) {
+      const { data: row } = await service
+        .from('telegram_chats').select('phone').eq('chat_id', String(chatId)).maybeSingle()
+
+      const config = await integrationConfig<{ token?: string }>(service, 'telegram')
+      if (config?.token) {
+        await sendWelcome(config.token, String(chatId), !!row?.phone)
+      }
+    }
   }
 
   return NextResponse.json({ ok: true })

@@ -51,7 +51,25 @@ export async function onStatusChanged(
   status: string | null,
 ): Promise<void> {
   if (status !== PICKING_STAGE) return
+
+  /*
+   * Два адресати однієї події.
+   *
+   * Складу йде бланк, клієнтові — повідомлення, що його замовлення
+   * збирають. Це одна й та сама мить, і розводити її по двох місцях
+   * означало б рано чи пізно надіслати одне без другого.
+   *
+   * Клієнта повідомляємо після складу й окремо: якщо в нього немає
+   * чату або месенджер мовчить, бланк на склад має піти однаково.
+   */
   await sendOrderSheet(service, orderId)
+
+  try {
+    const { notifyPicking } = await import('@/lib/customer-notify')
+    await notifyPicking(service, orderId)
+  } catch (e) {
+    console.error('notifyPicking failed:', e instanceof Error ? e.message : e)
+  }
 }
 
 export async function sendToChat(dialogId: string, text: string): Promise<void> {

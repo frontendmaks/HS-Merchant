@@ -42,6 +42,39 @@ export async function dropWebhook(token: string) {
   return await call(token, 'deleteWebhook', {})
 }
 
+/**
+ * Вітання з проханням поділитись номером.
+ *
+ * Посилання з номером працює лише тоді, коли людина прийшла саме по
+ * ньому. Хто відкрив бота напряму — а так роблять частіше, ніж здається —
+ * лишався для нас безіменним чатом: повідомлення є, а кому воно належить,
+ * невідомо.
+ *
+ * Кнопка «поділитись номером» закриває цю дірку, і номер при цьому
+ * підтверджує сам Telegram, а не ми з чужих слів.
+ */
+export async function sendWelcome(token: string, chatId: string, known: boolean) {
+  const text = known
+    ? 'Вітаємо! Тут ви отримуватимете сповіщення про свої замовлення в «Галицькій Свіжині».'
+    : 'Вітаємо в «Галицькій Свіжині»!\n\n'
+      + 'Тут ви отримуватимете сповіщення про свої замовлення — коли ми їх прийняли '
+      + 'і коли почали збирати.\n\n'
+      + 'Щоб ми знали, які замовлення ваші, поділіться номером телефону — тим самим, '
+      + 'який ви вказуєте при замовленні.'
+
+  return await call(token, 'sendMessage', {
+    chat_id: chatId,
+    text,
+    reply_markup: known
+      ? { remove_keyboard: true }
+      : {
+          keyboard: [[{ text: '\u{1F4F1} Поділитись номером', request_contact: true }]],
+          resize_keyboard: true,
+          one_time_keyboard: true,
+        },
+  })
+}
+
 export async function sendMessage(
   service: Service,
   chatId: string,
