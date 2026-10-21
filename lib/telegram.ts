@@ -53,6 +53,30 @@ export async function dropWebhook(token: string) {
  * Кнопка «поділитись номером» закриває цю дірку, і номер при цьому
  * підтверджує сам Telegram, а не ми з чужих слів.
  */
+/** Надсилає підготований екран */
+export async function sendScreen(
+  token: string,
+  chatId: string,
+  screen: { text: string; keyboard?: { text: string; callback_data?: string; url?: string }[][]; menu?: boolean },
+  menuRows: string[][],
+) {
+  return await call(token, 'sendMessage', {
+    chat_id: chatId,
+    text: screen.text,
+    link_preview_options: { is_disabled: true },
+    reply_markup: screen.keyboard
+      ? { inline_keyboard: screen.keyboard }
+      : screen.menu
+        ? { keyboard: menuRows.map(r => r.map(text => ({ text }))), resize_keyboard: true }
+        : undefined,
+  })
+}
+
+/** Прибирає «годинник» із натиснутої кнопки */
+export async function answerCallback(token: string, id: string, text?: string) {
+  return await call(token, 'answerCallbackQuery', { callback_query_id: id, text })
+}
+
 export async function sendWelcome(token: string, chatId: string, known: boolean) {
   const text = known
     ? 'Вітаємо! Тут ви отримуватимете сповіщення про свої замовлення в «Галицькій Свіжині».'

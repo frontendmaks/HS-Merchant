@@ -31,6 +31,10 @@ export const DEFAULTS = {
   trello_marketplace_list: '6ad85d88e8cb921c90f8e3cc' as string,
   /** Чи дописувати в картки номер ящика й бланк */
   trello_enrich: true,
+  /** Сайт магазину — бот кличе туди по нове замовлення */
+  site_url: 'https://halytska-svizhyna.ua' as string,
+  /** Телефон відділу доставки — його бот дає клієнтові */
+  delivery_phone: '+380 (32) 232-32-32' as string,
 } as const
 
 export type SettingKey = keyof typeof DEFAULTS
