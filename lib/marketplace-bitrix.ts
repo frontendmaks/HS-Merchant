@@ -14,7 +14,9 @@ import { bitrix } from '@/lib/bitrix'
 import { createServiceClient } from '@/lib/supabase/service'
 import { loadPricing, basePrice, roundOffer, categoryFor } from '@/lib/price-category'
 import { calcMarketplacePrice } from '@/lib/feed-xml'
-import { WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY } from '@/lib/bitrix-deal'
+import {
+  WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, contactFor, productIds,
+} from '@/lib/bitrix-deal'
 import { getSetting } from '@/lib/settings'
 import { platformLabel } from '@/lib/order-source'
 import { ensureLines } from '@/lib/order-lines'
@@ -79,7 +81,13 @@ async function feedPrices(
   return prices
 }
 
-export interface PushResult { dealId: number; priced: number; lines: number }
+export interface PushResult {
+  dealId: number
+  priced: number
+  lines: number
+  /** Скільки рядків знайшли свій товар у Бітріксі — від цього залежить сума */
+  matched: number
+}
 
 export async function pushMarketplaceOrder(
   service: Service,
@@ -108,10 +116,36 @@ export async function pushMarketplaceOrder(
     const prices = await feedPrices(service, order.platform as string)
     let priced = 0
 
+    /*
+     * Артикул товару в рядку угоди.
+     *
+     * Без нього Бітрікс не зараховує рядок у суму угоди: три позиції на
+     * 813 ₴ показували «0 грн». Тож тягнемо той самий ланцюжок, що й для
+     * телефонних замовлень: наш товар → GUID 1С → товар у Бітріксі.
+     */
+    const ourIds = lines.map(l => l.product_id).filter(Boolean) as string[]
+    const { data: products } = ourIds.length
+      ? await service.from('products').select('id, uid_1c').in('id', ourIds)
+      : { data: [] }
+
+    const uidByOurId = new Map(
+      (products ?? []).filter(p => p.uid_1c).map(p => [p.id as string, p.uid_1c as string]),
+    )
+    const bitrixByUid = await productIds(service, [...new Set(uidByOurId.values())])
+
+    let matched = 0
     const rows = lines.map(l => {
       const fromFeed = l.product_id ? prices.get(l.product_id as string) : undefined
       if (fromFeed != null) priced++
+
+      const uid = l.product_id ? uidByOurId.get(l.product_id as string) : undefined
+      const id = uid ? bitrixByUid.get(uid) : undefined
+      if (id) matched++
+
       return {
+        // Товар без пари в каталозі йде рядком із назвою — комірник бачить
+        // те саме, тільки сума угоди такий рядок не враховує
+        ...(id ? { PRODUCT_ID: id } : {}),
         PRODUCT_NAME: l.title,
         PRICE: fromFeed ?? Number(l.price_per_unit ?? 0),
         QUANTITY: Number(l.ordered_qty ?? 1),
@@ -120,6 +154,11 @@ export async function pushMarketplaceOrder(
 
     const warehouse = await getSetting(service, 'marketplace_warehouse')
     const label = platformLabel(order.platform as string)
+
+    // Клієнт в угоді: знайдемо за телефоном або заведемо нового
+    const contactId = order.customer_phone && order.customer_name
+      ? await contactFor(order.customer_name as string, order.customer_phone as string)
+      : null
 
     const fields: Record<string, unknown> = {
       // Назва каже головне: це доставка, і звідки вона прийшла
@@ -136,6 +175,7 @@ export async function pushMarketplaceOrder(
       [FIELD.paymentType]: PAYMENT_PREPAID,
       [FIELD.shipping]: SHIPPING_NP,
       [FIELD.orderKey]: order.external_id ?? '',
+      ...(contactId ? { CONTACT_ID: contactId } : {}),
     }
 
     const dealId = order.bitrix_deal_id
@@ -149,7 +189,7 @@ export async function pushMarketplaceOrder(
     await service.from('orders')
       .update({ bitrix_deal_id: dealId, bitrix_error: null }).eq('id', orderId)
 
-    return { dealId, priced, lines: rows.length }
+    return { dealId, priced, lines: rows.length, matched }
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)
     await service.from('orders').update({ bitrix_error: error }).eq('id', orderId)

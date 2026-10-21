@@ -11,6 +11,7 @@
  * бачити те саме.
  */
 import { createServiceClient } from '@/lib/supabase/service'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import {
   buildLine, indexCatalog,
   type CatalogProduct, type MarketplaceLine, type OrderLine,
@@ -19,11 +20,19 @@ import {
 type Service = ReturnType<typeof createServiceClient>
 
 export async function loadCatalog(service: Service) {
-  const { data } = await service
+  /*
+   * Сторінками, а не одним запитом.
+   *
+   * PostgREST обрізає відповідь на тисячі рядків і мовчить про це —
+   * `.limit(5000)` його не стосується. Каталог має дві тисячі товарів, тож
+   * половина для зіставлення просто не існувала: рядок замовлення не
+   * знаходив свого товару, лишався без артикулу, а в Бітріксі угода з
+   * таких рядків показувала суму 0 ₴.
+   */
+  const data = await fetchAllRows(() => service
     .from('products')
-    .select('id, name, sku, external_id, price, attributes')
-    .limit(5000)
-  return indexCatalog((data ?? []) as CatalogProduct[])
+    .select('id, name, sku, external_id, price, attributes'))
+  return indexCatalog((data ?? []) as unknown as CatalogProduct[])
 }
 
 /** The order's lines as the marketplace sent them. */

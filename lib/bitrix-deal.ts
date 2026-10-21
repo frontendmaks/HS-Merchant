@@ -85,7 +85,7 @@ interface ItemRow {
  * Спільний ключ — GUID з 1С: у нас `uid_1c`, там `XML_ID`. Знайдені пари
  * лишаються в базі, тож питаємо Бітрікс лише про ті, яких ще не бачили.
  */
-async function productIds(
+export async function productIds(
   service: Service,
   uids: string[],
 ): Promise<Map<string, number>> {
@@ -124,7 +124,13 @@ async function productIds(
  * почули, і шукати за ним означало б створити другого «Дениса К.» поруч із
  * «Костишиним Денисом».
  */
-async function contactFor(name: string, phone: string): Promise<number | null> {
+/**
+ * Контакт для угоди: знайти або створити.
+ *
+ * Без нього угода стоїть із порожнім клієнтом, і в CRM її не знайти ні за
+ * іменем, ні за телефоном — а саме так її й шукають.
+ */
+export async function contactFor(name: string, phone: string): Promise<number | null> {
   try {
     const dup = await bitrix<{ CONTACT?: number[] }>('crm.duplicate.findbycomm', {
       entity_type: 'CONTACT', type: 'PHONE', values: [phone],
