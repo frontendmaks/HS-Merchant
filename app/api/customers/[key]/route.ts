@@ -26,7 +26,7 @@ export async function GET(
 
   const [{ data: orders }, { data: products }] = await Promise.all([
     service.from('orders')
-      .select('id, external_id, manual_number, platform, order_date, status, total, address, warehouse, delivery_date, delivery_slot')
+      .select('id, external_id, manual_number, platform, order_date, status, total, address, warehouse, delivery_date, delivery_slot, review:order_reviews(rating, comment)')
       .filter('customer_phone', 'like', `%${digits}`)
       .order('order_date', { ascending: false })
       .limit(50),

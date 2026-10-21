@@ -39,6 +39,8 @@ interface Row {
   delivery_zone: string | null; delivery_date: string | null; delivery_slot: string | null
   total: number | null; status: string | null; share_token: string | null
   auto_done_at: string | null; auto_problem: string | null; chat_sent_at: string | null
+  /** Оцінка клієнта, якщо він її лишив */
+  review?: { rating: number; comment: string | null }[] | null
 }
 
 /**
@@ -133,7 +135,7 @@ export default async function SiteOrdersPage({
 
   const { data } = await supabase
     .from('orders')
-    .select('id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at')
+    .select('id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, review:order_reviews(rating, comment)')
     .in('platform', [...SITE_PLATFORMS])
     .eq('delivery_date', date)
     .order('created_at', { ascending: false })
@@ -266,6 +268,20 @@ export default async function SiteOrdersPage({
                     )}
                     {!o.auto_done_at && !o.auto_problem && (
                       <span className="block text-zinc-600 text-xs">не оглянуто</span>
+                    )}
+                    {/* Оцінка клієнта — поруч із номером, бо саме за номером
+                        про замовлення й згадують */}
+                    {o.review?.[0] && (
+                      <span
+                        className="block text-amber-400 text-xs"
+                        title={o.review[0].comment ?? 'Без коментаря'}
+                      >
+                        {'\u2605'.repeat(o.review[0].rating)}
+                        <span className="text-zinc-600">
+                          {'\u2606'.repeat(5 - o.review[0].rating)}
+                        </span>
+                        {o.review[0].comment ? ' ✍' : ''}
+                      </span>
                     )}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">

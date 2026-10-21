@@ -220,6 +220,21 @@ export async function relocateOrder(
       })
     : true
 
+  /*
+   * Клієнт має почути це від нас.
+   *
+   * Він чекає сьогодні. Якщо не сказати, він чекатиме до вечора, а тоді
+   * зателефонує — і розмова почнеться з образи.
+   */
+  try {
+    const { notifyOnce, orderMovedText, ORDER_MOVED } = await import('@/lib/customer-notify')
+    const from = order.delivery_date as string
+    await notifyOnce(service, created.id as string, ORDER_MOVED,
+      o => orderMovedText(o, from))
+  } catch (e) {
+    console.error('notify moved failed:', e instanceof Error ? e.message : e)
+  }
+
   return {
     orderId: created.id as string,
     number: reserved.number,

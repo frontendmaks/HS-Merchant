@@ -24,6 +24,7 @@ interface Order {
   platform: string | null; order_date: string | null; status: string | null
   total: number | null; address: string | null; warehouse: string | null
   delivery_date: string | null; delivery_slot: string | null
+  review?: { rating: number; comment: string | null }[] | null
 }
 interface Product {
   title: string; qty: number; unit: string | null; times: number; last_order: string | null
@@ -150,6 +151,17 @@ export default function CustomerRow({ c }: { c: Customer }) {
                           {o.manual_number ? `№${o.manual_number}` : o.external_id}
                           <span className="text-zinc-600"> · {o.status}</span>
                         </Link>
+                        {/* Оцінка поруч із сумою: разом вони й кажуть, чим
+                            для клієнта було це замовлення */}
+                        {o.review?.[0] && (
+                          <span
+                            className="text-amber-400 whitespace-nowrap"
+                            title={o.review[0].comment ?? 'Без коментаря'}
+                          >
+                            {'\u2605'.repeat(o.review[0].rating)}
+                            {o.review[0].comment ? ' ✍' : ''}
+                          </span>
+                        )}
                         <span className="text-zinc-400 tabular-nums whitespace-nowrap">
                           {money(o.total)}
                         </span>

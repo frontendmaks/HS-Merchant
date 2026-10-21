@@ -187,5 +187,21 @@ export async function changeOrderStatus(
   await notifyIntegrations(id, 'order.status_changed')
   // Комплектація — момент, коли бланк потрібен складу
   await onStatusChanged(supabase, id, status)
+
+  /*
+   * Скасування клієнт має почути від нас, а не здогадатись із того, що
+   * ніхто не приїхав. Причину не переказуємо: вона наша, внутрішня, і
+   * «гість не відповідає» в листі покупцеві звучить як звинувачення.
+   */
+  if (status === 'Скасовано') {
+    try {
+      const { notifyOnce, orderCanceledText, ORDER_CANCELED } =
+        await import('@/lib/customer-notify')
+      await notifyOnce(supabase, id, ORDER_CANCELED, orderCanceledText)
+    } catch (e) {
+      console.error('notify canceled failed:', e instanceof Error ? e.message : e)
+    }
+  }
+
   return NextResponse.json({ success: true })
 }

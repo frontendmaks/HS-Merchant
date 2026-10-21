@@ -51,6 +51,10 @@
     {
       "path": "/api/cron/notify?limit=30",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/delivery",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

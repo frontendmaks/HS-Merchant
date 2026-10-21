@@ -19,6 +19,14 @@ type Service = ReturnType<typeof createServiceClient>
 export const ORDER_RECEIVED = 'order_received'
 /** Склад узявся збирати — клієнтові варто знати, що воно рушило */
 export const ORDER_PICKING = 'order_picking'
+/** Перенесли на інший день — мовчати про це найгірше з усього */
+export const ORDER_MOVED = 'order_moved'
+/** Скасували — клієнт має почути це від нас, а не здогадатись */
+export const ORDER_CANCELED = 'order_canceled'
+/** Почався період доставки */
+export const ORDER_ON_THE_WAY = 'order_on_the_way'
+/** Період доставки скінчився — питаємо, як усе пройшло */
+export const ORDER_DELIVERED = 'order_delivered'
 
 const CHANNEL_PHRASE: Record<string, string> = {
   site: 'на сайті',
@@ -45,9 +53,6 @@ interface ItemRow {
   ordered_qty: number | null
   ordered_total: number | null
 }
-
-const money = (n: number) =>
-  `${Math.round(n).toLocaleString('uk-UA')} ₴`
 
 const day = (date: string) =>
   new Date(`${date}T12:00:00`).toLocaleDateString('uk-UA', {
@@ -93,8 +98,6 @@ export function orderReceivedText(
   } else if (address) {
     lines.push(`Доставка за адресою: ${address}.`)
   }
-
-  if (order.total != null) lines.push(`Сума: ${money(Number(order.total))}`)
 
   if (items.length) {
     lines.push('', 'Ваше замовлення:')
@@ -142,26 +145,89 @@ export function orderPickingText(order: OrderRow): string {
  * замовлення: статус міняють і руками, і синхронізацією. Журнал
  * повідомлень і є тим запобіжником.
  */
-export async function notifyPicking(
+export async function notifyPicking(service: Service, orderId: string): Promise<void> {
+  await notifyOnce(service, orderId, ORDER_PICKING, orderPickingText)
+}
+
+export function orderMovedText(order: OrderRow, fromDate: string): string {
+  const name = greetingName(order.customer_name)
+  const when = order.delivery_date ? day(order.delivery_date) : null
+  const slot = order.delivery_slot ? `, ${order.delivery_slot}` : ''
+
+  const lines = [
+    `${name}, ваше замовлення від ${day(fromDate)} перенесено.`,
+  ]
+  if (when) lines.push('', `Нова дата доставки: ${when}${slot}.`)
+  lines.push('', 'Перепрошуємо за незручності. Якщо дата не підходить — зателефонуйте нам.')
+
+  return lines.join('\n')
+}
+
+/** Скасування. Причину не переказуємо: вона наша, внутрішня. */
+export function orderCanceledText(order: OrderRow): string {
+  return [
+    `${greetingName(order.customer_name)}, ваше замовлення скасовано.`,
+    '',
+    'Якщо це сталося непорозумінням — зателефонуйте нам, ми все владнаємо.',
+  ].join('\n')
+}
+
+/** Період доставки почався */
+export function orderOnTheWayText(order: OrderRow): string {
+  const name = greetingName(order.customer_name)
+  const slot = order.delivery_slot ?? null
+
+  const lines = [`${name}, ваше замовлення вирушило до вас.`]
+  if (slot) lines.push('', `Очікуйте його сьогодні в період ${slot}.`)
+  lines.push('', 'Кур\u2019єр зателефонує перед приїздом.')
+
+  return lines.join('\n')
+}
+
+/** Період скінчився — просимо оцінити */
+export function orderDeliveredText(order: OrderRow, reviewLink: string | null): string {
+  const lines = [
+    `${greetingName(order.customer_name)}, дякуємо за замовлення!`,
+    '',
+    'Будемо вдячні, якщо оціните доставку — це займе пів хвилини '
+      + 'і допоможе нам працювати краще.',
+  ]
+  if (reviewLink) lines.push('', reviewLink)
+  return lines.join('\n')
+}
+
+/**
+ * Надсилає одну подію по одному замовленню.
+ *
+ * Повторів не буває: журнал повідомлень і є запобіжником, бо кожна з цих
+ * подій може спрацювати двічі — статус міняють і руками, і синхронізацією.
+ */
+export async function notifyOnce(
   service: Service,
   orderId: string,
-): Promise<void> {
+  event: string,
+  compose: (order: OrderRow, link: string | null) => string,
+): Promise<boolean> {
   const { data: order } = await service
     .from('orders')
     .select('id, platform, customer_name, customer_phone, address, delivery_date, delivery_slot, total, share_token')
     .eq('id', orderId).maybeSingle()
 
-  if (!order?.customer_phone) return
+  if (!order?.customer_phone) return false
 
   const { count } = await service
     .from('customer_messages')
     .select('id', { count: 'exact', head: true })
-    .eq('order_id', orderId).eq('event', ORDER_PICKING)
+    .eq('order_id', orderId).eq('event', event)
 
-  if (count) return
+  if (count) return false
 
-  await deliver(service, order as unknown as OrderRow,
-    orderPickingText(order as unknown as OrderRow), ORDER_PICKING)
+  const row = order as unknown as OrderRow
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hs-merchant.vercel.app'
+  const link = row.share_token ? `${base}/vidhuk/${row.share_token}` : null
+
+  const sent = await deliver(service, row, compose(row, link), event)
+  return sent === 'sent'
 }
 
 export interface NotifyResult {
@@ -278,4 +344,82 @@ async function deliver(
 
   if (viber.ok) return 'sent'
   return viber.reason === 'unknown' || viber.reason === 'off' ? 'unknown' : 'failed'
+}
+
+/**
+ * Період доставки: вирушило й доставлено.
+ *
+ * Час доставки записаний як «11:00-14:00» і живе за київським годинником,
+ * а сервер рахує в UTC. Зсув беремо на саму дату: наприкінці жовтня
+ * годинник переводять, і зашите число помилялось би на годину — рівно в
+ * той бік, щоб написати «вирушило» тоді, коли кур'єр ще на складі.
+ */
+const KYIV = 'Europe/Kyiv'
+
+const kyivNow = () => {
+  const now = new Date()
+  const date = now.toLocaleDateString('en-CA', { timeZone: KYIV })
+  const [h, m] = now.toLocaleTimeString('en-GB', {
+    timeZone: KYIV, hour: '2-digit', minute: '2-digit', hour12: false,
+  }).split(':').map(Number)
+  return { date, minutes: h * 60 + m }
+}
+
+const slotBounds = (slot: string | null): { from: number; to: number } | null => {
+  const m = (slot ?? '').match(/^(\d{1,2}):(\d{2})\s*[-–]\s*(\d{1,2}):(\d{2})$/)
+  if (!m) return null
+  return {
+    from: Number(m[1]) * 60 + Number(m[2]),
+    to: Number(m[3]) * 60 + Number(m[4]),
+  }
+}
+
+export interface SlotResult {
+  looked: number
+  onTheWay: number
+  delivered: number
+}
+
+/**
+ * Проходить сьогоднішні замовлення й каже те, що на часі.
+ *
+ * Скасовані оминаємо: сказати «вирушило» про скасоване замовлення гірше,
+ * ніж не сказати нічого.
+ */
+export async function notifyBySlot(
+  service: Service,
+  { limit = 100 }: { limit?: number } = {},
+): Promise<SlotResult> {
+  const result: SlotResult = { looked: 0, onTheWay: 0, delivered: 0 }
+  const { date, minutes } = kyivNow()
+
+  const { data } = await service
+    .from('orders')
+    .select('id, delivery_slot, status, customer_phone')
+    .in('platform', ['site', 'manual'])
+    .eq('delivery_date', date)
+    .not('customer_phone', 'is', null)
+    .not('status', 'in', '("Скасовано","Повернено","Не вдалося")')
+    .limit(limit)
+
+  const orders = data ?? []
+  result.looked = orders.length
+
+  for (const order of orders) {
+    const bounds = slotBounds(order.delivery_slot as string | null)
+    if (!bounds) continue
+
+    if (minutes >= bounds.to) {
+      if (await notifyOnce(service, order.id as string, ORDER_DELIVERED,
+        (o, link) => orderDeliveredText(o, link))) result.delivered++
+      continue
+    }
+
+    if (minutes >= bounds.from) {
+      if (await notifyOnce(service, order.id as string, ORDER_ON_THE_WAY,
+        orderOnTheWayText)) result.onTheWay++
+    }
+  }
+
+  return result
 }

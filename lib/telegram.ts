@@ -83,7 +83,18 @@ export async function sendMessage(
   const config = await integrationConfig<{ token?: string }>(service, 'telegram')
   if (!config?.token) return { ok: false, detail: 'Telegram не під’єднано' }
 
-  const answer = await call(config.token, 'sendMessage', { chat_id: chatId, text })
+  /*
+   * Без картки посилання.
+   *
+   * Telegram підтягує до посилання заголовок і опис сайту — у нас це
+   * «Агрегатор XML фідів для маркетплейсів». Клієнтові це ні про що не
+   * каже й виглядає так, ніби він отримав чужий службовий лист.
+   */
+  const answer = await call(config.token, 'sendMessage', {
+    chat_id: chatId,
+    text,
+    link_preview_options: { is_disabled: true },
+  })
   return { ok: answer.ok, detail: answer.description ?? 'ok' }
 }
 
