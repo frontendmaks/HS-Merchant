@@ -111,6 +111,8 @@ export async function POST(req: NextRequest) {
       delivery_slot: slot,
       delivery_zone: body?.delivery_zone ?? null,
       warehouse: body?.warehouse ?? null,
+      // Склад назвала людина — огляд його не переставляє, лише звіряє
+      warehouse_pinned: !!body?.warehouse,
       customer_name: name,
       customer_phone: phone,
       address,
