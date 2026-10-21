@@ -33,11 +33,24 @@ const CACHE_KEY = 'site_promos'
 /** Акції міняють раз на тиждень, тож пів доби витримки нікого не образить */
 const TTL_MS = 12 * 3600_000
 
+/**
+ * Текст із HTML у вигляді, придатному для читання.
+ *
+ * WordPress пише лапки числовими сутностями — `&#8220;Наминака&#8221;`, —
+ * і перелічувати їх поіменно означає рано чи пізно пропустити якусь.
+ * Тому числові розкодовуємо загальним правилом, а іменовані лишаємо
+ * списком: їх небагато і вони не ростуть.
+ */
+const NAMED: Record<string, string> = {
+  amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', nbsp: ' ',
+  laquo: '«', raquo: '»', ndash: '–', mdash: '—', hellip: '…',
+}
+
 const decode = (s: string) => s
-  .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'")
-  .replace(/&laquo;/g, '«').replace(/&raquo;/g, '»')
-  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
   .replace(/<[^>]+>/g, ' ')
+  .replace(/&#x([\da-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+  .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+  .replace(/&([a-z]+);/gi, (whole, name: string) => NAMED[name.toLowerCase()] ?? whole)
   .replace(/\s+/g, ' ').trim()
 
 const get = async (url: string) => {
@@ -70,7 +83,7 @@ function itemsFrom(page: string): PromoItem[] {
 
   for (const block of page.split('class="product-entry').slice(1)) {
     const link = block.match(/href="(https:\/\/[^"]+\/[a-z0-9-]{4,}\/)"/)?.[1]
-    const name = block.match(/alt="([^"]+)"/)?.[1]
+    const name = block.match(/alt="([^"]*)"/)?.[1]
     const price = block.match(/itemprop="price"[^>]*content="([\d.]+)"/)?.[1]
     const unit = block.match(/(грн\/кг|грн\/шт|грн)/)?.[1]
 
