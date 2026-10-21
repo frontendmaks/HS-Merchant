@@ -148,7 +148,11 @@ export default async function OrderSheet({
             <tr style={{ borderTop: THICK }} className="font-bold">
               <td colSpan={4} className="py-2 text-right">Разом</td>
               <td className="py-2 text-right whitespace-nowrap">
-                {Number(order.total ?? 0)} ₴
+                {/* Сума своїх же рядків, а не поле замовлення: підсумок під
+                    стовпчиком мусить дорівнювати стовпчику, хоч би що
+                    сталося з полем */}
+                {Math.round((items ?? []).reduce(
+                  (sum: number, i) => sum + Number(i.ordered_total ?? 0), 0) * 100) / 100} ₴
               </td>
             </tr>
             {order.weight != null && (
