@@ -45,6 +45,7 @@ const nav = [
       { href: '/products/removals', label: 'Зняття з продажу', roles: PAGE_ROLES.productRemovals },
     ],
   },
+  { href: '/integrations', label: 'Інтеграції', icon: '⇄', roles: PAGE_ROLES.integrations },
   { href: '/users',    label: 'Користувачі',    icon: '◉', roles: PAGE_ROLES.users },
 ]
 

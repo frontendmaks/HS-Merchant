@@ -92,6 +92,8 @@ export const PAGE_ROLES = {
   // An analyst opens this to see who is who; acting on a user needs a role
   // that can grant one, which is checked per action rather than per page
   users:     ['super_admin', 'admin', 'manager', 'analyst', 'viewer'],
+  /** Токени чужих сервісів — лише ті, хто відповідає за систему */
+  integrations: ['super_admin', 'admin'],
   /** Operators plan their own week here; management approves it */
   schedule:  ['super_admin', 'admin', 'manager', 'operator'],
   /** The change journal exposes who did what — management only */
