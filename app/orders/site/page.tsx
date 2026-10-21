@@ -11,6 +11,7 @@ import SyncButton from './SyncButton'
 import SiteFilters from './SiteFilters'
 import { lastCronRun } from '@/lib/cron-log'
 import EditButton from './EditButton'
+import { dayMonth } from '@/lib/format'
 
 /**
  * Замовлення з сайту й телефону.
@@ -38,7 +39,8 @@ interface Row {
   customer_phone: string | null; address: string | null; warehouse: string | null
   delivery_zone: string | null; delivery_date: string | null; delivery_slot: string | null
   total: number | null; status: string | null; share_token: string | null
-  auto_done_at: string | null; auto_problem: string | null; chat_sent_at: string | null
+  auto_done_at: string | null; auto_problem: string | null
+  chat_sent_at: string | null; chat_due_at: string | null
 }
 
 /**
@@ -133,7 +135,7 @@ export default async function SiteOrdersPage({
 
   const { data } = await supabase
     .from('orders')
-    .select('id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at')
+    .select('id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, chat_due_at')
     .in('platform', [...SITE_PLATFORMS])
     .eq('delivery_date', date)
     .order('created_at', { ascending: false })
@@ -252,11 +254,21 @@ export default async function SiteOrdersPage({
                         не з журналу
                       </span>
                     )}
-                    {o.chat_sent_at && (
+                    {o.chat_sent_at ? (
                       <span className="block text-emerald-600 text-xs" title="Бланк надіслано в чат складу">
                         бланк у чаті
                       </span>
-                    )}
+                    ) : o.chat_due_at ? (
+                      /* Мовчання в групі складу — не помилка, а розклад:
+                         замовлення на майбутній день не має губитись серед
+                         сьогоднішніх */
+                      <span
+                        className="block text-sky-500 text-xs"
+                        title={`Бланк піде о 05:00 ${dayMonth(o.delivery_date ?? '')}`}
+                      >
+                        бланк — очікує дня доставки
+                      </span>
+                    ) : null}
                     {!o.auto_done_at && !o.auto_problem && (
                       <span className="block text-zinc-600 text-xs">не оглянуто</span>
                     )}

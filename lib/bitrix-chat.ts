@@ -58,6 +58,46 @@ export async function sendToChat(dialogId: string, text: string): Promise<void> 
   await bitrix('im.message.add', { DIALOG_ID: dialogId, MESSAGE: text })
 }
 
+/** Київський день, а не UTC: робочий день складу живе за місцевим часом */
+export const kyivToday = () =>
+  new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' })
+
+/** Котра зараз година у Львові */
+const kyivHour = () =>
+  Number(new Date().toLocaleString('en-GB', { timeZone: 'Europe/Kyiv', hour: '2-digit', hour12: false }))
+
+/** О котрій ранку склад отримує бланки на сьогодні */
+export const BLANK_HOUR = 5
+
+/**
+ * Чи час уже надсилати бланк на цю дату.
+ *
+ * Замовлення на п'ятницю, прийняте в середу, складу сьогодні не потрібне:
+ * воно загубиться серед сьогоднішніх, а в п'ятницю вранці його ніхто не
+ * шукатиме в учорашній стрічці. Тому бланк чекає до п'ятої ранку свого дня.
+ */
+export const blankDue = (deliveryDate: string | null | undefined): boolean => {
+  if (!deliveryDate) return true
+  const today = kyivToday()
+  if (deliveryDate < today) return true
+  if (deliveryDate > today) return false
+  return kyivHour() >= BLANK_HOUR
+}
+
+/** Коли саме бланк має піти — п'ята ранку дня доставки за Києвом */
+export const blankDueAt = (deliveryDate: string): Date => {
+  // Зсув Києва проти UTC рахуємо на саму дату: наприкінці жовтня він
+  // міняється, і зашите «+03:00» відправляло б бланк на годину раніше
+  const noon = new Date(`${deliveryDate}T12:00:00Z`)
+  const offset = (new Date(noon.toLocaleString('en-US', { timeZone: 'Europe/Kyiv' })).getTime()
+    - new Date(noon.toLocaleString('en-US', { timeZone: 'UTC' })).getTime()) / 3_600_000
+  const sign = offset >= 0 ? '+' : '-'
+  const hours = String(Math.abs(offset)).padStart(2, '0')
+  return new Date(
+    `${deliveryDate}T${String(BLANK_HOUR).padStart(2, '0')}:00:00${sign}${hours}:00`,
+  )
+}
+
 /**
  * Надсилає бланк у чат складу.
  *
@@ -71,12 +111,26 @@ export async function sendOrderSheet(
   try {
     const { data: order } = await service
       .from('orders')
-      .select('warehouse, share_token, chat_sent_at')
+      .select('warehouse, share_token, chat_sent_at, delivery_date')
       .eq('id', orderId).single()
 
     if (!order?.share_token) return { error: 'У замовлення немає бланка' }
     if (order.chat_sent_at) return { ok: true }
     if (!order.warehouse) return { error: 'Склад не визначено' }
+
+    /*
+     * Замовлення на майбутній день чекає свого ранку.
+     *
+     * Записуємо, коли саме бланк має піти, — і тим самим кажемо людині в
+     * Мерчанті, що мовчання в групі не помилка, а розклад.
+     */
+    const deliveryDate = order.delivery_date as string | null
+    if (!blankDue(deliveryDate) && deliveryDate) {
+      await service.from('orders')
+        .update({ chat_due_at: blankDueAt(deliveryDate).toISOString(), chat_error: null })
+        .eq('id', orderId)
+      return { ok: true }
+    }
 
     const { data: chat } = await service
       .from('warehouse_chats').select('dialog_id').eq('warehouse', order.warehouse).maybeSingle()
@@ -91,7 +145,7 @@ export async function sendOrderSheet(
     await sendToChat(chat.dialog_id as string, `${base}/zamovlennya/${order.share_token}`)
 
     await service.from('orders')
-      .update({ chat_sent_at: new Date().toISOString(), chat_error: null })
+      .update({ chat_sent_at: new Date().toISOString(), chat_due_at: null, chat_error: null })
       .eq('id', orderId)
 
     return { ok: true }
