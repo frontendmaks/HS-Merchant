@@ -103,3 +103,42 @@ export async function ensureLines(
   }
   return (inserted ?? []) as unknown as OrderLine[]
 }
+
+/**
+ * Доклеює товар до рядків, які лишились без нього.
+ *
+ * Рядок запам'ятовує свій товар один раз — коли склад уперше відкриває
+ * замовлення. Якщо тоді каталог був неповний, рядок лишався без товару
+ * назавжди: ні ціни з фіду, ні артикулу в угоді. Перезіставляти щоразу
+ * марно, а один раз — рівно те, чого бракує.
+ *
+ * Чіпаємо лише порожнє: товар, якого склад уже виправив руками,
+ * переписувати не можна.
+ */
+export async function relinkLines(
+  service: Service,
+  orderId: string,
+  prepared?: Awaited<ReturnType<typeof loadCatalog>>,
+): Promise<number> {
+  const { data } = await service
+    .from('order_items')
+    .select('id, product_external_id, title')
+    .eq('order_id', orderId)
+    .is('product_id', null)
+    .not('product_external_id', 'is', null)
+
+  const orphans = data ?? []
+  if (!orphans.length) return 0
+
+  const catalog = prepared ?? await loadCatalog(service)
+  let linked = 0
+
+  for (const row of orphans) {
+    const product = catalog.find(row.product_external_id as string)
+    if (!product) continue
+    await service.from('order_items').update({ product_id: product.id }).eq('id', row.id)
+    linked++
+  }
+
+  return linked
+}

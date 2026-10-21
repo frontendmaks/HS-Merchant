@@ -19,7 +19,7 @@ import {
 } from '@/lib/bitrix-deal'
 import { getSetting } from '@/lib/settings'
 import { platformLabel } from '@/lib/order-source'
-import { ensureLines } from '@/lib/order-lines'
+import { ensureLines, relinkLines } from '@/lib/order-lines'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -107,6 +107,11 @@ export async function pushMarketplaceOrder(
      * замовлення, якого ніхто не відкривав у Мерчанті, виглядало порожнім —
      * і автопілот відмовлявся його заводити, хоча товари в ньому були.
      */
+    // Рядки, що лишились без товару з часів неповного каталогу, доклеюємо
+    // тут: без товару угода не має ні ціни з фіду, ні суми
+    await ensureLines(service, orderId)
+    await relinkLines(service, orderId)
+
     const lines = (await ensureLines(service, orderId))
       .filter(l => !l.removed)
       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
