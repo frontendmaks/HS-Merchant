@@ -3,6 +3,7 @@ export const maxDuration = 300
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { processMarketplaceOrders } from '@/lib/marketplace-autopilot'
+import { pushMarketplaceOrder } from '@/lib/marketplace-bitrix'
 import { getSetting } from '@/lib/settings'
 import { bitrixConfigured } from '@/lib/bitrix'
 import { logCronRun } from '@/lib/cron-log'
@@ -29,6 +30,30 @@ export async function GET(request: NextRequest) {
   const startedAt = Date.now()
   const limit = Math.min(Math.max(
     Number(new URL(request.url).searchParams.get('limit') ?? 10), 1), 40)
+
+  /*
+   * Перезаписати вже заведені угоди.
+   *
+   * Потрібне, коли змінилось те, як ми їх складаємо: угода вже існує, і
+   * звичайний прохід її не чіпає. Викликається руками, не за розкладом.
+   */
+  const repush = Number(request.nextUrl.searchParams.get('repush') ?? 0)
+  if (repush > 0) {
+    const { data } = await service
+      .from('orders')
+      .select('id, external_id')
+      .in('platform', ['maudau', 'rozetka'])
+      .not('bitrix_deal_id', 'is', null)
+      .order('order_date', { ascending: false })
+      .limit(Math.min(repush, 100))
+
+    const again = []
+    for (const o of data ?? []) {
+      const r = await pushMarketplaceOrder(service, o.id as string)
+      again.push({ order: o.external_id, ...r })
+    }
+    return NextResponse.json({ repushed: again.length, again })
+  }
 
   const result = await processMarketplaceOrders(service, { limit })
   await logCronRun(service, 'marketplace-autopilot', startedAt, result, result.error)
