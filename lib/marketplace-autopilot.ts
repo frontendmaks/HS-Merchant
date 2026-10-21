@@ -13,7 +13,7 @@ import { changeOrderStatus } from '@/lib/order-status-change'
 import { pushMarketplaceOrder } from '@/lib/marketplace-bitrix'
 import { currentActor } from '@/lib/order-events'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
-import { isNew, PAYMENT_STAGE_STATUSES } from '@/lib/order-statuses'
+import { isNew, READY_TO_SHIP_STATUSES } from '@/lib/order-statuses'
 import { stageId, stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
 import { onStatusChanged } from '@/lib/bitrix-chat'
 import { bitrix } from '@/lib/bitrix'
@@ -124,7 +124,9 @@ async function startPicking(service: Service, result: MarketplaceResult): Promis
     .in('platform', ['maudau', 'rozetka'])
     .not('bitrix_deal_id', 'is', null)
     .eq('is_paid', true)
-    .in('status', PAYMENT_STAGE_STATUSES)
+    // Саме «узгоджено», а не «очікує оплату»: останнє означає, що
+    // майданчик грошей ще не бачить, і наш прапорець із ним розходиться
+    .in('status', READY_TO_SHIP_STATUSES)
     .gte('order_date', new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10))
     .limit(30)
 
