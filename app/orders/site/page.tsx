@@ -11,6 +11,7 @@ import SyncButton from './SyncButton'
 import SiteFilters from './SiteFilters'
 import { lastCronRun } from '@/lib/cron-log'
 import EditButton from './EditButton'
+import MergePreorders from './MergePreorders'
 
 /**
  * Замовлення з сайту й телефону.
@@ -213,6 +214,24 @@ export default async function SiteOrdersPage({
         picked={{ wh, slot, src, q }}
         total={forDay.length}
       />
+
+      {/* Об'єднання живе на своїй вкладці: саме там його шукають, і на
+          решті воно було б зайвим рядком між роботою */}
+      {matcher.key === 'preorder' && (
+        <MergePreorders
+          date={date}
+          candidates={orders.map(o => ({
+            id: o.id,
+            external_id: o.external_id,
+            customer_name: o.customer_name,
+            customer_phone: o.customer_phone,
+            address: o.address,
+            warehouse: o.warehouse,
+            total: o.total,
+          }))}
+        />
+      )}
+
 
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-800">
