@@ -57,6 +57,8 @@ const PICKING = 'Комплектується'
 const PACKED = 'Спаковано'
 const PROCESSING = 'В обробці'
 const CANCELED = 'Скасовано'
+/** Виконано — день закінчився, замовлення поїхало */
+const DONE = 'Виконано'
 
 /**
  * Етапи опрацювання — те, що оператор має зробити далі.
@@ -70,6 +72,8 @@ const CANCELED = 'Скасовано'
  *   Чекає, поки його відправлять на комплектацію.
  * «Потребує уваги» — оглянуте, але чогось бракує; що саме, написано в рядку.
  * «Комплектується» — переведене й бланк уже в чаті складу.
+ * «Виконані» — день закрито. Проставляється щоночі, але перевести можна
+ *   й раніше руками, якщо замовлення вже доїхало.
  */
 const FUNNEL: { key: string; label: string; match: (o: Row) => boolean }[] = [
   {
@@ -97,6 +101,7 @@ const FUNNEL: { key: string; label: string; match: (o: Row) => boolean }[] = [
     key: 'picking', label: 'Комплектується',
     match: o => o.status === PICKING || o.status === PACKED,
   },
+  { key: 'done', label: 'Виконані', match: o => o.status === DONE },
   { key: 'canceled', label: 'Скасовано', match: o => o.status === CANCELED },
   { key: 'all', label: 'Усі', match: () => true },
 ]

@@ -55,6 +55,14 @@
     {
       "path": "/api/cron/delivery",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/close-day",
+      "schedule": "59 20 * * *"
+    },
+    {
+      "path": "/api/cron/close-day",
+      "schedule": "59 21 * * *"
     }
   ]
 }
