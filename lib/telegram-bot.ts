@@ -116,15 +116,28 @@ const line = (o: OrderRow) => {
   return parts.join(' · ')
 }
 
-export async function screenStart(name: string | null, known: boolean): Promise<Screen> {
+export async function screenStart(
+  service: Service,
+  name: string | null,
+  known: boolean,
+): Promise<Screen> {
+  const link = await siteLink(service)
+
   return {
+    /*
+     * Кнопка-посилання веде на сайт одним дотиком.
+     *
+     * Постійні кнопки внизу екрана адрес не вміють — Telegram дозволяє
+     * їх лише в кнопках під повідомленням. Тому замовлення живе тут, а
+     * внизу лишається те, що веде всередину бота.
+     */
+    keyboard: [[{ text: '\u{1F6D2} Замовити на сайті', url: link }]],
     text: known
       ? `Вітаємо, ${greetingName(name)}! Чим допомогти?`
       : 'Вітаємо в «Галицькій Свіжині»!\n\n'
         + 'Тут ви стежитимете за своїми замовленнями — ми повідомимо, коли '
         + 'приймемо, коли почнемо збирати і коли кур’єр вирушить.\n\n'
         + 'Щоб ми знали, які замовлення ваші, поділіться номером телефону.',
-    menu: true,
   }
 }
 
@@ -253,25 +266,24 @@ export async function loadPromos(service: Service): Promise<Promo[]> {
 export async function screenPromos(service: Service): Promise<Screen> {
   const link = await siteLink(service)
   const promos = await loadPromos(service)
+  const total = promos.reduce((n, p) => n + p.items.length, 0)
 
-  if (!promos.length) {
+  if (!total) {
     return {
-      text: 'Зараз акцій немає. Щойно з\u2019являться — ми напишемо.',
-      keyboard: [[{ text: 'Дивитись каталог', url: link }]],
+      text: 'Зараз знижених цін немає. Щойно з\u2019являться — ми напишемо.',
+      keyboard: [[{ text: '\u{1F6D2} Замовити на сайті', url: link }]],
     }
   }
 
-  const total = promos.reduce((n, p) => n + p.items.length, 0)
-
   return {
-    text: `\u{1F3F7} Акції — ${total} ${total === 1 ? 'позиція' : 'позицій'} `
+    text: `\u{1F3F7} Знижені ціни — ${total} ${total === 1 ? 'позиція' : 'позицій'} `
       + `у ${promos.length} категоріях.\n\nОберіть, що подивитись:`,
     keyboard: [
       ...promos.slice(0, 12).map((p, i) => [{
         text: `${p.category} · ${p.items.length} · до −${p.maxOff}%`,
         callback_data: `promo:${i}`,
       }]),
-      [{ text: 'Усі товари на сайті', url: link }],
+      [{ text: '\u{1F6D2} Замовити на сайті', url: link }],
     ],
   }
 }

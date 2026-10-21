@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import {
-  rememberChat, sendWelcome, sendScreen, answerCallback, sendMessage,
+  rememberChat, sendWelcome, sendScreen, answerCallback, sendMessage, sendPhoto,
 } from '@/lib/telegram'
 import { integrationConfig } from '@/lib/integrations'
 import {
   MENU, CANCEL_REASONS, screenStart, screenOrders, screenNewOrder,
-  screenPromos, screenPromo, screenHelp, screenCancelReasons,
+  screenPromos, screenPromo, screenHelp, screenCancelReasons, siteLink,
 } from '@/lib/telegram-bot'
+import { sitePromos } from '@/lib/site-promos'
+import { getSetting } from '@/lib/settings'
 import { changeOrderStatus } from '@/lib/order-status-change'
 import { phoneKey } from '@/lib/phone'
 
@@ -115,7 +117,7 @@ async function onMessage(service: Service, token: string, message: Message): Pro
 
   if (contact || start) {
     await sendWelcome(token, chat, !!phone)
-    if (phone) await show(service, token, chat, await screenStart(null, true))
+    if (phone) await show(service, token, chat, await screenStart(service, null, true))
     return
   }
 
@@ -132,7 +134,7 @@ async function route(
 ): Promise<void> {
   const t = text.toLowerCase()
 
-  if (t.includes('нове замовлення') || t.startsWith('/new')) {
+  if (t.includes('замовити') || t.includes('нове замовлення') || t.startsWith('/new')) {
     return show(service, token, chat, await screenNewOrder(service))
   }
   if (t.includes('мої замовлення') || t.startsWith('/orders')) {
@@ -142,6 +144,7 @@ async function route(
     return show(service, token, chat, await screenOrders(service, phone, { open: false }))
   }
   if (t.includes('акці') || t.startsWith('/promos')) {
+    await showPromoCards(service, token, chat)
     return show(service, token, chat, await screenPromos(service))
   }
   if (t.includes('допомог') || t.startsWith('/help')) {
@@ -172,6 +175,34 @@ async function route(
   }
 }
 
+/**
+ * Картки акцій — такі, як на сайті.
+ *
+ * Банер, назва, опис і кнопка. Сторінка акції на сайті не містить ні
+ * переліку товарів, ні цін, тож вигадувати зв'язок «ця акція — ці
+ * товари» ми не будемо: знижені ціни йдуть окремим списком нижче, і
+ * там вони справжні.
+ */
+async function showPromoCards(service: Service, token: string, chat: string): Promise<void> {
+  const site = await getSetting(service, 'site_url')
+  const utm = await getSetting(service, 'site_utm')
+  const promos = await sitePromos(service, site)
+
+  for (const promo of promos.slice(0, 4)) {
+    const url = `${promo.url}${utm ? `?${utm}` : ''}`
+    const caption = [promo.title, promo.description?.slice(0, 700)]
+      .filter(Boolean).join('\n\n')
+
+    const button = [[{ text: 'Детальніше', url }]]
+
+    if (promo.image) {
+      await sendPhoto(token, chat, promo.image, caption, button)
+    } else {
+      await sendScreen(token, chat, { text: caption, keyboard: button }, MENU)
+    }
+  }
+}
+
 async function show(
   service: Service,
   token: string,
@@ -193,7 +224,7 @@ async function onButton(
 
   if (data === 'menu') {
     const phone = await phoneOf(service, chat)
-    return show(service, token, chat, await screenStart(null, !!phone))
+    return show(service, token, chat, await screenStart(service, null, !!phone))
   }
 
   if (data === 'promos') {

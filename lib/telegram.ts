@@ -72,6 +72,22 @@ export async function sendScreen(
   })
 }
 
+/** Картка акції: банер, текст і кнопка на сайт */
+export async function sendPhoto(
+  token: string,
+  chatId: string,
+  photo: string,
+  caption: string,
+  keyboard?: { text: string; url?: string; callback_data?: string }[][],
+) {
+  return await call(token, 'sendPhoto', {
+    chat_id: chatId,
+    photo,
+    caption,
+    reply_markup: keyboard ? { inline_keyboard: keyboard } : undefined,
+  })
+}
+
 /** Прибирає «годинник» із натиснутої кнопки */
 export async function answerCallback(token: string, id: string, text?: string) {
   return await call(token, 'answerCallbackQuery', { callback_query_id: id, text })
