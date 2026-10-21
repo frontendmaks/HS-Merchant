@@ -47,6 +47,10 @@
     {
       "path": "/api/cron/trello?limit=40",
       "schedule": "*/3 * * * *"
+    },
+    {
+      "path": "/api/cron/notify?limit=30",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

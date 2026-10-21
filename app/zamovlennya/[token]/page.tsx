@@ -43,8 +43,18 @@ const PRINT_CSS = `@media print {
 
 export default async function OrderSheet({
   params,
+  /**
+   * Той самий аркуш у двох прочитаннях.
+   *
+   * Складу потрібні номер ящика, склад і кнопка друку. Клієнтові —
+   * нічого з цього: номер ящика йому ні про що не каже, склад тим паче,
+   * а друкувати він не буде. Лишається те саме замовлення, тільки без
+   * нашої внутрішньої кухні.
+   */
+  forCustomer = false,
 }: {
   params: Promise<{ token: string }>
+  forCustomer?: boolean
 }) {
   const { token } = await params
   if (!/^[A-Za-z0-9_-]{20,}$/.test(token)) notFound()
@@ -89,16 +99,23 @@ export default async function OrderSheet({
         <div style={{ borderBottom: THICK }} className="flex items-start justify-between gap-4 pb-3">
           <div>
             <h1 className="text-2xl font-bold">
-              Замовлення № {order.manual_number ?? order.external_id}
+              {forCustomer
+                ? 'Ваше замовлення'
+                : `Замовлення № ${order.manual_number ?? order.external_id}`}
             </h1>
             <div className="text-sm mt-1">
               Доставка: <strong>{when}</strong>, {order.delivery_slot ?? '—'}
             </div>
           </div>
-          <div className="text-right text-sm">
-            <div className="font-semibold">{order.warehouse ?? 'Склад не визначено'}</div>
-            <div style={MUTED}>{order.external_id}</div>
-          </div>
+          {!forCustomer && (
+            <div className="text-right text-sm">
+              <div className="font-semibold">{order.warehouse ?? 'Склад не визначено'}</div>
+              <div style={MUTED}>{order.external_id}</div>
+            </div>
+          )}
+          {forCustomer && (
+            <div className="text-right text-sm font-semibold">Галицька Свіжина</div>
+          )}
         </div>
 
         <table className="w-full text-sm mt-4">
@@ -166,14 +183,14 @@ export default async function OrderSheet({
           </tfoot>
         </table>
 
-        {order.operator_comment && (
+        {!forCustomer && order.operator_comment && (
           <div className="mt-5 rounded p-3 text-sm" style={{ border: `1px solid ${GREY}` }}>
             <div className="font-semibold mb-1">Коментар</div>
             <div className="whitespace-pre-wrap">{order.operator_comment}</div>
           </div>
         )}
 
-        <PrintButton />
+        {!forCustomer && <PrintButton />}
       </div>
     </div>
   )
