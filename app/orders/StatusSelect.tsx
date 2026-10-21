@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { statusOptions } from '@/lib/order-status-options'
-import { SITE_CANCEL_REASONS } from '@/lib/cancel-reasons'
+import CancelDialog from './CancelDialog'
 
 const CANCELED = 'Скасовано'
 
@@ -31,8 +31,6 @@ export default function StatusSelect({ id, platform, externalId, status, disable
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [asking, setAsking] = useState(false)
-  const [reason, setReason] = useState('')
-  const [note, setNote] = useState('')
 
   async function change(next: string, withReason?: string, comment?: string) {
     const previous = value
@@ -71,8 +69,6 @@ export default function StatusSelect({ id, platform, externalId, status, disable
         return
       }
       setAsking(false)
-      setReason('')
-      setNote('')
       router.refresh()
     } catch {
       setValue(previous)
@@ -103,51 +99,15 @@ export default function StatusSelect({ id, platform, externalId, status, disable
       </select>
 
       {asking && (
-        <div className="mt-1.5 w-64 bg-zinc-900 border border-zinc-700 rounded-lg p-2 space-y-2">
-          <div className="text-zinc-400 text-xs">Чому скасовуємо?</div>
-
-          <select
-            value={reason}
-            onChange={e => setReason(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1
-                       text-xs text-white focus:outline-none focus:border-red-500"
-          >
-            <option value="">Оберіть причину…</option>
-            {SITE_CANCEL_REASONS.map(group => (
-              <optgroup key={group.group} label={group.group}>
-                {group.items.map(r => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-
-          <textarea
-            value={note}
-            onChange={e => setNote(e.target.value)}
-            rows={2}
-            placeholder="Коментар (не обов'язково)"
-            className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1
-                       text-xs text-white resize-none focus:outline-none focus:border-red-500"
-          />
-
-          <div className="flex gap-1.5">
-            <button
-              onClick={() => void change(CANCELED, reason, note)}
-              disabled={!reason || busy}
-              className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white
-                         text-xs px-2.5 py-1 rounded transition-colors"
-            >
-              {busy ? '…' : 'Скасувати замовлення'}
-            </button>
-            <button
-              onClick={() => { setAsking(false); setValue(status || ''); setError('') }}
-              className="text-zinc-500 hover:text-white text-xs px-2 transition-colors"
-            >
-              Ні
-            </button>
-          </div>
-        </div>
+        <CancelDialog
+          title="Скасувати замовлення?"
+          note="Клієнт отримає повідомлення, угода в Бітріксі закриється, а картка на дошці піде в «Не доставлено»."
+          confirmLabel="Скасувати замовлення"
+          busy={busy}
+          error={error || null}
+          onCancel={() => { setAsking(false); setValue(status || ''); setError('') }}
+          onConfirm={(reason, comment) => void change(CANCELED, reason, comment)}
+        />
       )}
 
       {error && <div className="text-red-400 text-xs mt-0.5 max-w-[14rem]">{error}</div>}

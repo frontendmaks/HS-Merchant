@@ -12,6 +12,7 @@ import SiteFilters from './SiteFilters'
 import { lastCronRun } from '@/lib/cron-log'
 import EditButton from './EditButton'
 import MergePreorders from './MergePreorders'
+import DeleteButton from './DeleteButton'
 
 /**
  * Замовлення з сайту й телефону.
@@ -359,6 +360,14 @@ export default async function SiteOrdersPage({
                       >
                         Бланк ↗
                       </a>
+                    )}
+                    {/* Видалення поруч із бланком, але приглушене: це не
+                        щоденна дія, і виглядати вона має відповідно */}
+                    {!readOnly && (
+                      <DeleteButton
+                        id={o.id}
+                        label={o.manual_number ? `№${o.manual_number}` : (o.external_id ?? 'замовлення')}
+                      />
                     )}
                   </td>
                 </tr>
