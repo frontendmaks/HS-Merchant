@@ -11,7 +11,7 @@ import {
   orderTotal, lineTotal, type ManualLine,
 } from '@/lib/manual-orders'
 import { reserveNumber, linkNumber, releaseNumber } from '@/lib/manual-register'
-import { withDelivery } from '@/lib/delivery-fee'
+import { withDelivery, isDeliveryLine } from '@/lib/delivery-fee'
 import { pushOrderToBitrix } from '@/lib/bitrix-deal'
 import { bitrixConfigured } from '@/lib/bitrix'
 
@@ -42,10 +42,24 @@ export async function POST(req: NextRequest) {
   const address = body?.address?.trim()
   const date = body?.delivery_date
   const slot = body?.delivery_slot
-  const goods = (body?.lines ?? []).filter(l => l.title?.trim() && Number(l.qty) > 0)
-  // Доставку додаємо тут, а не в формі: правило про тисячу має діяти однаково,
-  // хто б і звідки замовлення не прислав
-  const lines = withDelivery(goods)
+  const typed = (body?.lines ?? []).filter(l => l.title?.trim() && Number(l.qty) > 0)
+  const goods = typed.filter(l => !isDeliveryLine(l))
+
+  /*
+   * Доставку рахуємо самі — крім випадку, коли її вписала людина.
+   *
+   * Правило про тисячу має діяти однаково, хто б і звідки замовлення не
+   * прислав, тож за звичайних обставин рядок доставки додається тут, а не
+   * у формі. Але оператор говорить із клієнтом і знає те, чого не знає
+   * правило: далеке село, домовлена сума, виняток. Якщо він вписав
+   * доставку сам, вона й лишається — хоч би що казав поріг.
+   *
+   * Раніше `withDelivery` прибирала всі такі рядки й додавала свій за
+   * порогом: у замовленні на 2234 грн доставка була безкоштовна, і
+   * вписаний оператором рядок зникав безслідно — ні в переліку, ні в
+   * бланку, ні в угоді.
+   */
+  const lines = typed.some(isDeliveryLine) ? typed : withDelivery(goods)
 
   if (!name) return NextResponse.json({ error: 'Вкажіть ПІБ клієнта' }, { status: 400 })
   if (!phone) return NextResponse.json({ error: 'Вкажіть телефон' }, { status: 400 })

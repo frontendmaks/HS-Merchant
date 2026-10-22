@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { isPhoneComplete, phoneKey } from '@/lib/phone'
-import { deliveryFeeFor } from '@/lib/delivery-fee'
+import { deliveryFeeFor, isDeliveryLine } from '@/lib/delivery-fee'
 import ZonePicker, { type ZoneShape } from '@/components/ZonePicker'
 import Overlay, { ProductPicker, field, money, type Line } from '@/components/OrderLinesPicker'
 import Settings from './Settings'
@@ -299,10 +299,23 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
     addrTimer.current = setTimeout(() => void resolve(address, date), 700)
   }, [address, date, resolve])
 
-  const goodsSum = lines.reduce((s, l) => s + l.qty * l.price_per_unit, 0)
-  // Оператор називає клієнту суму вголос, тож доставку він має бачити тут,
-  // а не дізнаватись про неї з готового замовлення
-  const delivery = lines.length ? deliveryFeeFor(lines) : 0
+  /*
+   * Оператор називає клієнту суму вголос, тож доставку він має бачити
+   * тут, а не дізнаватись про неї з готового замовлення.
+   *
+   * І бачити саме ту, що буде в замовленні: якщо він вписав рядок
+   * доставки сам — далеке село, домовлена сума, — рахуємо його, а не
+   * поріг. Інакше на екрані одне число, а в бланку інше.
+   */
+  const goods = lines.filter(l => !isDeliveryLine(l))
+  const goodsSum = goods.reduce((s, l) => s + l.qty * l.price_per_unit, 0)
+  const typedDelivery = lines
+    .filter(isDeliveryLine)
+    .reduce((s, l) => s + l.qty * l.price_per_unit, 0)
+
+  const delivery = lines.some(isDeliveryLine)
+    ? typedDelivery
+    : (goods.length ? deliveryFeeFor(goods) : 0)
   const total = goodsSum + delivery
 
   /**
