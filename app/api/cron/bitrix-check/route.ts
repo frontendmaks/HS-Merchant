@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { checkDeals } from '@/lib/bitrix-missing'
+import { sweepStaleHolds } from '@/lib/manual-register'
 import { logCronRun } from '@/lib/cron-log'
 
 export const maxDuration = 120
@@ -22,8 +23,12 @@ export async function GET(request: NextRequest) {
 
   try {
     const result = await checkDeals(service)
-    await logCronRun(service, 'bitrix-check', startedAt, result)
-    return NextResponse.json(result)
+
+    // Заразом повертаємо в обіг номери, що лишились за ніким
+    const holds = await sweepStaleHolds(service)
+
+    await logCronRun(service, 'bitrix-check', startedAt, { ...result, holds })
+    return NextResponse.json({ ...result, holds })
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)
     await logCronRun(service, 'bitrix-check', startedAt, null, error)

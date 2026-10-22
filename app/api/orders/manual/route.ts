@@ -10,7 +10,7 @@ import {
   MANUAL_PLATFORM, manualExternalId, manualWeight,
   orderTotal, lineTotal, type ManualLine,
 } from '@/lib/manual-orders'
-import { reserveNumber, linkNumber } from '@/lib/manual-register'
+import { reserveNumber, linkNumber, releaseNumber } from '@/lib/manual-register'
 import { withDelivery } from '@/lib/delivery-fee'
 import { pushOrderToBitrix } from '@/lib/bitrix-deal'
 import { bitrixConfigured } from '@/lib/bitrix'
@@ -91,13 +91,30 @@ export async function POST(req: NextRequest) {
   let created: Created | null = null
   let lastError = ''
 
-  // Номер беремо з журналу — тієї самої таблиці, куди пишуть і руками
-  const reserved = await reserveNumber(service, date, name)
+  /*
+   * Номер беремо з журналу — тієї самої таблиці, куди пишуть і руками.
+   *
+   * І беремо рівно стільки разів, скільки треба, щоб замовлення
+   * створилось. Раніше при невдачі наступний номер просто вигадувався —
+   * «той, що взяли, плюс один», — повз журнал, повз аркуш і повз інші
+   * замовлення. Так телефонне замовлення дістало сьомий номер, хоч його
+   * вже везли іншій людині: єдина перевірка, яка там була, стосувалась
+   * видимого номера замовлення (МР-22.10-7), а не номера ящика.
+   *
+   * Тепер кожна спроба — це чесний резерв, а невдала спроба свій номер
+   * одразу повертає. Згорілих чисел не лишається.
+   */
+  let reserved = await reserveNumber(service, date, name)
 
   for (let attempt = 0; attempt < 5 && !created; attempt++) {
-    const number = attempt === 0
-      ? reserved.number
-      : reserved.number + attempt
+    if (attempt > 0) {
+      await releaseNumber(service, {
+        number: reserved.number, date, reason: 'замовлення не створилось',
+      })
+      reserved = await reserveNumber(service, date, name)
+    }
+
+    const number = reserved.number
     const externalId = manualExternalId(date, number)
 
     const { data, error } = await service.from('orders').insert({
@@ -144,6 +161,15 @@ export async function POST(req: NextRequest) {
   }
 
   if (!created) {
+    /*
+     * Замовлення немає — номер має повернутись у обіг.
+     *
+     * Інакше в аркуші складу навпроти числа стоїть ім'я людини, якій
+     * нічого не везуть, а нумерація дня йде далі через порожнє місце.
+     */
+    await releaseNumber(service, {
+      number: reserved.number, date, reason: 'замовлення не створилось',
+    })
     return NextResponse.json({ error: lastError }, { status: 500 })
   }
 

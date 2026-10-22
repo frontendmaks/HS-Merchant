@@ -46,8 +46,8 @@ async function noteTaken(
   number: number,
   customerName: string,
   orderId: string | null = null,
-): Promise<void> {
-  await takeNumber(service, { date, number, orderId, customerName })
+): Promise<boolean> {
+  return await takeNumber(service, { date, number, orderId, customerName })
 }
 
 /**
@@ -87,14 +87,34 @@ export interface ReservedNumber {
  * номер означає гнати нумерацію дня вперед на порожньому місці.
  */
 async function takenNumbers(service: Service, date: string): Promise<Set<number>> {
-  const { data } = await service
-    .from('orders')
-    .select('manual_number')
-    .eq('delivery_date', date)
-    .not('manual_number', 'is', null)
-    .neq('status', 'Скасовано')
+  /*
+   * Три джерела, і жодному з них не можна вірити окремо.
+   *
+   * Аркуш каже, що рядок порожній, — а його тримає живе замовлення, бо
+   * ім'я звідти стерли руками. Журнал каже, що номер вільний, — а в
+   * аркуші стоїть ім'я. Замовлення каже своє — а журнал про нього не
+   * знає, бо номер приїхав із 1С.
+   *
+   * Тому зайнятим вважаємо номер, якщо так вважає бодай одне з трьох.
+   * Зайвий пропущений номер коштує дірки в нумерації; виданий двічі —
+   * двох ящиків з одним числом на складі.
+   */
+  const [{ data: orders }, { data: journal }] = await Promise.all([
+    service.from('orders')
+      .select('manual_number')
+      .eq('delivery_date', date)
+      .not('manual_number', 'is', null)
+      .neq('status', 'Скасовано'),
+    service.from('order_numbers')
+      .select('number')
+      .eq('delivery_date', date)
+      .is('released_at', null),
+  ])
 
-  return new Set((data ?? []).map(o => Number(o.manual_number)))
+  return new Set([
+    ...(orders ?? []).map(o => Number(o.manual_number)),
+    ...(journal ?? []).map(r => Number(r.number)),
+  ])
 }
 
 /**
@@ -147,6 +167,7 @@ export async function reserveNumber(
   service: Service,
   date: string,
   customerName: string,
+  orderId: string | null = null,
 ): Promise<ReservedNumber> {
   /*
    * Таблиця не відповіла — видаємо номер за власним журналом.
@@ -158,7 +179,7 @@ export async function reserveNumber(
   const fallback = async (note: string): Promise<ReservedNumber> => {
     const own = await nextFreeNumber(service, date)
     const number = own ?? await nextManualNumber(service, date)
-    if (own != null) await noteTaken(service, date, own, customerName)
+    if (own != null) await noteTaken(service, date, own, customerName, orderId)
     return { number, source: 'local', note }
   }
 
@@ -174,7 +195,7 @@ export async function reserveNumber(
   const tab = tabNameFor(date)
   const taken = await takenNumbers(service, date)
 
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 8; attempt++) {
     const rows = await readRange(spreadsheetId, `'${tab}'!A1:B300`)
     if (!rows) return fallback('Таблиця не відповіла')
 
@@ -190,10 +211,26 @@ export async function reserveNumber(
     const fresh = await readRange(spreadsheetId, `'${tab}'!B${targetRow}`)
     if (fresh?.[0]?.[0]?.toString().trim()) continue
 
-    const written = await writeCell(spreadsheetId, `'${tab}'!B${targetRow}`, customerName)
-    if (!written) return fallback('Не вдалося записати в таблицю')
+    /*
+     * Журнал — перед аркушем.
+     *
+     * Він відмовить, якщо номер уже за кимось, і тоді в аркуш писати не
+     * можна: інакше в таблиці з'явиться друге ім'я навпроти того самого
+     * числа, і склад не розрізнить ящики. Відмова — привід узяти
+     * наступний вільний, а не привід здатися.
+     */
+    const noted = await noteTaken(service, date, number, customerName, orderId)
+    if (!noted) {
+      taken.add(number)
+      continue
+    }
 
-    await noteTaken(service, date, number, customerName)
+    const written = await writeCell(spreadsheetId, `'${tab}'!B${targetRow}`, customerName)
+    if (!written) {
+      await freeNumber(service, { number, date, reason: 'не вдалося записати в таблицю' })
+      return fallback('Не вдалося записати в таблицю')
+    }
+
     return { number, source: 'sheet', note }
   }
 
@@ -380,4 +417,65 @@ export async function releaseNumber(
     }
   }
   return false
+}
+
+/**
+ * Прибирання покинутих резервів.
+ *
+ * Номер беруть до того, як замовлення існує: спершу треба знати число,
+ * щоб вписати його в угоду й на бланк. Якщо створення не доходить до
+ * кінця, рядок лишається зайнятим ніким — ні замовлення, ні ящика, а
+ * число з обігу випало. У таблиці при цьому стоїть ім'я людини, якій
+ * нічого не везуть.
+ *
+ * Кожна така невдача тепер прибирає за собою сама, але мережа рветься
+ * й посеред прибирання. Тому раз на годину проходимо ще й слідом: якщо
+ * рядок зайнятий без замовлення довше, ніж триває оформлення, і на це
+ * число немає живого замовлення — повертаємо його в обіг.
+ */
+export async function sweepStaleHolds(
+  service: Service,
+  { minutes = 30 }: { minutes?: number } = {},
+): Promise<{ looked: number; freed: number }> {
+  const result = { looked: 0, freed: 0 }
+
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' })
+  const edge = new Date(Date.now() - minutes * 60_000).toISOString()
+
+  const { data } = await service
+    .from('order_numbers')
+    .select('delivery_date, number, customer_name')
+    .is('released_at', null)
+    .is('order_id', null)
+    .lt('taken_at', edge)
+    .gte('delivery_date', today)
+
+  const holds = (data ?? []) as { delivery_date: string; number: number }[]
+  result.looked = holds.length
+
+  for (const hold of holds) {
+    /*
+     * Живе замовлення на це число — не чіпаємо.
+     *
+     * Рядок без замовлення в журналі не завжди означає покинутий резерв:
+     * номер міг приїхати з 1С, а зв'язок із замовленням ще не склався.
+     */
+    const { count } = await service
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('delivery_date', hold.delivery_date)
+      .eq('manual_number', hold.number)
+      .neq('status', 'Скасовано')
+
+    if (count) continue
+
+    await releaseNumber(service, {
+      number: hold.number,
+      date: hold.delivery_date,
+      reason: 'резерв без замовлення',
+    })
+    result.freed++
+  }
+
+  return result
 }

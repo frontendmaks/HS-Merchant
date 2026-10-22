@@ -44,6 +44,23 @@ export async function takeNumber(
     customerName: string | null
   },
 ): Promise<boolean> {
+  /*
+   * Чужий рядок не перебиваємо.
+   *
+   * Запис ішов через upsert, і той, хто брав номер другим, мовчки ставав
+   * на місце першого: у журналі лишалось одне ім'я, хоч ящиків двоє. Так
+   * «Горинь Юлія» зникла з сьомого номера, а на складі їх стало два.
+   *
+   * Тепер зайнятий рядок — це відмова, а не перезапис. Хто саме його
+   * тримає, вирішує журнал, а не черговість запису.
+   */
+  const { data: held } = await service.from('order_numbers')
+    .select('order_id')
+    .eq('delivery_date', date).eq('number', number).is('released_at', null)
+    .maybeSingle()
+
+  if (held && held.order_id && held.order_id !== orderId) return false
+
   const { error } = await service.from('order_numbers').upsert({
     delivery_date: date,
     number,
