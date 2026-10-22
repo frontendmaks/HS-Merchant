@@ -21,6 +21,19 @@ export const BITRIX_DELIVERY_PRODUCT_ID = 20030
 export const isDeliveryLine = (l: { title: string }) =>
   l.title.trim() === DELIVERY_TITLE
 
+/**
+ * Чиєї доставки стосується це правило.
+ *
+ * Нашої — тієї, що возить наш кур'єр за нашим графіком: сайт і телефон.
+ * Маркетплейсне замовлення везе майданчик, його умови доставки домовлені
+ * з покупцем там, і ціна вже порахована в чеку, який покупець бачив.
+ * Дописати туди свої п'ятдесят гривень означає виставити рахунок за те,
+ * про що з людиною ніхто не говорив, — а поріг у тисячу там не значить
+ * нічого, бо рахує майданчик по-своєму.
+ */
+export const chargesOwnDelivery = (platform: string | null | undefined) =>
+  platform === 'site' || platform === 'manual'
+
 /** Сума товарів без доставки. */
 export function goodsTotal(lines: ManualLine[]): number {
   const sum = lines

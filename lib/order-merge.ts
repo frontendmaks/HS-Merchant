@@ -21,6 +21,7 @@ import { stageId, stageName } from '@/lib/bitrix-stages'
 import { phoneKey } from '@/lib/phone'
 import {
   DELIVERY_TITLE, DELIVERY_FEE, FREE_DELIVERY_FROM, BITRIX_DELIVERY_PRODUCT_ID,
+  chargesOwnDelivery,
 } from '@/lib/delivery-fee'
 import { reserveNumber, releaseNumber, linkNumber } from '@/lib/manual-register'
 
@@ -43,6 +44,7 @@ export interface MergeResult {
 
 interface Row {
   id: string
+  platform: string | null
   bitrix_deal_id: number | null
   customer_name: string | null
   customer_phone: string | null
@@ -71,7 +73,7 @@ export async function mergeOrders(
 
   const { data } = await service
     .from('orders')
-    .select('id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, warehouse_pinned, delivery_zone, area, customer_comment, delivery_date, manual_number, status, moved_to_order_id, total')
+    .select('id, platform, bitrix_deal_id, customer_name, customer_phone, address, warehouse, warehouse_pinned, delivery_zone, area, customer_comment, delivery_date, manual_number, status, moved_to_order_id, total')
     .in('id', orderIds)
 
   const rows = (data ?? []) as unknown as Row[]
@@ -145,7 +147,17 @@ export async function mergeOrders(
    */
   const goods = collected.filter(l => String(l.title ?? '').trim() !== DELIVERY_TITLE)
   const goodsSum = goods.reduce((sum, l) => sum + Number(l.ordered_total ?? 0), 0)
-  const fee = goodsSum > FREE_DELIVERY_FROM ? 0 : DELIVERY_FEE
+
+  /*
+   * Маркетплейсне замовлення нашої доставки не знає.
+   *
+   * Його везе майданчик за своїми умовами, і ціну покупець уже бачив у
+   * чеку. Об'єднувати такі замовлення не випадає взагалі, але правило
+   * має стояти тут, а не триматись на тому, що в інтерфейс їх не
+   * показують.
+   */
+  const ourDelivery = rows.every(r => chargesOwnDelivery(r.platform))
+  const fee = ourDelivery && goodsSum <= FREE_DELIVERY_FROM ? DELIVERY_FEE : 0
 
   const deliveryRow = collected.find(l => String(l.title ?? '').trim() === DELIVERY_TITLE)
 
