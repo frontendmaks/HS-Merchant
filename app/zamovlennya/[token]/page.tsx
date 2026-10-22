@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import { notFound } from 'next/navigation'
+import { marketNumberLabel } from '@/lib/order-source'
 import { createServiceClient } from '@/lib/supabase/service'
 import PrintButton from './PrintButton'
 
@@ -62,7 +63,7 @@ export default async function OrderSheet({
   const service = createServiceClient()
   const { data: order } = await service
     .from('orders')
-    .select(`id, external_id, manual_number, delivery_date, delivery_slot,
+    .select(`id, external_id, manual_number, market_number, platform, delivery_date, delivery_slot,
              warehouse, customer_name, customer_phone, address,
              total, weight, operator_comment, status, created_at`)
     .eq('share_token', token)
@@ -101,7 +102,11 @@ export default async function OrderSheet({
             <h1 className="text-2xl font-bold">
               {forCustomer
                 ? 'Ваше замовлення'
-                : `Замовлення № ${order.manual_number ?? order.external_id}`}
+                /* Маркетплейсне має власний номер — «M12»; кур'єрське —
+                   номер ящика з журналу. Дві різні черги, і бланк має
+                   показувати ту, за якою це замовлення шукатимуть */
+                : `Замовлення № ${marketNumberLabel(order.platform, order.market_number)
+                    ?? order.manual_number ?? order.external_id}`}
             </h1>
             <div className="text-sm mt-1">
               Доставка: <strong>{when}</strong>, {order.delivery_slot ?? '—'}

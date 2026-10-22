@@ -18,7 +18,7 @@ import { isNew } from '@/lib/order-statuses'
 import { stageId, stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
 import { sendToChat } from '@/lib/bitrix-chat'
 import { getSetting } from '@/lib/settings'
-import { platformLabel } from '@/lib/order-source'
+import { platformLabel, marketNumberLabel } from '@/lib/order-source'
 import { bitrix } from '@/lib/bitrix'
 
 type Service = ReturnType<typeof createServiceClient>
@@ -133,6 +133,7 @@ interface MarketplaceOrder {
   external_id: string | null
   share_token: string | null
   chat_sent_at: string | null
+  market_number: number | null
 }
 
 /**
@@ -175,7 +176,15 @@ async function tellWarehouse(service: Service, order: MarketplaceOrder): Promise
     }
 
     const base = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hs-merchant.vercel.app'
-    const text = `Замовлення з ${platformLabel(order.platform)}, `
+    /*
+     * Номер попереду назви майданчика.
+     *
+     * Його й називають уголос, коли питають про замовлення, — а назва
+     * майданчика пояснює, звідки воно й чому під нього треба набивати
+     * накладну.
+     */
+    const number = marketNumberLabel(order.platform, order.market_number)
+    const text = `Замовлення ${[number, `з ${platformLabel(order.platform)}`].filter(Boolean).join(' ')}, `
       + 'потрібно набити накладну для узгодження з клієнтом - '
       + `${base}/zamovlennya/${token}`
 
@@ -199,7 +208,7 @@ const recent = (days: number) =>
 async function startPicking(service: Service, result: MarketplaceResult): Promise<void> {
   const { data } = await service
     .from('orders')
-    .select('id, external_id, platform, status, bitrix_deal_id, share_token, chat_sent_at')
+    .select('id, external_id, platform, status, bitrix_deal_id, share_token, chat_sent_at, market_number')
     .in('platform', ['maudau', 'rozetka'])
     .not('bitrix_deal_id', 'is', null)
     .neq('status', 'Скасовано')

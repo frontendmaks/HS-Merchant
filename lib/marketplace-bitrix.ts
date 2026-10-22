@@ -22,13 +22,14 @@ import {
   WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, contactFor, productIds,
 } from '@/lib/bitrix-deal'
 import { getSetting } from '@/lib/settings'
-import { platformLabel } from '@/lib/order-source'
+import { platformLabel, marketNumberLabel } from '@/lib/order-source'
 import { ensureLines, relinkLines } from '@/lib/order-lines'
 
 type Service = ReturnType<typeof createServiceClient>
 
 const FIELD = {
   warehouse: 'UF_BILL_ADRESS_LIST',
+  boxNumber: 'UF_CRM_1607510002583',
   address: 'UF_CRM_1606294264905',
   paymentType: 'UF_PAYMANT_TYPE',
   shipping: 'UF_SHIPPING',
@@ -91,6 +92,8 @@ export interface PushResult {
   lines: number
   /** Скільки рядків знайшли свій товар у Бітріксі — від цього залежить сума */
   matched: number
+  /** «M12» — номер замовлення в черзі свого майданчика */
+  number: string | null
 }
 
 /**
@@ -161,6 +164,38 @@ async function marketplacePrices(
   }
 }
 
+/**
+ * Номер маркетплейсного замовлення — свій, не ящиковий.
+ *
+ * Черга номерів у маркетплейсів власна й рахується з одиниці щомісяця:
+ * M1, M2 для MauDau, R1, R2 для Rozetka. Номер ящика кур'єрської
+ * доставки живе окремо — то інша черга на той самий день, і сплутати їх
+ * означає зібрати не те.
+ *
+ * Видаємо один раз: уже виданий номер лишається за замовленням назавжди,
+ * бо його вже бачили на бланку, в угоді й у чаті.
+ */
+async function ensureMarketNumber(
+  service: Service,
+  order: { id: string; platform: string | null; order_date: string | null; market_number: number | null },
+): Promise<number | null> {
+  if (order.market_number != null) return order.market_number
+  if (!order.platform) return null
+
+  const month = `${(order.order_date ?? new Date().toISOString().slice(0, 10)).slice(0, 7)}-01`
+
+  const { data, error } = await service.rpc('next_market_number', {
+    p_platform: order.platform,
+    p_month: month,
+  })
+
+  if (error || data == null) return null
+
+  const number = Number(data)
+  await service.from('orders').update({ market_number: number }).eq('id', order.id)
+  return number
+}
+
 export async function pushMarketplaceOrder(
   service: Service,
   orderId: string,
@@ -168,7 +203,7 @@ export async function pushMarketplaceOrder(
   try {
     const { data: order } = await service
       .from('orders')
-      .select('id, external_id, platform, customer_name, customer_phone, address, branch, total, status, bitrix_deal_id, operator_comment')
+      .select('id, external_id, platform, customer_name, customer_phone, address, branch, total, status, bitrix_deal_id, operator_comment, order_date, market_number')
       .eq('id', orderId).single()
 
     if (!order) return { error: 'Замовлення не знайдено' }
@@ -247,14 +282,26 @@ export async function pushMarketplaceOrder(
     const warehouse = await getSetting(service, 'marketplace_warehouse')
     const label = platformLabel(order.platform as string)
 
+    const number = await ensureMarketNumber(service, order as {
+      id: string; platform: string | null; order_date: string | null; market_number: number | null
+    })
+    const numberLabel = marketNumberLabel(order.platform as string, number)
+
     // Клієнт в угоді: знайдемо за телефоном або заведемо нового
     const contactId = order.customer_phone && order.customer_name
       ? await contactFor(order.customer_name as string, order.customer_phone as string)
       : null
 
     const fields: Record<string, unknown> = {
-      // Назва каже головне: це доставка, і звідки вона прийшла
-      TITLE: `Доставка ${label} · ${order.external_id}`,
+      /*
+       * Назва каже головне: номер, звідки замовлення й чим його знайти.
+       *
+       * Номер попереду, бо саме його називають уголос на складі й за ним
+       * шукають угоду; номер майданчика лишається в кінці для звірки з
+       * кабінетом.
+       */
+      TITLE: [numberLabel, `Доставка ${label}`, order.external_id]
+        .filter(Boolean).join(' · '),
       CATEGORY_ID,
       STAGE_ID: NEW_STAGE,
       ASSIGNED_BY_ID: ASSIGNED_BY,
@@ -267,6 +314,8 @@ export async function pushMarketplaceOrder(
       [FIELD.paymentType]: PAYMENT_PREPAID,
       [FIELD.shipping]: SHIPPING_NP,
       [FIELD.orderKey]: order.external_id ?? '',
+      // Те саме поле, з якого 1С читає номер ящика в сайтових замовленнях
+      [FIELD.boxNumber]: numberLabel ?? '',
       ...(contactId ? { CONTACT_ID: contactId } : {}),
     }
 
@@ -281,7 +330,7 @@ export async function pushMarketplaceOrder(
     await service.from('orders')
       .update({ bitrix_deal_id: dealId, bitrix_error: null }).eq('id', orderId)
 
-    return { dealId, priced, lines: rows.length, matched }
+    return { dealId, priced, lines: rows.length, matched, number: numberLabel }
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)
     await service.from('orders').update({ bitrix_error: error }).eq('id', orderId)

@@ -33,3 +33,26 @@ export const PLATFORM_LABEL: Record<string, string> = {
 
 export const platformLabel = (platform: string | null) =>
   PLATFORM_LABEL[platform ?? ''] ?? (platform || '—')
+
+/**
+ * Літера майданчика в номері замовлення.
+ *
+ * Маркетплейсні замовлення мають власну чергу номерів: на складі їх
+ * називають «М дванадцять», і плутати це число з номером ящика
+ * кур'єрської доставки не можна — то дві різні черги на один день.
+ * Літера й розрізняє їх з одного погляду.
+ */
+export const PLATFORM_PREFIX: Record<string, string> = {
+  maudau: 'M',
+  rozetka: 'R',
+}
+
+/** «maudau» + 12 → «M12». Без номера — порожньо, щоб нічого не вигадувати. */
+export function marketNumberLabel(
+  platform: string | null,
+  number: number | null | undefined,
+): string | null {
+  if (number == null) return null
+  const prefix = PLATFORM_PREFIX[platform ?? ''] ?? (platform ?? '?').charAt(0).toUpperCase()
+  return `${prefix}${number}`
+}

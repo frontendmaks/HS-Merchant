@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { marketNumberLabel } from '@/lib/order-source'
 import OrderJournal from './OrderJournal'
 import OrderItemsEditor from './OrderItemsEditor'
 import ShipmentDialog from './ShipmentDialog'
@@ -75,6 +76,8 @@ function fmt(n: number) {
 interface OrderRowProps {
   id: string
   external_id: string
+  /** Номер у черзі свого майданчика: 12 → «M12» */
+  market_number?: number | null
   platform: string
   order_date: string | null
   /** "HH:mm" the marketplace stamped on the order, in Kyiv time */
@@ -308,6 +311,13 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
     >
       <td className="px-3 py-2 whitespace-nowrap text-zinc-400 text-xs">{props.order_date || '—'}</td>
       <td className="px-3 py-2 text-zinc-300 font-mono text-xs align-top">
+        {/* Наш номер попереду: саме його називають на складі. Номер
+            майданчика лишається поруч — за ним звіряються з кабінетом */}
+        {marketNumberLabel(props.platform, props.market_number) && (
+          <div className="whitespace-nowrap text-white text-sm font-semibold">
+            {marketNumberLabel(props.platform, props.market_number)}
+          </div>
+        )}
         <div className="whitespace-nowrap">{props.external_id}</div>
         {/* High up the row on purpose: a comment is the one thing here the
             operator must read before touching the order */}

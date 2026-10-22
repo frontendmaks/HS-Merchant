@@ -227,6 +227,7 @@ export default async function MarketplaceOrdersPage({
                     key={order.id}
                     id={order.id}
                     external_id={order.external_id}
+                    market_number={order.market_number}
                     platform={order.platform}
                     order_date={order.order_date}
                     arrival={arrivalTime(order.platform, order.raw)}
