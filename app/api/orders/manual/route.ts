@@ -104,18 +104,24 @@ export async function POST(req: NextRequest) {
    * Тепер кожна спроба — це чесний резерв, а невдала спроба свій номер
    * одразу повертає. Згорілих чисел не лишається.
    */
-  let reserved = await reserveNumber(service, date, name)
+  const reserved = await reserveNumber(service, date, name)
+  const number = reserved.number
 
   for (let attempt = 0; attempt < 5 && !created; attempt++) {
-    if (attempt > 0) {
-      await releaseNumber(service, {
-        number: reserved.number, date, reason: 'замовлення не створилось',
-      })
-      reserved = await reserveNumber(service, date, name)
-    }
-
-    const number = reserved.number
-    const externalId = manualExternalId(date, number)
+    /*
+     * Номер ящика тримаємо, змінюємо лише підпис.
+     *
+     * Видимий номер замовлення — «МР-22.10-3» — унікальний назавжди, і
+     * скасоване замовлення тримає своє позначення до кінця дня. Через це
+     * вставка з третім номером падала, і код вигадував собі наступні
+     * числа повз журнал: так Кучинська дістала сьомий, уже зайнятий.
+     *
+     * Але зайняте тут лише позначення, а не ящик. Ящик третій, журнал це
+     * підтвердив, і саме він має лишитись; підпису ж додаємо хвостик.
+     */
+    const externalId = attempt === 0
+      ? manualExternalId(date, number)
+      : `${manualExternalId(date, number)}-${attempt + 1}`
 
     const { data, error } = await service.from('orders').insert({
       external_id: externalId,
@@ -156,7 +162,7 @@ export async function POST(req: NextRequest) {
       break
     }
     lastError = error?.message ?? 'Не вдалося створити замовлення'
-    // Унікальний індекс спрацював — пробуємо наступний номер
+    // Унікальний індекс спрацював — пробуємо інший підпис, той самий ящик
     if (!error?.message?.includes('duplicate')) break
   }
 
@@ -168,7 +174,7 @@ export async function POST(req: NextRequest) {
      * нічого не везуть, а нумерація дня йде далі через порожнє місце.
      */
     await releaseNumber(service, {
-      number: reserved.number, date, reason: 'замовлення не створилось',
+      number, date, reason: 'замовлення не створилось',
     })
     return NextResponse.json({ error: lastError }, { status: 500 })
   }
