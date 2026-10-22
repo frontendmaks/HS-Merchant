@@ -200,6 +200,51 @@ export async function reserveNumber(
   return fallback('Номер зайняли під час запису — спробуйте ще раз')
 }
 
+/** «2026-10-23» → «23.10»: так дату пишуть у самому аркуші */
+const shortDate = (date: string) => {
+  const [, m, d] = date.split('-')
+  return `${d}.${m}`
+}
+
+/**
+ * Номер, з якого замовлення поїхало, лишається зайнятим.
+ *
+ * Перенесення — не скасування. Ящика з цим номером того дня справді не
+ * буде, але віддавати число наступному замовленню не можна: склад,
+ * комірник і кур'єр уже говорять про «четвертий», у дзвінках і в чаті
+ * він названий, і поява другого «четвертого» того самого дня плутає
+ * саме там, де плутати найдорожче.
+ *
+ * Тому рядок не звільняємо, а переписуємо: замість імені — куди
+ * замовлення поїхало. Для таблиці комірка лишається непорожньою, отже
+ * зайнятою; для журналу рядок лишається взятим; а для людини видно, що
+ * сталось, замість мовчазної дірки.
+ */
+export async function blockMovedNumber(
+  service: Service,
+  { number, date, toDate }: { number: number; date: string; toDate: string },
+): Promise<boolean> {
+  const mark = `перенесено на ${shortDate(toDate)}`
+
+  await takeNumber(service, { date, number, orderId: null, customerName: mark })
+
+  if (!sheetsConfigured()) return false
+
+  const spreadsheetId = await registerFor(service, date)
+  if (!spreadsheetId) return false
+
+  const tab = tabNameFor(date)
+  const rows = await readRange(spreadsheetId, `'${tab}'!A1:B300`)
+  if (!rows) return false
+
+  for (let i = 1; i < rows.length; i++) {
+    if (Number((rows[i]?.[0] ?? '').toString().trim()) === number) {
+      return await writeCell(spreadsheetId, `'${tab}'!B${i + 1}`, mark)
+    }
+  }
+  return false
+}
+
 /**
  * Переносить номер замовлення з одного дня на інший.
  *
@@ -268,15 +313,15 @@ export async function moveNumber(
   if (!written) return { ...same, note: 'Не вдалося записати в журнал' }
 
   await noteTaken(service, toDate, target.number, customerName)
-  await freeNumber(service, { number, date: fromDate, reason: `переїхав на ${toDate}` })
 
-  // Старий рядок звільняємо після запису нового: якщо щось піде не так,
-  // замовлення лишиться видимим бодай в одному дні
-  const fromRows = await readRange(fromSheet, `'${tabNameFor(fromDate)}'!A1:B300`)
-  const source = fromRows ? rowOf(fromRows, number) : null
-  if (source?.row) {
-    await writeCell(fromSheet, `'${tabNameFor(fromDate)}'!B${source.row}`, '')
-  }
+  /*
+   * Старий рядок позначаємо після запису нового.
+   *
+   * Якщо щось піде не так, замовлення лишиться видимим бодай в одному
+   * дні. І позначаємо, а не звільняємо: число, під яким замовлення вже
+   * називали, того дня більше нікому не належить.
+   */
+  await blockMovedNumber(service, { number, date: fromDate, toDate })
 
   return { ok: true, number: target.number, note }
 }

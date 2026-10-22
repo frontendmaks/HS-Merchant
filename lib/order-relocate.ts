@@ -19,7 +19,7 @@ import {
 } from '@/lib/bitrix-deal'
 import { slotId } from '@/lib/bitrix-slots'
 import { stageId, stageName } from '@/lib/bitrix-stages'
-import { reserveNumber, releaseNumber } from '@/lib/manual-register'
+import { reserveNumber, releaseNumber, blockMovedNumber } from '@/lib/manual-register'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -216,11 +216,20 @@ export async function relocateOrder(
     updated_at: new Date().toISOString(),
   }).eq('id', orderId)
 
-  // Старий рядок у журналі звільняємо — ящика з цим номером того дня не буде
+  /*
+   * Старий рядок лишається зайнятим — але вже не вільним для заповнення.
+   *
+   * Ящика з цим номером того дня не буде, однак віддавати число
+   * наступному замовленню не можна: про «четвертий» уже говорили в чаті
+   * складу, в дзвінку клієнтові й на бланку, і другий «четвертий» того
+   * самого дня плутає саме там, де плутати найдорожче. У журналі й у
+   * таблиці замість імені стане «перенесено на 23.10».
+   */
   const freed = order.manual_number != null && order.delivery_date
-    ? await releaseNumber(service, {
+    ? await blockMovedNumber(service, {
         number: Number(order.manual_number),
         date: order.delivery_date as string,
+        toDate,
       })
     : true
 
@@ -243,6 +252,7 @@ export async function relocateOrder(
     orderId: created.id as string,
     number: reserved.number,
     dealId,
-    note: freed ? null : 'Старий рядок у журналі звільнити не вдалося — перевірте вручну',
+    note: freed ? null
+      : 'Старий рядок у журналі позначити не вдалося — перевірте вручну',
   }
 }
