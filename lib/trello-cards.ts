@@ -116,6 +116,7 @@ function issuesOf(card: TrelloCard, order: OrderRow): string[] {
       out.push('у картці немає періоду доставки')
     }
 
+    if (!order.delivery_date) out.push('в угоді не заповнена дата доставки')
     if (!order.warehouse) out.push('у замовленні не визначено склад')
     if (!order.delivery_slot) out.push('у замовленні не вказано період')
   }
@@ -234,6 +235,25 @@ export async function enrichNewCards(
     )
 
     /*
+     * Замовлення, якому ще не поставили день.
+     *
+     * Картка на дошці вже є — інтеграція створила її одразу, і день у її
+     * описі стоїть. А в угоді поле дати порожнє, тож за «телефон + день»
+     * замовлення не знайти, і картка висить нічия. Тоді шукаємо за самим
+     * телефоном — але тільки якщо таке замовлення в нього одне.
+     *
+     * Номера воно все одно не дістане: номер належить дню, а дня немає.
+     * Зате в картці зявиться бланк і рядок про те, чого бракує, — і
+     * порожня дата стане видимою там, де з нею працюють.
+     */
+    const undatedByPhone = new Map<string, OrderRow[]>()
+    for (const o of orders) {
+      if (o.delivery_date) continue
+      const key = phoneKey(o.customer_phone)
+      if (key) undatedByPhone.set(key, [...(undatedByPhone.get(key) ?? []), o])
+    }
+
+    /*
      * Запасний ключ — адреса.
      *
      * Частина карток приходить без телефону й без клієнта: інтеграція
@@ -284,7 +304,12 @@ export async function enrichNewCards(
         continue
       }
 
+      const undated = phones
+        .map(p => undatedByPhone.get(p))
+        .find(found => found?.length === 1)?.[0]
+
       const order = hit
+        ?? undated
         ?? soleByAddress(addressKey(card.name + ' ' + card.desc), date)
 
       if (!order) {
