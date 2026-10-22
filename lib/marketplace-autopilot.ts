@@ -13,9 +13,11 @@ import { changeOrderStatus } from '@/lib/order-status-change'
 import { pushMarketplaceOrder } from '@/lib/marketplace-bitrix'
 import { currentActor } from '@/lib/order-events'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
-import { isNew, READY_TO_SHIP_STATUSES } from '@/lib/order-statuses'
+import { isNew } from '@/lib/order-statuses'
 import { stageId, stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
-import { onStatusChanged } from '@/lib/bitrix-chat'
+import { sendToChat } from '@/lib/bitrix-chat'
+import { getSetting } from '@/lib/settings'
+import { platformLabel } from '@/lib/order-source'
 import { bitrix } from '@/lib/bitrix'
 
 type Service = ReturnType<typeof createServiceClient>
@@ -124,18 +126,64 @@ export async function processMarketplaceOrders(
  * майданчик, і зібрати неоплачене означає відправити посилку за свій
  * рахунок.
  */
+interface MarketplaceOrder {
+  id: string
+  platform: string
+  external_id: string | null
+  share_token: string | null
+  chat_sent_at: string | null
+}
+
+/**
+ * Повідомлення про маркетплейсне замовлення — у чат Гуртівні.
+ *
+ * Накладну під нього набивають саме там, і до того, як її звірять із
+ * клієнтом, замовлення нікуди не їде. Тому в чат іде не голий бланк, як
+ * для сайтових, а те, що з ним треба зробити.
+ *
+ * Надсилаємо один раз: позначка на замовленні та сама, що й для бланка
+ * складу, і повторний прохід через неї не пише нічого вдруге.
+ */
+async function tellWarehouse(service: Service, order: MarketplaceOrder): Promise<void> {
+  if (order.chat_sent_at || !order.share_token) return
+
+  try {
+    const warehouse = await getSetting(service, 'marketplace_chat_warehouse')
+    const { data: chat } = await service
+      .from('warehouse_chats').select('dialog_id').eq('warehouse', warehouse).maybeSingle()
+
+    if (!chat) {
+      await service.from('orders')
+        .update({ chat_error: `Для складу «${warehouse}» не вказано чат` })
+        .eq('id', order.id)
+      return
+    }
+
+    const base = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hs-merchant.vercel.app'
+    const text = `Замовлення з ${platformLabel(order.platform)}, `
+      + 'потрібно набити накладну для узгодження з клієнтом - '
+      + `${base}/zamovlennya/${order.share_token}`
+
+    await sendToChat(chat.dialog_id as string, text)
+
+    await service.from('orders')
+      .update({ chat_sent_at: new Date().toISOString(), chat_error: null })
+      .eq('id', order.id)
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e)
+    await service.from('orders').update({ chat_error: error }).eq('id', order.id)
+  }
+}
+
 const PICKING = 'Комплектується'
 
 async function startPicking(service: Service, result: MarketplaceResult): Promise<void> {
   const { data } = await service
     .from('orders')
-    .select('id, external_id, platform, status, bitrix_deal_id')
+    .select('id, external_id, platform, status, bitrix_deal_id, share_token, chat_sent_at')
     .in('platform', ['maudau', 'rozetka'])
     .not('bitrix_deal_id', 'is', null)
-    .eq('is_paid', true)
-    // Саме «узгоджено», а не «очікує оплату»: останнє означає, що
-    // майданчик грошей ще не бачить, і наш прапорець із ним розходиться
-    .in('status', READY_TO_SHIP_STATUSES)
+    .neq('status', 'Скасовано')
     .gte('order_date', new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10))
     .limit(30)
 
@@ -156,8 +204,15 @@ async function startPicking(service: Service, result: MarketplaceResult): Promis
 
     await bitrix('crm.deal.update', { id: dealId, fields: { STAGE_ID: target } })
 
-    // Бланк у чат складу — те саме, що відбувається для замовлень із сайту
-    await onStatusChanged(service, order.id as string, PICKING)
+    /*
+     * Чат дізнається інше, ніж про замовлення з сайту.
+     *
+     * Сайтове приходить на склад готовим — комірникові потрібне саме
+     * посилання й більше нічого. Маркетплейсне ж спершу треба набити
+     * накладною і звірити з клієнтом, і повідомлення має сказати саме
+     * це: інакше його прочитають як чергове замовлення на збірку.
+     */
+    await tellWarehouse(service, order as MarketplaceOrder)
     await broadcastOrderChange(order.id as string, 'sync')
     result.picking++
   }

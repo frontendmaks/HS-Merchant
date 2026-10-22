@@ -93,6 +93,74 @@ export interface PushResult {
   matched: number
 }
 
+/**
+ * Ціна маркетплейсного рядка для угоди.
+ *
+ * У Бітріксі такі замовлення мають стояти за категорією «Маркетплейс» —
+ * це ціна «Онлайн», помножена на коефіцієнт категорії й заокруглена вгору
+ * до гривні. Саме цю ціну бачить бухгалтерія й за нею набивають накладну.
+ *
+ * Ціна, яку заплатив покупець на майданчику, лишається на замовленні в
+ * Мерчанті: вона потрібна для звірки виплат і комісії, і підміняти її
+ * нашою означало б утратити те, що справді сталось.
+ *
+ * Онлайнову ціну беремо з нашого каталогу, а для товару, якого на сайті
+ * немає, — з каталогу Бітрікса. Якщо не знайшлось ніде, лишається ціна
+ * рядка: краще та, що є, ніж нуль.
+ */
+async function marketplacePrices(
+  service: Service,
+  lines: { product_id?: string | null; bitrix_product_id?: number | null }[],
+): Promise<{ price: (l: { product_id?: string | null; bitrix_product_id?: number | null }) => number | null; note: string }> {
+  const { data: category } = await service
+    .from('price_categories')
+    .select('multiplier, rounding, rounding_step')
+    .eq('name', 'Маркетплейс')
+    .maybeSingle()
+
+  if (!category) return { price: () => null, note: 'категорії «Маркетплейс» немає' }
+
+  const multiplier = Number(category.multiplier ?? 1)
+  const step = Number(category.rounding_step ?? 1) || 1
+  const mode = String(category.rounding ?? 'none')
+
+  const ourIds = lines.map(l => l.product_id).filter(Boolean) as string[]
+  const bxIds = lines.map(l => l.bitrix_product_id).filter(Boolean) as number[]
+
+  const [{ data: ours }, { data: fromBitrix }] = await Promise.all([
+    ourIds.length
+      ? service.from('products').select('id, price').in('id', ourIds)
+      : Promise.resolve({ data: [] as { id: string; price: number | null }[] }),
+    bxIds.length
+      ? service.from('bitrix_products').select('product_id, price').in('product_id', bxIds)
+      : Promise.resolve({ data: [] as { product_id: number; price: number | null }[] }),
+  ])
+
+  const online = new Map<string, number>(
+    (ours ?? []).map(p => [p.id as string, Number(p.price ?? 0)]),
+  )
+  const onlineBx = new Map<number, number>(
+    (fromBitrix ?? []).map(p => [Number(p.product_id), Number(p.price ?? 0)]),
+  )
+
+  const round = (value: number) => {
+    if (mode === 'none' || !(value > 0)) return Math.round(value * 100) / 100
+    const units = value / step
+    const whole = mode === 'up' ? Math.ceil(units)
+      : mode === 'down' ? Math.floor(units) : Math.round(units)
+    return Math.round(whole * step * 100) / 100
+  }
+
+  return {
+    note: `×${multiplier}`,
+    price: l => {
+      const base = (l.product_id ? online.get(l.product_id) : undefined)
+        ?? (l.bitrix_product_id ? onlineBx.get(Number(l.bitrix_product_id)) : undefined)
+      return base && base > 0 ? round(base * multiplier) : null
+    },
+  }
+}
+
 export async function pushMarketplaceOrder(
   service: Service,
   orderId: string,
@@ -123,6 +191,9 @@ export async function pushMarketplaceOrder(
     if (!lines.length) return { error: 'У замовленні немає позицій' }
 
     const prices = await feedPrices(service, order.platform as string)
+    const market = await marketplacePrices(service, lines as {
+      product_id?: string | null; bitrix_product_id?: number | null
+    }[])
     let priced = 0
 
     /*
@@ -146,8 +217,17 @@ export async function pushMarketplaceOrder(
     const rows = lines.map(l => {
       const own = Number(l.price_per_unit ?? 0)
       const fromFeed = l.product_id ? prices.get(l.product_id as string) : undefined
-      // Фід — лише запасний варіант: ціна рядка головніша
-      const price = own > 0 ? own : fromFeed ?? 0
+
+      /*
+       * Категорія «Маркетплейс» головніша за все.
+       *
+       * Саме за цією ціною набивають накладну, і вона має бути однакова
+       * в усіх маркетплейсних угодах, хоч би скільки покупець заплатив
+       * на майданчику. Решта — запасні варіанти на випадок, коли
+       * онлайнової ціни на товар немає ніде.
+       */
+      const price = market.price(l as { product_id?: string | null; bitrix_product_id?: number | null })
+        ?? (own > 0 ? own : fromFeed ?? 0)
       if (own <= 0 && fromFeed != null) priced++
 
       const uid = l.product_id ? uidByOurId.get(l.product_id as string) : undefined
