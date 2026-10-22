@@ -17,6 +17,7 @@ import {
 import { getSetting } from '@/lib/settings'
 import { phoneKey } from '@/lib/phone'
 import { slotStartMinutes } from '@/lib/bitrix-slots'
+import { kyivToday, kyivMinutesNow } from '@/lib/delivery-slots'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -27,6 +28,8 @@ export interface CardResult {
   numbered: number
   linked: number
   moved: number
+  /** Скільки карток чекає свого вечора в «Нових замовленнях» */
+  waiting: number
   unmatched: { card: string; why: string }[]
   problems: { card: string; number: number | null; issues: string[] }[]
   error?: string
@@ -175,7 +178,7 @@ export async function enrichNewCards(
   { limit = 40, orderIds }: { limit?: number; orderIds?: string[] } = {},
 ): Promise<CardResult> {
   const result: CardResult = {
-    looked: 0, numbered: 0, linked: 0, moved: 0, unmatched: [], problems: [],
+    looked: 0, numbered: 0, linked: 0, moved: 0, waiting: 0, unmatched: [], problems: [],
   }
 
   if (!trelloConfigured()) return { ...result, error: 'TRELLO_KEY/TRELLO_TOKEN не налаштовано' }
@@ -476,6 +479,7 @@ export async function enrichNewCards(
      */
     const spread = await spreadToPicking(service, matched, board)
     result.moved += spread.moved
+    result.waiting = spread.waiting
     result.problems.push(...spread.problems.map(p => ({
       card: p.card, number: null, issues: [p.why],
     })))
@@ -605,8 +609,41 @@ function separatorFor(
   return (fit ?? windows[0]).sep
 }
 
+/**
+ * Коли замовлення можна розкладати по складах.
+ *
+ * Склад збирає увечері напередодні, і до того часу картка має лежати в
+ * «Нових замовленнях»: розкладене зарання змішується з тим, що везуть
+ * сьогодні, і комірник бачить у своїй колонці ящики на два різні дні.
+ *
+ * Межа — 17:30 напередодні дати доставки. Замовлення на завтра чекає до
+ * сьогоднішнього вечора; замовлення на понеділок, зроблене в середу,
+ * чекає до недільного. Замовлення на сьогодні відкрите завжди: його
+ * вечір був учора.
+ */
+const SPREAD_FROM_MINUTES = 17 * 60 + 30
+
+export function spreadOpen(
+  deliveryDate: string | null,
+  now = new Date(),
+): { open: boolean; from: string } {
+  if (!deliveryDate) return { open: false, from: '—' }
+
+  const eve = new Date(`${deliveryDate}T12:00:00`)
+  eve.setDate(eve.getDate() - 1)
+  const from = eve.toLocaleDateString('en-CA')
+
+  const today = kyivToday(now)
+  if (today > from) return { open: true, from }
+  if (today < from) return { open: false, from }
+
+  return { open: kyivMinutesNow(now) >= SPREAD_FROM_MINUTES, from }
+}
+
 export interface SpreadResult {
   moved: number
+  /** Картки, яким ще рано: день доставки не настав */
+  waiting: number
   problems: { card: string; why: string }[]
 }
 
@@ -615,10 +652,23 @@ export async function spreadToPicking(
   cards: { card: TrelloCard; order: OrderRow }[],
   boardId: string,
 ): Promise<SpreadResult> {
-  const result: SpreadResult = { moved: 0, problems: [] }
-  const ready = cards.filter(({ order }) =>
+  const result: SpreadResult = { moved: 0, waiting: 0, problems: [] }
+  const fit = cards.filter(({ order }) =>
     order.warehouse && order.delivery_slot && !isMarketplace(order)
     && order.status !== 'Скасовано')
+
+  /*
+   * Рано — значить рано.
+   *
+   * Картку на післязавтра лишаємо в «Нових замовленнях»: вона поїде на
+   * склад свого вечора. Це не хиба й не привід щось правити, тож і в
+   * перелік зауважень не йде — просто рахуємо, скільки чекає.
+   */
+  const ready = fit.filter(({ order }) => {
+    const when = spreadOpen(order.delivery_date)
+    if (!when.open) result.waiting++
+    return when.open
+  })
 
   if (!ready.length) return result
 
