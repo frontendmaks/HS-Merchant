@@ -31,6 +31,8 @@ export interface CatalogueItem {
   category: string | null
   /** Звідки товар: із нашого каталогу чи лише з Бітрікса */
   source?: 'site' | 'bitrix'
+  /** Коли цей товар востаннє продавали за цією ціною */
+  price_from?: string | null
   /** Номер товару в Бітріксі — щоб угода отримала саме його, а не назву */
   bitrix_product_id?: number
 }
@@ -61,11 +63,29 @@ async function catalogue(): Promise<CatalogueItem[]> {
    * Ціни там немає — її називає оператор, бо такий товар і продається за
    * домовленістю.
    */
-  const { data: fromBitrix } = await service
-    .from('bitrix_products')
-    .select('product_id, uid_1c, name, measure')
-    .eq('active', true)
-    .order('name')
+  const [{ data: fromBitrix }, { data: lastPrices }] = await Promise.all([
+    service.from('bitrix_products')
+      .select('product_id, uid_1c, name, measure')
+      .eq('active', true)
+      .order('name'),
+    /*
+     * Ціна — з історії продажів, бо в каталозі CRM її немає.
+     *
+     * Поле ціни порожнє в усіх 3988 товарах, а модуль «Торговий каталог»
+     * для нашого вебхука закритий. Зате кожна угода несе ціну позиції — і
+     * це та сама ціна, яку оператор називав останнього разу. Підставляємо
+     * її й кажемо, коли це було: якщо відтоді змінилась, видно, що
+     * перевірити.
+     */
+    service.from('bitrix_last_price').select('product_id, price, sold_on'),
+  ])
+
+  const priced = new Map(
+    (lastPrices ?? []).map(r => [
+      Number(r.product_id),
+      { price: Number(r.price ?? 0), on: r.sold_on as string | null },
+    ]),
+  )
 
   const items = (data ?? []).map(p => {
     const attrs = (p.attributes as Record<string, string> | null) ?? {}
@@ -117,7 +137,8 @@ async function catalogue(): Promise<CatalogueItem[]> {
       name: b.name as string,
       sku: null,
       code_1c: b.uid_1c as string,
-      price: 0,
+      price: priced.get(Number(b.product_id))?.price ?? 0,
+      price_from: priced.get(Number(b.product_id))?.on ?? null,
       unit: measureUnit(b.measure as string | null),
       pack: null,
       stock: null,

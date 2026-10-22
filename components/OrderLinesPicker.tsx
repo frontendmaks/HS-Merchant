@@ -14,9 +14,11 @@ export interface Product {
   id: string; name: string; sku: string | null; code_1c: string | null
   price: number; unit: string; pack: number | null
   stock: number | null; status: string; category: string | null
-  /** «bitrix» — товар є лише в CRM: ціни немає, її називає оператор */
+  /** «bitrix» — товар є лише в CRM */
   source?: 'site' | 'bitrix'
   bitrix_product_id?: number
+  /** Коли цей товар востаннє продали за цією ціною */
+  price_from?: string | null
 }
 
 export interface Line {
@@ -317,14 +319,21 @@ export function ProductPicker({ lines, onChange, total }: {
                 <div className="flex items-start gap-2">
                   <span className="text-white text-sm min-w-0 flex-1">{p.name}</span>
                   <span className="text-zinc-300 text-xs whitespace-nowrap">
-                    {p.source === 'bitrix'
+                    {p.source === 'bitrix' && !p.price
                       ? <span className="text-amber-500">ціну вкажіть · {p.unit}</span>
                       : `${p.price} ₴/${p.unit}`}
                   </span>
                 </div>
                 <div className="text-zinc-500 text-xs mt-0.5">
                   {p.source === 'bitrix'
-                    ? <span className="text-zinc-400">лише в Бітріксі — на сайті не продається</span>
+                    ? (
+                      <span className="text-zinc-400">
+                        лише в Бітріксі
+                        {p.price_from
+                          ? ` · ціна з продажу ${p.price_from.split('-').reverse().slice(0, 2).join('.')}`
+                          : ' · ціни в каталозі немає'}
+                      </span>
+                    )
                     : (p.sku ?? '—')}
                   {p.pack ? ` · фасування ${p.pack} ${p.unit}` : ''}
                   {p.status !== 'active' && (
