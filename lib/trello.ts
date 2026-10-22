@@ -13,7 +13,15 @@ export const trelloConfigured = () =>
 export class TrelloError extends Error {}
 
 async function call<T>(
-  method: 'GET' | 'PUT' | 'POST',
+  /*
+   * Тільки читати й правити.
+   *
+   * Картки на дошці створює чинна інтеграція, і створювати їх ще й нам
+   * означало б дублювати замовлення: дві картки на один ящик, і склад
+   * збирає двічі. Тому POST тут немає зовсім — не за домовленістю, а за
+   * типом: написати створення картки не вийде, навіть помилково.
+   */
+  method: 'GET' | 'PUT',
   path: string,
   params: Record<string, string> = {},
 ): Promise<T> {

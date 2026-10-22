@@ -118,8 +118,20 @@ function issuesOf(card: TrelloCard, order: OrderRow): string[] {
       out.push(`дата в картці ${cardDate}, у замовленні ${order.delivery_date}`)
     }
 
-    if (!/Період доставки\s*\*{0,2}\d{1,2}[:.]\d{2}/u.test(card.desc)) {
+    const cardSlot = slotInDesc(card.desc)
+    if (!cardSlot) {
       out.push('у картці немає періоду доставки')
+    } else if (order.delivery_slot
+      && slotKey(cardSlot) !== slotKey(order.delivery_slot)) {
+      /*
+       * Період у картці й у замовленні мають збігатись.
+       *
+       * Везе кур'єр за карткою, а правлять замовлення в Мерчанті — і
+       * якщо вони розійшлись, хтось приїде не в ту годину. Розкладаємо
+       * картку за періодом замовлення (він із угоди, і він головний), а
+       * про розбіжність кажемо вголос.
+       */
+      out.push(`період у картці ${cardSlot}, у замовленні ${order.delivery_slot}`)
     }
 
     if (!order.delivery_date) out.push('в угоді не заповнена дата доставки')
@@ -400,9 +412,6 @@ export async function enrichNewCards(
       }
 
       const issues = issuesOf(card, order)
-      if (issues.length) {
-        result.problems.push({ card: card.name.slice(0, 60), number: order.manual_number, issues })
-      }
 
       const fields: { name?: string; desc?: string; idList?: string } = {}
 
@@ -418,9 +427,29 @@ export async function enrichNewCards(
         fields.idList = marketList
       }
 
-      // Номер ящика попереду назви — склад шукає картку саме за ним
-      if (order.manual_number != null && !NUMBER_AT_START.test(card.name)) {
-        fields.name = `№${order.manual_number} ${card.name}`.slice(0, 16_384)
+      /*
+       * Номер ящика попереду назви — склад шукає картку саме за ним.
+       *
+       * Номер у назві може бути й чужим: картку колись зчепили не з тим
+       * замовленням, або замовлення перенесли й воно дістало інше число.
+       * Тоді стара поведінка — «номер уже є, не чіпаємо» — лишала на
+       * дошці завідомо хибне число. Тож звіряємо: не той — переписуємо.
+       */
+      if (order.manual_number != null) {
+        const want = `№${order.manual_number}`
+        const has = card.name.match(NUMBER_AT_START)?.[0]?.replace(/\s+/g, '')
+
+        if (!has) {
+          fields.name = `${want} ${card.name}`.slice(0, 16_384)
+        } else if (has !== want) {
+          fields.name = card.name.replace(NUMBER_AT_START, want).slice(0, 16_384)
+          issues.push(`у назві стояв ${has}, виправлено на ${want}`)
+        }
+      }
+
+      // Перелік хиб складено — тепер він і в картці, і в підсумку проходу
+      if (issues.length) {
+        result.problems.push({ card: card.name.slice(0, 60), number: order.manual_number, issues })
       }
 
       const desc = `${stripOurs(card.desc)}\n\n${ourBlock(order, issues)}`
