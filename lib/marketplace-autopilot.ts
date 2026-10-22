@@ -227,8 +227,20 @@ async function startPicking(service: Service, result: MarketplaceResult): Promis
     // Питаємо стадію, щоб не переставляти її щопроходу: Бітрікс пише в
     // стрічку угоди кожну зміну, і склад читав би ту саму новину двічі
     const deal = await bitrix<{ STAGE_ID?: string }>('crm.deal.get', { id: dealId })
+    const closed = !!deal?.STAGE_ID && CLOSED_STAGES.includes(stageName(deal.STAGE_ID) ?? '')
+    if (closed) continue
+
+    /*
+     * Чат не залежить від того, чи міняли стадію.
+     *
+     * Раніше повідомлення стояло після зміни, і замовлення, яке вже
+     * опинилось у «Комплектується» іншим шляхом, прохід минав цілком —
+     * разом із проханням набити накладну. Склад про таке замовлення не
+     * дізнавався зовсім.
+     */
+    await tellWarehouse(service, order as MarketplaceOrder)
+
     if (deal?.STAGE_ID === target) continue
-    if (deal?.STAGE_ID && CLOSED_STAGES.includes(stageName(deal.STAGE_ID) ?? '')) continue
 
     await bitrix('crm.deal.update', { id: dealId, fields: { STAGE_ID: target } })
 
@@ -240,7 +252,6 @@ async function startPicking(service: Service, result: MarketplaceResult): Promis
      * накладною і звірити з клієнтом, і повідомлення має сказати саме
      * це: інакше його прочитають як чергове замовлення на збірку.
      */
-    await tellWarehouse(service, order as MarketplaceOrder)
     await broadcastOrderChange(order.id as string, 'sync')
     result.picking++
   }
