@@ -19,6 +19,7 @@ import {
 import { slotId } from '@/lib/bitrix-slots'
 import { stageId, stageName } from '@/lib/bitrix-stages'
 import { phoneKey } from '@/lib/phone'
+import { reserveNumber, releaseNumber, linkNumber } from '@/lib/manual-register'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -29,6 +30,10 @@ export interface MergeResult {
   dealId: number
   merged: number
   lines: number
+  /** Номер ящика, який об'єднане дістало з журналу */
+  number: number
+  /** Що завадило взяти його з таблиці, якщо завадило */
+  numberNote: string | null
 }
 
 interface Row {
@@ -143,13 +148,6 @@ export async function mergeOrders(
     return { error: `Угоду створити не вдалося: ${e instanceof Error ? e.message : e}` }
   }
 
-  /*
-   * Номер з журналу не беремо.
-   *
-   * Його видасть огляд — той самий, що й для звичайного замовлення. Так
-   * об'єднане проходить рівно той шлях, що й решта, замість окремої
-   * гілки, яка колись розійдеться з головною.
-   */
   const { data: created, error } = await service.from('orders').insert({
     external_id: `BX-${dealId}`,
     platform: 'site',
@@ -202,7 +200,6 @@ export async function mergeOrders(
      * інше.
      */
     if (row.manual_number != null && row.delivery_date) {
-      const { releaseNumber } = await import('@/lib/manual-register')
       await releaseNumber(service, {
         number: Number(row.manual_number), date: row.delivery_date,
       }).catch(() => null)
@@ -230,10 +227,42 @@ export async function mergeOrders(
     updated_at: new Date().toISOString(),
   }).in('id', orderIds)
 
+  /*
+   * Номер беремо вже після того, як вихідні звільнили свої.
+   *
+   * Порядок тут важить. Об'єднане замовлення — це той самий покупець і
+   * та сама адреса, і на складі воно має стояти там само, де стояли б
+   * його частини. Якщо спершу звільнити рядки, найменшим вільним стане
+   * саме найменший зі звільнених — і ящик лишиться на своєму місці, а
+   * не поїде в кінець дня.
+   *
+   * Чекати на огляд не випадає: між об'єднанням і проходом минає до
+   * трьох хвилин, а оператор уже дивиться на замовлення й питає, який
+   * у нього номер.
+   */
+  const reserved = await reserveNumber(
+    service, deliveryDate, base.customer_name ?? 'об’єднане замовлення',
+  )
+
+  await service.from('orders')
+    .update({ manual_number: reserved.number, number_source: reserved.source })
+    .eq('id', created.id)
+
+  await linkNumber(service, {
+    date: deliveryDate, number: reserved.number, orderId: created.id as string,
+  })
+
+  // Номер ящика склад читає з угоди — там він має з'явитись тієї ж миті
+  await bitrix('crm.deal.update', {
+    id: dealId, fields: { [FIELD.boxNumber]: String(reserved.number) },
+  }).catch(() => null)
+
   return {
     orderId: created.id as string,
     dealId,
     merged: rows.length,
     lines: lines.length,
+    number: reserved.number,
+    numberNote: reserved.note,
   }
 }

@@ -37,6 +37,7 @@ export default function MergePreorders({ candidates, date }: {
   const [when, setWhen] = useState(date)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<{ number: number; note: string | null } | null>(null)
 
   if (!candidates.length) return null
 
@@ -53,6 +54,7 @@ export default function MergePreorders({ candidates, date }: {
   async function merge() {
     setBusy(true)
     setError(null)
+    setDone(null)
     try {
       const r = await fetch('/api/orders/merge', {
         method: 'POST',
@@ -64,6 +66,9 @@ export default function MergePreorders({ candidates, date }: {
       const d = await r.json()
       if (!r.ok) throw new Error(d.error ?? 'Не вдалося об’єднати')
       setPicked(new Set())
+      // Номер кажемо вголос: саме про нього питає оператор одразу після
+      // об'єднання, і шукати його в оновленому списку незручно
+      setDone({ number: d.number, note: d.number_note ?? d.numberNote ?? null })
       router.refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -146,6 +151,14 @@ export default function MergePreorders({ candidates, date }: {
           {!mixed && picked.size < 2 && (
             <span className="text-zinc-600 text-xs">Потрібно щонайменше два</span>
           )}
+        </div>
+      )}
+
+      {done && (
+        <div className="px-4 py-2 bg-emerald-950/40 border-t border-emerald-900
+                        text-emerald-400 text-xs">
+          Об&apos;єднано — нове замовлення під номером <b>№{done.number}</b>
+          {done.note && <span className="text-amber-400"> · {done.note}</span>}
         </div>
       )}
 

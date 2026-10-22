@@ -44,7 +44,9 @@ export async function POST(request: NextRequest) {
       { details: { merged_into: result.orderId } }, actor)
   }
   await logOrderEvent(service, result.orderId, 'created',
-    { details: { merged_from: orderIds.length, lines: result.lines } }, actor)
+    { details: {
+      merged_from: orderIds.length, lines: result.lines, number: result.number,
+    } }, actor)
 
   await broadcastOrderChange(result.orderId, 'sync')
 
