@@ -5,9 +5,10 @@
  * йде решта розмови про замовлення, а не в окремий месенджер, який треба
  * окремо відкривати.
  *
- * Надсилаємо саме посилання й нічого більше: у чаті його читає людина, яка
- * вже знає, що це таке, і будь-який супровідний текст лише відсуває потрібне
- * вниз.
+ * Поруч із посиланням стоїть номер замовлення — і більше нічого. Самого
+ * посилання було замало: у стрічці вони всі однакові, і щоб зрозуміти, про
+ * яке замовлення мова, доводилось відкривати кожне. Номер — те єдине, чим
+ * їх розрізняють уголос, тож він і стоїть попереду.
  */
 import { bitrix } from '@/lib/bitrix'
 import { createServiceClient } from '@/lib/supabase/service'
@@ -89,7 +90,7 @@ export async function sendOrderSheet(
   try {
     const { data: order } = await service
       .from('orders')
-      .select('warehouse, share_token, chat_sent_at')
+      .select('warehouse, share_token, chat_sent_at, manual_number, external_id')
       .eq('id', orderId).single()
 
     if (!order?.share_token) return { error: 'У замовлення немає бланка' }
@@ -106,7 +107,21 @@ export async function sendOrderSheet(
     }
 
     const base = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hs-merchant.vercel.app'
-    await sendToChat(chat.dialog_id as string, `${base}/zamovlennya/${order.share_token}`)
+
+    /*
+     * Номер ящика, а як його ще немає — видимий номер замовлення.
+     *
+     * Перше те, чим замовлення називають на складі; друге лишається на
+     * випадок, коли бланк пішов раніше, ніж журнал видав число.
+     */
+    const number = order.manual_number != null
+      ? `№${order.manual_number}`
+      : (order.external_id as string | null) ?? ''
+
+    await sendToChat(
+      chat.dialog_id as string,
+      `Замовлення ${number}: ${base}/zamovlennya/${order.share_token}`.replace('  ', ' '),
+    )
 
     await service.from('orders')
       .update({ chat_sent_at: new Date().toISOString(), chat_error: null })
