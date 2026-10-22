@@ -225,6 +225,14 @@ export default async function SiteOrdersPage({
 
   const matcher = FUNNEL.find(f => f.key === stage) ?? FUNNEL[0]
   const orders = scoped.filter(matcher.match)
+
+  /*
+   * Що можна звести в одне замовлення.
+   *
+   * Беремо передзамовлення з того, що зараз у списку: об'єднання має
+   * стосуватись того, на що людина дивиться, а не всього місяця.
+   */
+  const mergeable = orders.filter(o => o.status === PREORDER)
   const active = scoped.filter(o => isInProgress(o.status))
 
   // Пропонуємо лише те, що цього дня справді є: порожній варіант у списку
@@ -359,12 +367,16 @@ export default async function SiteOrdersPage({
         </div>
       )}
 
-      {/* Об'єднання живе на своїй вкладці: саме там його шукають, і на
-          решті воно було б зайвим рядком між роботою */}
-      {matcher.key === 'preorder' && (
+      {/* Об'єднання — там, де передзамовлення видно.
+          Раніше воно жило лише на вкладці «Передзамовлення», але ті самі
+          замовлення частіше трапляються на очі в «Потребує уваги»: сайт
+          не розпізнав адресу, і людина відкриває саме її. Об'єднати їх
+          звідти було неможливо — доводилось шукати ту саму пару на іншій
+          вкладці. Тепер пропонуємо скрізь, де в списку є що об'єднувати. */}
+      {mergeable.length > 1 && (
         <MergePreorders
           date={date}
-          candidates={orders.map(o => ({
+          candidates={mergeable.map(o => ({
             id: o.id,
             external_id: o.external_id,
             customer_name: o.customer_name,
