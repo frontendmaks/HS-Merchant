@@ -331,7 +331,9 @@ export function ProductPicker({ lines, onChange, total }: {
                         лише в Бітріксі
                         {p.price_from
                           ? ` · ціна з продажу ${p.price_from.split('-').reverse().slice(0, 2).join('.')}`
-                          : ' · ціни в каталозі немає'}
+                          : p.price
+                            ? ' · ціна ОНЛАЙН'
+                            : ' · ціни немає — вкажіть'}
                       </span>
                     )
                     : (p.sku ?? '—')}

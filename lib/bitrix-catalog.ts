@@ -12,12 +12,22 @@
  * а не ходити по вісімдесят запитів до CRM.
  */
 import { createServiceClient } from '@/lib/supabase/service'
-import { bitrix } from '@/lib/bitrix'
+import { bitrix, bitrixCatalog, catalogConfigured } from '@/lib/bitrix'
 
 type Service = ReturnType<typeof createServiceClient>
 
 /** Скільки Бітрікс віддає за один раз */
 const PAGE = 50
+
+/**
+ * Тип ціни «ОНЛАЙН».
+ *
+ * Фіксованої ціни в товара немає: у кожного магазину свій тип, їх
+ * тридцять вісім — «маг.ЦУМ», «ГУРТІВНЯ», «ЛЬВІВ АС2». Для доставки
+ * чинний онлайновий, і саме його має бачити оператор, бо саме цю ціну
+ * почує покупець.
+ */
+export const ONLINE_PRICE_TYPE = 24
 
 /**
  * Одиниці виміру за номером.
@@ -45,6 +55,7 @@ export interface CatalogResult {
   seen: number
   saved: number
   skipped: number
+  priced: number
 }
 
 /**
@@ -57,7 +68,7 @@ export async function syncBitrixCatalog(
   service: Service,
   { maxPages = 120 }: { maxPages?: number } = {},
 ): Promise<CatalogResult> {
-  const result: CatalogResult = { seen: 0, saved: 0, skipped: 0 }
+  const result: CatalogResult = { seen: 0, saved: 0, skipped: 0, priced: 0 }
   const now = new Date().toISOString()
 
   for (let page = 0; page < maxPages; page++) {
@@ -107,5 +118,59 @@ export async function syncBitrixCatalog(
       .or(`synced_at.is.null,synced_at.lt.${now}`)
   }
 
+  result.priced = await syncOnlinePrices(service)
+
   return result
+}
+
+interface Price { productId: number; price: number }
+
+/**
+ * Онлайнові ціни — на товари, які ми вже знаємо.
+ *
+ * Ціни приходять окремим списком, не разом із товаром, і їх трохи менше,
+ * ніж товарів: те, чого онлайн не продають, онлайнової ціни й не має.
+ */
+async function syncOnlinePrices(service: Service): Promise<number> {
+  if (!catalogConfigured()) return 0
+
+  const byProduct = new Map<number, number>()
+
+  for (let page = 0; page < 200; page++) {
+    const batch = await bitrixCatalog<{ prices?: Price[] }>('catalog.price.list', {
+      filter: { catalogGroupId: ONLINE_PRICE_TYPE },
+      select: ['productId', 'price'],
+      order: { id: 'ASC' },
+      start: page * PAGE,
+    })
+
+    const prices = batch?.prices ?? []
+    if (!prices.length) break
+    for (const p of prices) {
+      if (Number(p.price) > 0) byProduct.set(Number(p.productId), Number(p.price))
+    }
+    if (prices.length < PAGE) break
+  }
+
+  if (!byProduct.size) return 0
+
+  const now = new Date().toISOString()
+  const { data: known } = await service
+    .from('bitrix_products').select('uid_1c, product_id')
+
+  const rows = (known ?? [])
+    .filter(k => byProduct.has(Number(k.product_id)))
+    .map(k => ({
+      uid_1c: k.uid_1c as string,
+      product_id: Number(k.product_id),
+      price: byProduct.get(Number(k.product_id)) as number,
+      price_at: now,
+    }))
+
+  for (let i = 0; i < rows.length; i += 500) {
+    await service.from('bitrix_products')
+      .upsert(rows.slice(i, i + 500), { onConflict: 'uid_1c' })
+  }
+
+  return rows.length
 }

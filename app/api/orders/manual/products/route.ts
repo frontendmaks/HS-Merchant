@@ -65,17 +65,15 @@ async function catalogue(): Promise<CatalogueItem[]> {
    */
   const [{ data: fromBitrix }, { data: lastPrices }] = await Promise.all([
     service.from('bitrix_products')
-      .select('product_id, uid_1c, name, measure')
+      .select('product_id, uid_1c, name, measure, price')
       .eq('active', true)
       .order('name'),
     /*
-     * Ціна — з історії продажів, бо в каталозі CRM її немає.
+     * Остання ціна продажу — на випадок, коли в каталозі її немає.
      *
-     * Поле ціни порожнє в усіх 3988 товарах, а модуль «Торговий каталог»
-     * для нашого вебхука закритий. Зате кожна угода несе ціну позиції — і
-     * це та сама ціна, яку оператор називав останнього разу. Підставляємо
-     * її й кажемо, коли це було: якщо відтоді змінилась, видно, що
-     * перевірити.
+     * Онлайнова ціна стоїть не в усіх товарів: те, чого онлайн не
+     * продають, її й не має. Тоді беремо ту, за якою товар справді
+     * продали востаннє, і кажемо, коли це було.
      */
     service.from('bitrix_last_price').select('product_id, price, sold_on'),
   ])
@@ -137,8 +135,17 @@ async function catalogue(): Promise<CatalogueItem[]> {
       name: b.name as string,
       sku: null,
       code_1c: b.uid_1c as string,
-      price: priced.get(Number(b.product_id))?.price ?? 0,
-      price_from: priced.get(Number(b.product_id))?.on ?? null,
+      /*
+       * Каталог головніший за історію.
+       *
+       * Онлайнова ціна — чинна, і саме її почує покупець. Остання ціна
+       * продажу лишається запасною: вона каже, скільки це коштувало,
+       * коли коштувало востаннє.
+       */
+      price: Number(b.price ?? 0) || priced.get(Number(b.product_id))?.price || 0,
+      price_from: Number(b.price ?? 0) > 0
+        ? null
+        : priced.get(Number(b.product_id))?.on ?? null,
       unit: measureUnit(b.measure as string | null),
       pack: null,
       stock: null,

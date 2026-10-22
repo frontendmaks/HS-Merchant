@@ -36,12 +36,40 @@ export class BitrixError extends Error {
   }
 }
 
+/**
+ * Торговий каталог ходить іншим вебхуком.
+ *
+ * Ціни живуть у модулі «Торговий каталог», і він перевіряє не дозволи
+ * застосунку, а роль користувача, від якого створено вебхук. Наш працює
+ * від звичайного співробітника, і всі `catalog.*` для нього закриті.
+ *
+ * Тому для каталогу є окремий вебхук — від користувача з правами на
+ * читання цін. Решта викликів лишається на своєму: чим менше прав у
+ * ключа, яким робиться повсякденна робота, тим менша ціна його втрати.
+ */
+export const catalogConfigured = () => !!process.env.BITRIX_CATALOG_WEBHOOK_URL
+
+export async function bitrixCatalog<T = unknown>(
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<T> {
+  return call<T>(method, params, process.env.BITRIX_CATALOG_WEBHOOK_URL, 'BITRIX_CATALOG_WEBHOOK_URL')
+}
+
 export async function bitrix<T = unknown>(
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<T> {
-  const hook = process.env.BITRIX_WEBHOOK_URL
-  if (!hook) throw new Error('BITRIX_WEBHOOK_URL не налаштовано')
+  return call<T>(method, params, process.env.BITRIX_WEBHOOK_URL, 'BITRIX_WEBHOOK_URL')
+}
+
+async function call<T>(
+  method: string,
+  params: Record<string, unknown>,
+  hook: string | undefined,
+  which: string,
+): Promise<T> {
+  if (!hook) throw new Error(`${which} не налаштовано`)
 
   const body: string[] = []
   for (const [k, v] of Object.entries(params)) toForm(v, k, body)
