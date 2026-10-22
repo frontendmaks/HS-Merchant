@@ -710,8 +710,21 @@ export async function numberInPicking(
   const lists = await boardLists(board)
 
   let numbered = 0
+  /*
+   * Дивимось не лише в списки комплектації.
+   *
+   * Картку з комплектації забирає кур'єр — і вона переїжджає в список з
+   * його іменем. Поки ми заглядали тільки в «…комплектується», картка з
+   * хибним числом лишалась у кур'єра до кінця дня, і саме там воно
+   * коштує найдорожче: за цим числом шукають ящик у машині.
+   *
+   * Обминаємо лише те, де числу вже байдуже: нові замовлення (їх веде
+   * дописування), маркетплейс, доставлене й недоставлене.
+   */
+  const SKIP = /нові замовлення|маркетплейс|не\s*достав|доставлен|архів/i
+
   for (const list of lists) {
-    if (!/комплект/i.test(list.name)) continue
+    if (SKIP.test(list.name)) continue
 
     for (const card of await listCards(list.id)) {
       if (numbered >= limit) return { numbered }
