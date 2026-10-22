@@ -45,7 +45,7 @@ async function catalogue(): Promise<CatalogueItem[]> {
   const service = createServiceClient()
   const { data } = await service
     .from('products')
-    .select('id, name, sku, code_1c, price, stock, unit, status, category_name, attributes')
+    .select('id, name, sku, code_1c, uid_1c, price, stock, unit, status, category_name, attributes')
     // Активні першими: по телефону здебільшого замовляють те, що є
     .order('status')
     .order('name')
@@ -93,12 +93,25 @@ async function catalogue(): Promise<CatalogueItem[]> {
     }
   })
 
-  // Наш каталог головніший: якщо товар є на сайті, він має прийти з ціною,
-  // фасуванням і залишком, а не голою назвою з CRM
-  const known = new Set(items.map(i => i.code_1c).filter(Boolean))
+  /*
+   * Наш каталог головніший.
+   *
+   * Якщо товар є на сайті, він має прийти з ціною, фасуванням і залишком,
+   * а не голою назвою з CRM. Зводимо їх за кодом 1С — це той самий GUID
+   * по обидва боки; `code_1c` тут не підходить, там артикул.
+   *
+   * Частина кодів приїхала з сайту в обгортці WPML — `[:en]…[:]`. Для
+   * зведення вона зайва: той самий товар через неї виглядав би чужим.
+   */
+  const bare = (uid: string | null) =>
+    (uid ?? '').replace(/^\[:[a-z]{2}\]/i, '').replace(/\[:\]$/, '').trim()
+
+  const known = new Set(
+    (data ?? []).map(p => bare(p.uid_1c as string | null)).filter(Boolean),
+  )
 
   const extra: CatalogueItem[] = (fromBitrix ?? [])
-    .filter(b => !known.has(b.uid_1c as string))
+    .filter(b => !known.has(bare(b.uid_1c as string)))
     .map(b => ({
       id: `bx-${b.product_id}`,
       name: b.name as string,
