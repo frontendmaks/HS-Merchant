@@ -7,6 +7,7 @@
  * бути замовлення.
  */
 import { bitrix } from '@/lib/bitrix'
+import { slotId } from '@/lib/bitrix-slots'
 import { createServiceClient } from '@/lib/supabase/service'
 import { BITRIX_DELIVERY_PRODUCT_ID, isDeliveryLine } from '@/lib/delivery-fee'
 
@@ -31,12 +32,6 @@ export const WAREHOUSE_ID: Record<string, number> = {
 }
 
 /** Періоди доставки: наша мітка → значення списку UF_CRM_1606047143435 */
-export const SLOT_ID: Record<string, number> = {
-  '11:00-14:00': 26,
-  '14:00-17:00': 27,
-  '17:00-20:00': 345,
-}
-
 export const FIELD = {
   boxNumber: 'UF_CRM_1607510002583',   // НОМЕР ЯЩИКА — номер із журналу
   warehouse: 'UF_BILL_ADRESS_LIST',
@@ -237,7 +232,7 @@ export async function pushOrderToBitrix(
       [FIELD.boxNumber]: order.manual_number != null ? String(order.manual_number) : '',
       [FIELD.warehouse]: order.warehouse ? WAREHOUSE_ID[order.warehouse] ?? '' : '',
       [FIELD.deliveryDate]: order.delivery_date ? `${order.delivery_date}T03:00:00+03:00` : '',
-      [FIELD.deliverySlot]: order.delivery_slot ? SLOT_ID[order.delivery_slot] ?? '' : '',
+      [FIELD.deliverySlot]: await slotId(order.delivery_slot),
       [FIELD.address]: order.address ?? '',
       [FIELD.paymentType]: PAYMENT_CASH,
       [FIELD.shipping]: SHIPPING_DELIVERY,

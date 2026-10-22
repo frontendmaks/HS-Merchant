@@ -41,10 +41,12 @@ export interface TrelloCard {
   idList: string
   shortUrl: string
   pos: number
+  /** Коли картку востаннє чіпали — за цим видно, що вона вже нічия */
+  dateLastActivity?: string
 }
 
 export const listCards = (listId: string) =>
-  call<TrelloCard[]>('GET', `/lists/${listId}/cards`, { fields: 'name,desc,idList,shortUrl,pos' })
+  call<TrelloCard[]>('GET', `/lists/${listId}/cards`, { fields: 'name,desc,idList,shortUrl,pos,dateLastActivity' })
 
 export const updateCard = (
   cardId: string,

@@ -10,7 +10,7 @@ import {
   MANUAL_PLATFORM, manualExternalId, manualWeight,
   orderTotal, lineTotal, type ManualLine,
 } from '@/lib/manual-orders'
-import { reserveNumber } from '@/lib/manual-register'
+import { reserveNumber, linkNumber } from '@/lib/manual-register'
 import { withDelivery } from '@/lib/delivery-fee'
 import { pushOrderToBitrix } from '@/lib/bitrix-deal'
 import { bitrixConfigured } from '@/lib/bitrix'
@@ -183,6 +183,10 @@ export async function POST(req: NextRequest) {
    * журналі й на бланку. Помилка лишається на замовленні, і надіслати його
    * можна повторно — повторний виклик оновлює ту саму угоду.
    */
+  // Номер резервували до того, як замовлення існувало, — тепер journal
+  // може сказати, за ким він записаний
+  await linkNumber(service, { date, number: created.manual_number, orderId: created.id })
+
   const crm = bitrixConfigured()
     ? await pushOrderToBitrix(service, created.id)
     : { error: 'Бітрікс не налаштовано' }

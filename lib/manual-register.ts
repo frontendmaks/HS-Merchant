@@ -45,8 +45,27 @@ async function noteTaken(
   date: string,
   number: number,
   customerName: string,
+  orderId: string | null = null,
 ): Promise<void> {
-  await takeNumber(service, { date, number, orderId: null, customerName })
+  await takeNumber(service, { date, number, orderId, customerName })
+}
+
+/**
+ * Дописує журналу, кому дістався номер.
+ *
+ * Номер резервують до того, як замовлення існує: спершу треба знати
+ * число, щоб вписати його в угоду й на бланк. Через це в журналі
+ * лишався рядок «зайнято, а ким — невідомо», і при розборі дня з нього
+ * нічого не можна було дізнатись.
+ */
+export async function linkNumber(
+  service: Service,
+  { date, number, orderId }: { date: string; number: number; orderId: string },
+): Promise<void> {
+  await service.from('order_numbers')
+    .update({ order_id: orderId })
+    .eq('delivery_date', date).eq('number', number).is('released_at', null)
+    .is('order_id', null)
 }
 
 export interface ReservedNumber {
@@ -57,12 +76,15 @@ export interface ReservedNumber {
 }
 
 /**
- * Номери, які ми вже видали на цю дату — хай навіть у таблиці їх стерли.
+ * Номери, які цього дня вже за кимось, — хай навіть у таблиці їх стерли.
  *
- * Рахуємо ті, що видали самі: телефонні замовлення й сайтові, яким номер
- * проставила система. Номери, що приїхали з Бітрікса вже готовими, до уваги
- * не беремо — там те саме число трапляється двічі за добу, і це чужа
- * нумерація, не журнальна.
+ * Рахуємо всі: і видані нами, і проставлені в 1С. Раніше чужі номери
+ * оминали, бо «там своя нумерація», — і журнал видавав число, яке 1С
+ * уже зайняла. На складі від цього два ящики з однаковим номером, і
+ * розрізнити їх нема як.
+ *
+ * Скасовані не рахуємо: їхній ящик нікуди не поїде, і тримати за ними
+ * номер означає гнати нумерацію дня вперед на порожньому місці.
  */
 async function takenNumbers(service: Service, date: string): Promise<Set<number>> {
   const { data } = await service
@@ -70,7 +92,7 @@ async function takenNumbers(service: Service, date: string): Promise<Set<number>
     .select('manual_number')
     .eq('delivery_date', date)
     .not('manual_number', 'is', null)
-    .not('number_source', 'is', null)
+    .neq('status', 'Скасовано')
 
   return new Set((data ?? []).map(o => Number(o.manual_number)))
 }

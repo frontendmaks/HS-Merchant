@@ -15,8 +15,9 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { randomBytes } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import {
-  FIELD, WAREHOUSE_ID, SLOT_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY,
+  FIELD, WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY,
 } from '@/lib/bitrix-deal'
+import { slotId } from '@/lib/bitrix-slots'
 import { stageId, stageName } from '@/lib/bitrix-stages'
 import { reserveNumber, releaseNumber } from '@/lib/manual-register'
 
@@ -95,8 +96,7 @@ export async function relocateOrder(
     [FIELD.boxNumber]: String(reserved.number),
     [FIELD.warehouse]: order.warehouse ? WAREHOUSE_ID[order.warehouse as string] ?? '' : '',
     [FIELD.deliveryDate]: `${toDate}T03:00:00+03:00`,
-    [FIELD.deliverySlot]: order.delivery_slot
-      ? SLOT_ID[order.delivery_slot as string] ?? '' : '',
+    [FIELD.deliverySlot]: await slotId(order.delivery_slot as string | null),
     [FIELD.address]: order.address ?? '',
   }
 

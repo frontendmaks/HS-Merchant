@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { enrichNewCards } from '@/lib/trello-cards'
+import { enrichNewCards, tidyFailed } from '@/lib/trello-cards'
 import { logCronRun } from '@/lib/cron-log'
 
 export const maxDuration = 120
@@ -22,7 +22,19 @@ export async function GET(request: NextRequest) {
 
   const startedAt = Date.now()
   const result = await enrichNewCards(service, { limit })
-  await logCronRun(service, 'trello-cards', startedAt, result, result.error)
 
-  return NextResponse.json(result)
+  /*
+   * Прибирання — зрідка, а не щопроходу.
+   *
+   * Прохід ходить кожні три хвилини, і перечитувати заради цього сотню
+   * карток «Не доставлено» щоразу означало б витрачати більшість
+   * запитів до Trello на те, що міняється раз на день.
+   */
+  const tidy = request.nextUrl.searchParams.get('tidy') === '1'
+    || new Date().getUTCHours() === 4
+  const cleaned = tidy ? await tidyFailed(service) : null
+
+  await logCronRun(service, 'trello-cards', startedAt, { ...result, cleaned }, result.error)
+
+  return NextResponse.json({ ...result, cleaned })
 }

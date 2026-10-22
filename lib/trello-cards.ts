@@ -16,6 +16,7 @@ import {
 } from '@/lib/trello'
 import { getSetting } from '@/lib/settings'
 import { phoneKey } from '@/lib/phone'
+import { slotStartMinutes } from '@/lib/bitrix-slots'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -78,6 +79,7 @@ interface OrderRow {
   id: string
   platform: string
   manual_number: number | null
+  trello_card_id: string | null
   delivery_date: string | null
   delivery_slot: string | null
   address: string | null
@@ -178,7 +180,7 @@ export async function enrichNewCards(
     const day = (shift: number) =>
       new Date(Date.now() + shift * 86_400_000).toISOString().slice(0, 10)
 
-    const COLUMNS = 'id, platform, manual_number, delivery_date, delivery_slot, address, customer_name, customer_phone, warehouse, share_token, status'
+    const COLUMNS = 'id, platform, manual_number, delivery_date, delivery_slot, address, customer_name, customer_phone, warehouse, share_token, status, trello_card_id'
 
     /*
      * Маркетплейсні замовлення теж потрапляють у цей список.
@@ -267,6 +269,30 @@ export async function enrichNewCards(
             : 'ні телефону, ні єдиного замовлення за адресою',
         })
         continue
+      }
+
+      /*
+       * Дві картки на одне замовлення.
+       *
+       * Чинна інтеграція зрідка створює картку двічі, і тоді склад
+       * збирає один ящик, а бачить два завдання. Лишаємо ту, яку вже
+       * знаємо, другу ховаємо в архів — не видаляємо: якщо це все-таки
+       * різні замовлення, картку можна дістати назад.
+       */
+      if (order.trello_card_id && order.trello_card_id !== card.id) {
+        await updateCard(card.id, { closed: true })
+        result.problems.push({
+          card: card.name.slice(0, 60),
+          number: order.manual_number,
+          issues: ['друга картка на те саме замовлення — заархівовано'],
+        })
+        continue
+      }
+
+      if (!order.trello_card_id) {
+        await service.from('orders')
+          .update({ trello_card_id: card.id }).eq('id', order.id)
+        order.trello_card_id = card.id
       }
 
       const issues = issuesOf(card, order)
@@ -360,6 +386,12 @@ const ALIAS: Record<string, string> = {
 /** «11:00-14:00» → «1114»: так само виглядає й назва роздільника */
 const slotKey = (slot: string) => slot.replace(/[^\d]/g, '').replace(/00/g, '')
 
+/** «11-14» → 11 година: початок вікна, яке тримає цей роздільник */
+const separatorStart = (name: string) => {
+  const m = name.trim().match(/^(\d{2})-(\d{2})$/)
+  return m ? Number(m[1]) : null
+}
+
 interface Destination {
   listId: string
   /** Роздільник періоду: під нього й кладемо */
@@ -406,6 +438,40 @@ function positionUnder(dest: Destination, separator: { pos: number }): number {
   return after ? (separator.pos + after.pos) / 2 : separator.pos + 1000
 }
 
+/**
+ * Роздільник для періоду, навіть коли період нестандартний.
+ *
+ * На дошці три вікна — 11-14, 14-17, 17-20, — а в угоді період може
+ * стояти будь-який: «16:00-19:30» домовили з клієнтом окремо. Такій
+ * картці місце не під власною годиною, якої на дошці немає, а в тому
+ * вікні, у яке вона потрапляє початком: о 16:00 збирають разом із
+ * чотирнадцятою. Інакше картка зависає в «Нових замовленнях», і ящик
+ * просто не збере ніхто.
+ */
+function separatorFor(
+  dest: Destination,
+  slot: string,
+): { id: string; pos: number } | undefined {
+  const exact = dest.separators.get(slotKey(slot))
+  if (exact) return exact
+
+  const start = slotStartMinutes(slot)
+  if (start == null) return undefined
+
+  const hour = start / 60
+  const windows = [...dest.separators.entries()]
+    .map(([key, sep]) => ({ sep, from: separatorStart(`${key.slice(0, 2)}-${key.slice(2)}`) }))
+    .filter((w): w is { sep: { id: string; pos: number }; from: number } => w.from != null)
+    .sort((a, b) => a.from - b.from)
+
+  if (!windows.length) return undefined
+
+  // Останнє вікно, що починається не пізніше за наш період; якщо період
+  // ранішій за всі — найперше
+  const fit = [...windows].reverse().find(w => w.from <= hour)
+  return (fit ?? windows[0]).sep
+}
+
 export interface SpreadResult {
   moved: number
   problems: { card: string; why: string }[]
@@ -436,7 +502,7 @@ export async function spreadToPicking(
       continue
     }
 
-    const separator = dest.separators.get(slotKey(order.delivery_slot as string))
+    const separator = separatorFor(dest, order.delivery_slot as string)
     if (!separator) {
       result.problems.push({
         card: card.name.slice(0, 50),
@@ -454,6 +520,42 @@ export async function spreadToPicking(
   }
 
   return result
+}
+
+/**
+ * Прибирання в «Не доставлено».
+ *
+ * Туди кладуть картки скасованих замовлень, і ніхто їх звідти не
+ * забирає: за місяць список виріс до сотень карток, і розібрати в ньому
+ * вчорашнє вже неможливо. Лишаємо свіже — те, у чому ще можуть
+ * розбиратись, — а старше ховаємо в архів. Архів у Trello не видаляє:
+ * картку завжди можна дістати назад.
+ */
+export async function tidyFailed(
+  service: Service,
+  { days = 14, limit = 120 }: { days?: number; limit?: number } = {},
+): Promise<{ archived: number; left: number }> {
+  if (!trelloConfigured()) return { archived: 0, left: 0 }
+
+  const board = await getSetting(service, 'trello_board')
+  const lists = await boardLists(board)
+  const failed = lists.find(l => /не\s*достав/i.test(l.name))
+  if (!failed) return { archived: 0, left: 0 }
+
+  const cards = await listCards(failed.id)
+  const edge = Date.now() - days * 86_400_000
+
+  let archived = 0
+  for (const card of cards) {
+    if (archived >= limit) break
+    const touched = Date.parse(card.dateLastActivity ?? '')
+    if (!Number.isFinite(touched) || touched >= edge) continue
+
+    await updateCard(card.id, { closed: true })
+    archived++
+  }
+
+  return { archived, left: cards.length - archived }
 }
 
 /**

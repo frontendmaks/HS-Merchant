@@ -14,8 +14,9 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { randomBytes } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import {
-  FIELD, WAREHOUSE_ID, SLOT_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, contactFor,
+  FIELD, WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, contactFor,
 } from '@/lib/bitrix-deal'
+import { slotId } from '@/lib/bitrix-slots'
 import { stageId, stageName } from '@/lib/bitrix-stages'
 import { phoneKey } from '@/lib/phone'
 
@@ -117,7 +118,7 @@ export async function mergeOrders(
     ...(contactId ? { CONTACT_ID: contactId } : {}),
     [FIELD.warehouse]: base.warehouse ? WAREHOUSE_ID[base.warehouse] ?? '' : '',
     [FIELD.deliveryDate]: `${deliveryDate}T03:00:00+03:00`,
-    [FIELD.deliverySlot]: SLOT_ID[deliverySlot] ?? '',
+    [FIELD.deliverySlot]: await slotId(deliverySlot),
     [FIELD.address]: base.address ?? '',
   }
 

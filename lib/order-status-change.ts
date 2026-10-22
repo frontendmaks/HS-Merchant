@@ -203,6 +203,27 @@ export async function changeOrderStatus(
     }
 
     /*
+     * Ящик скасованого замовлення вільний.
+     *
+     * Номер лишався за ним до кінця дня, хоч ящика не буде: нумерація
+     * йшла далі, в аркуші стояло ім'я клієнта, якому нічого не везуть, а
+     * наступне замовлення отримувало більше число на порожньому місці.
+     */
+    try {
+      const { data: o } = await supabase.from('orders')
+        .select('manual_number, delivery_date').eq('id', id).single()
+
+      if (o?.manual_number != null && o.delivery_date) {
+        const { releaseNumber } = await import('@/lib/manual-register')
+        await releaseNumber(supabase, {
+          number: Number(o.manual_number), date: o.delivery_date as string,
+        })
+      }
+    } catch (e) {
+      console.error('release number failed:', e instanceof Error ? e.message : e)
+    }
+
+    /*
      * Картка на дошці теж має піти з роботи.
      *
      * Скасоване замовлення, що лишилось серед робочих карток, — це ящик,

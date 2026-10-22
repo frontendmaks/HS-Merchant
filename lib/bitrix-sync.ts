@@ -10,7 +10,9 @@ import { randomBytes } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import { createServiceClient } from '@/lib/supabase/service'
 import { stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
-import { WAREHOUSE_ID, SLOT_ID, CATEGORY_ID } from '@/lib/bitrix-deal'
+import { WAREHOUSE_ID, CATEGORY_ID } from '@/lib/bitrix-deal'
+import { slotLabel } from '@/lib/bitrix-slots'
+import { noteExternalNumber } from '@/lib/number-register'
 import { onStatusChanged } from '@/lib/bitrix-chat'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { moveNumber } from '@/lib/manual-register'
@@ -24,10 +26,6 @@ const MARKETPLACE_PLATFORMS = new Set(['maudau', 'rozetka'])
 const WAREHOUSE_BY_ID = new Map(
   Object.entries(WAREHOUSE_ID).map(([name, id]) => [String(id), name]),
 )
-const SLOT_BY_ID = new Map(
-  Object.entries(SLOT_ID).map(([label, id]) => [String(id), label]),
-)
-
 interface Deal {
   ID: string
   TITLE: string
@@ -212,7 +210,7 @@ export async function syncSiteOrders(
            * Мерчант — вони просто не мали дати.
            */
           delivery_date: deal.UF_CRM_1606047095?.slice(0, 10) || null,
-          delivery_slot: SLOT_BY_ID.get(deal.UF_CRM_1606047143435 ?? '') ?? null,
+          delivery_slot: await slotLabel(deal.UF_CRM_1606047143435),
           warehouse: WAREHOUSE_BY_ID.get(deal.UF_BILL_ADRESS_LIST ?? '') ?? null,
           customer_name: person?.name || persona.name || deal.TITLE,
           customer_phone: person?.phone ?? persona.phone,
@@ -338,6 +336,23 @@ export async function syncSiteOrders(
             }
           }
 
+          /*
+           * Номер, проставлений у 1С, журнал теж має побачити.
+           *
+           * Раніше такий номер приїжджав просто на замовлення, а в
+           * журналі ящик лишався вільним — і наступне замовлення дня
+           * спокійно отримувало те саме число. Запис робимо лише на
+           * вільний рядок: чужий не перебиваємо.
+           */
+          if (fields.manual_number != null && fields.delivery_date) {
+            await noteExternalNumber(service, {
+              date: fields.delivery_date,
+              number: Number(fields.manual_number),
+              orderId: existing.id as string,
+              customerName: fields.customer_name ?? null,
+            })
+          }
+
           // Статус міняють здебільшого в CRM — бланк має піти й тоді
           if (existing.status !== status) {
             await onStatusChanged(service, existing.id as string, status)
@@ -361,6 +376,15 @@ export async function syncSiteOrders(
             await saveRows(service, created.id as string, rows)
             touched = created.id as string
             result.created++
+
+            if (fields.manual_number != null && fields.delivery_date) {
+              await noteExternalNumber(service, {
+                date: fields.delivery_date,
+                number: Number(fields.manual_number),
+                orderId: created.id as string,
+                customerName: fields.customer_name ?? null,
+              })
+            }
           } else {
             /*
              * Невдала вставка більше не губиться.
@@ -397,6 +421,59 @@ export async function syncSiteOrders(
  * сталого номера, тільки порядок. Зате склад замовлення там — остання правда,
  * тож просто беремо його таким, як є.
  */
+/**
+ * Номер товару в Бітріксі → наш товар.
+ *
+ * Міст між ними — код 1С: у Бітріксі він лежить у XML_ID, у нас у
+ * `uid_1c`. Відповідність кешуємо в `bitrix_products`, тож за звичайний
+ * прохід мережі не торкаємось зовсім.
+ */
+async function linkProducts(service: Service, rows: Row[]): Promise<Map<number, string>> {
+  const out = new Map<number, string>()
+  const ids = [...new Set(rows.map(r => Number(r.PRODUCT_ID)).filter(Boolean))]
+  if (!ids.length) return out
+
+  const { data: known } = await service
+    .from('bitrix_products').select('uid_1c, product_id').in('product_id', ids)
+
+  const uidByBitrix = new Map(
+    (known ?? []).map(k => [Number(k.product_id), k.uid_1c as string]),
+  )
+
+  const unknown = ids.filter(id => !uidByBitrix.has(id))
+  if (unknown.length) {
+    try {
+      const found = await bitrix<{ ID: string; NAME: string; XML_ID: string }[]>(
+        'crm.product.list',
+        { filter: { ID: unknown }, select: ['ID', 'NAME', 'XML_ID'] },
+      )
+      const fresh = (found ?? []).filter(p => p.XML_ID).map(p => ({
+        uid_1c: p.XML_ID, product_id: Number(p.ID), name: p.NAME,
+      }))
+      for (const p of fresh) uidByBitrix.set(p.product_id, p.uid_1c)
+      if (fresh.length) {
+        await service.from('bitrix_products').upsert(fresh, { onConflict: 'uid_1c' })
+      }
+    } catch {
+      // Не дізнались — позиція просто лишиться без товару, як було досі
+    }
+  }
+
+  const uids = [...new Set(uidByBitrix.values())]
+  if (!uids.length) return out
+
+  const { data: ours } = await service
+    .from('products').select('id, uid_1c').in('uid_1c', uids)
+
+  const byUid = new Map((ours ?? []).map(p => [p.uid_1c as string, p.id as string]))
+  for (const [bitrixId, uid] of uidByBitrix) {
+    const our = byUid.get(uid)
+    if (our) out.set(bitrixId, our)
+  }
+
+  return out
+}
+
 async function saveRows(service: Service, orderId: string, rows: Row[]) {
   /**
    * Чи були товари до цього.
@@ -418,12 +495,24 @@ async function saveRows(service: Service, orderId: string, rows: Row[]) {
 
   if (!before) await service.from('orders').update({ auto_done_at: null }).eq('id', orderId)
 
+  /*
+   * Позиція має знати, який це товар, а не лише як він називався.
+   *
+   * Бітрікс дає свій номер товару, і цього досить, щоб дійти до нашого
+   * каталогу: номер → XML_ID (він же код 1С) → наш товар. Поки цього
+   * зв'язку не було, аналітика «що найкраще продається» впиралась у
+   * рядок із назвою — а назву в CRM правлять, і той самий товар у ній
+   * писався трьома способами.
+   */
+  const ourByBitrix = await linkProducts(service, rows)
+
   await service.from('order_items').insert(rows.map((r, i) => ({
     order_id: orderId,
     position: i,
     source: 'site',
     title: r.PRODUCT_NAME,
     bitrix_product_id: Number(r.PRODUCT_ID) || null,
+    product_id: ourByBitrix.get(Number(r.PRODUCT_ID)) ?? null,
     unit: unitOf(r),
     unit_weight: 0,
     price_per_unit: Number(r.PRICE),

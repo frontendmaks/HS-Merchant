@@ -17,7 +17,7 @@
  */
 import { createServiceClient } from '@/lib/supabase/service'
 import { resolveAddress, GeocoderUnavailable, areaFromDisplay } from '@/lib/delivery-zones'
-import { reserveNumber } from '@/lib/manual-register'
+import { reserveNumber, linkNumber } from '@/lib/manual-register'
 import { bitrix } from '@/lib/bitrix'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { CLOSED_STAGES } from '@/lib/bitrix-stages'
@@ -210,8 +210,16 @@ export async function autoProcessSiteOrders(
         }
       }
 
-      // Номер із журналу — тільки якщо його ще немає й дата відома
-      if (order.manual_number == null && order.delivery_date && !problems.length) {
+      /*
+       * Номер із журналу — щойно відома дата.
+       *
+       * Раніше номер не видавався, якщо огляд знайшов бодай одну хибу, —
+       * а найчастіша з них, «період доставки», до ящика не має стосунку
+       * зовсім. Замовлення через це доїжджали до «Виконано» без номера:
+       * склад збирав ящик, якого немає в журналі. Хиба лишається
+       * записаною й видимою, але номер замовлення отримує.
+       */
+      if (order.manual_number == null && order.delivery_date) {
         const reserved = await reserveNumber(
           service, order.delivery_date, order.customer_name ?? 'замовлення з сайту',
         )
@@ -226,6 +234,11 @@ export async function autoProcessSiteOrders(
           await service.from('orders')
             .update({ manual_number: reserved.number, number_source: reserved.source })
             .eq('id', order.id)
+
+          // Журнал має знати не лише що номер зайнято, а й ким
+          await linkNumber(service, {
+            date: order.delivery_date, number: reserved.number, orderId: order.id,
+          })
 
           crm[FIELD.boxNumber] = String(reserved.number)
           result.numbered++

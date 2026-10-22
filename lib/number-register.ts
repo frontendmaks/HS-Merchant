@@ -68,11 +68,46 @@ export async function freeNumber(
 }
 
 /**
+ * Записує номер, який прийшов не від нас.
+ *
+ * Номер ящика ставлять і в 1С — і тоді він приїжджає до нас уже на
+ * замовленні, повз журнал. Поки ми такі номери не записували, журнал
+ * вважав ящик вільним і міг видати його вдруге: саме так два різні
+ * клієнти одного дня опинялись під одним числом.
+ *
+ * Чужий запис не перебиваємо: якщо рядок уже за кимось, це розбіжність,
+ * і вирішувати її має людина, а не тихий перезапис.
+ */
+export async function noteExternalNumber(
+  service: Service,
+  { date, number, orderId, customerName }: {
+    date: string
+    number: number
+    orderId: string | null
+    customerName: string | null
+  },
+): Promise<void> {
+  const { data: held } = await service.from('order_numbers')
+    .select('order_id')
+    .eq('delivery_date', date).eq('number', number).is('released_at', null)
+    .maybeSingle()
+
+  if (held && held.order_id !== orderId) return
+
+  await takeNumber(service, { date, number, orderId, customerName })
+}
+
+/**
  * Найменший вільний номер дня — за нашим власним журналом.
  *
  * Потрібен тоді, коли таблиця не відповіла: краще видати номер за своїм
  * записом, ніж не видати зовсім. Зайняті номери беремо і з журналу, і з
  * самих замовлень — на випадок, якщо журнал відстав.
+ *
+ * Рахуємо всі номери дня, хоч би звідки вони взялись. Раніше номери з
+ * Бітрікса до уваги не бралось — мовляв, там своя нумерація; наслідком
+ * було те, що журнал спокійно видавав число, яке 1С уже зайняла, і на
+ * складі два ящики мали однаковий номер.
  */
 export async function nextFreeNumber(service: Service, date: string): Promise<number | null> {
   const [{ data: held }, { data: orders }] = await Promise.all([
@@ -82,7 +117,7 @@ export async function nextFreeNumber(service: Service, date: string): Promise<nu
       .select('manual_number')
       .eq('delivery_date', date)
       .not('manual_number', 'is', null)
-      .not('number_source', 'is', null),
+      .neq('status', 'Скасовано'),
   ])
 
   const taken = new Set<number>([

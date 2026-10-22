@@ -219,6 +219,39 @@ export default async function SiteOrdersPage({
    * має відповідати тому, що під ним у таблиці. Скасовані в суму не
    * йдуть — грошей за ними немає.
    */
+  /*
+   * Розбіжності, які видно лише поруч.
+   *
+   * Одне замовлення про себе нічого дивного не каже: номер як номер,
+   * сума як сума. Але два замовлення одного дня під одним номером — це
+   * два ящики, які на складі не розрізнити, а той самий телефон на ту
+   * саму дату — це найчастіше одне замовлення, заведене двічі.
+   */
+  const byNumber = new Map<string, number>()
+  const byPerson = new Map<string, number>()
+  for (const o of inScope) {
+    if (o.status === 'Скасовано') continue
+    if (o.manual_number != null && o.delivery_date) {
+      const key = `${o.delivery_date}|${o.manual_number}`
+      byNumber.set(key, (byNumber.get(key) ?? 0) + 1)
+    }
+    const phone = (o.customer_phone ?? '').replace(/\D/g, '').slice(-9)
+    if (phone && o.delivery_date) {
+      const key = `${o.delivery_date}|${phone}`
+      byPerson.set(key, (byPerson.get(key) ?? 0) + 1)
+    }
+  }
+
+  const sharesNumber = (o: Row) =>
+    o.status !== 'Скасовано' && o.manual_number != null && o.delivery_date
+    && (byNumber.get(`${o.delivery_date}|${o.manual_number}`) ?? 0) > 1
+
+  const sharesPerson = (o: Row) => {
+    const phone = (o.customer_phone ?? '').replace(/\D/g, '').slice(-9)
+    return o.status !== 'Скасовано' && !!phone && !!o.delivery_date
+      && (byPerson.get(`${o.delivery_date}|${phone}`) ?? 0) > 1
+  }
+
   const live = scoped.filter(o => o.status !== 'Скасовано')
   const summary = {
     orders: scoped.length,
@@ -227,7 +260,15 @@ export default async function SiteOrdersPage({
     canceled: scoped.length - live.length,
     days: new Set(scoped.map(o => o.delivery_date)).size,
   }
-  const avg = live.length ? summary.sum / live.length : 0
+  /*
+   * Середній чек рахуємо лише по тому, у чому є гроші.
+   *
+   * Частина угод приходить із 1С зовсім без позицій і з сумою 0 ₴ — це
+   * не безкоштовні замовлення, а дані, яких ще немає. У середньому вони
+   * тягнуть його вниз і кажуть неправду про день.
+   */
+  const paid = live.filter(o => Number(o.total ?? 0) > 0)
+  const avg = paid.length ? summary.sum / paid.length : 0
   const monthLabel = new Date(`${monthStart}T12:00:00`)
     .toLocaleDateString('uk-UA', { month: 'long', year: 'numeric' })
 
@@ -288,6 +329,7 @@ export default async function SiteOrdersPage({
             ['Виконано', summary.done.toLocaleString('uk-UA')],
             ['Скасовано', summary.canceled.toLocaleString('uk-UA')],
             ['Днів із доставкою', summary.days.toLocaleString('uk-UA')],
+            ['Без товарів', (live.length - paid.length).toLocaleString('uk-UA')],
           ].map(([label, value]) => (
             <div key={label}>
               <div className="text-zinc-500 text-xs">{label}</div>
@@ -394,6 +436,24 @@ export default async function SiteOrdersPage({
                     )}
                     {o.bitrix_error && (
                       <span className="block text-red-400 text-xs">⚠ {o.bitrix_error}</span>
+                    )}
+                    {sharesNumber(o) && (
+                      <span className="block text-red-400 text-xs"
+                        title="Цього дня під цим номером є ще одне замовлення">
+                        ⚠ номер зайнято двічі
+                      </span>
+                    )}
+                    {sharesPerson(o) && (
+                      <span className="block text-amber-500 text-xs"
+                        title="Той самий телефон на цю дату — схоже, замовлення завели двічі">
+                        ⚠ той самий клієнт цього дня
+                      </span>
+                    )}
+                    {Number(o.total ?? 0) === 0 && o.status !== 'Скасовано' && (
+                      <span className="block text-amber-500 text-xs"
+                        title="В угоді немає жодної позиції — збирати нема чого">
+                        ⚠ угода без товарів
+                      </span>
                     )}
                     {/* Оцінка клієнта — поруч із номером, бо саме за номером
                         про замовлення й згадують */}
