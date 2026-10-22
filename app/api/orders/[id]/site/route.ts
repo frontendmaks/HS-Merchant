@@ -98,7 +98,15 @@ export async function PATCH(
     // Нова адреса — новий склад: зона вираховується з неї, і лишити старий
     // склад означало б відправити замовлення не туди, куди його тепер везуть
     try {
-      const zone = await resolveAddress(service, address)
+      /*
+       * День доставки — той, що буде після цієї правки.
+       *
+       * Людина часто міняє адресу й дату разом, і склад має рахуватись
+       * за новим днем: недільна карта ділить місто інакше.
+       */
+      const zone = await resolveAddress(
+        service, address, body?.delivery_date ?? order.delivery_date as string | null,
+      )
       patch.delivery_zone = zone.zone
       if (zone.warehouse) {
         patch.warehouse = zone.warehouse

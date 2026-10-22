@@ -80,9 +80,29 @@ interface ZoneRow { code: string; warehouse: string; polygon: Point[] }
 
 /** Зони з бази — вісім полігонів, які перевіряються по кілька разів на адресу,
  *  тож читаються один раз і далі перебираються в пам'яті. */
-export async function loadZones(service: Service): Promise<ZoneRow[]> {
+export type DayKind = 'weekday' | 'sunday'
+
+/**
+ * Якою картою їздять цього дня.
+ *
+ * У неділю возять не ті самі склади й не ті самі межі, тож карта окрема.
+ * День беремо з дати доставки, а не з сьогоднішньої: замовлення на неділю
+ * складають у середу, і склад йому належить недільний.
+ */
+export function dayKindFor(deliveryDate: string | null | undefined): DayKind {
+  if (!deliveryDate) return 'weekday'
+  // Полудень, щоб перехід на зимовий час не зсунув день на попередній
+  return new Date(`${deliveryDate}T12:00:00`).getDay() === 0 ? 'sunday' : 'weekday'
+}
+
+export async function loadZones(
+  service: Service,
+  dayKind: DayKind = 'weekday',
+): Promise<ZoneRow[]> {
   const { data } = await service
-    .from('delivery_zones').select('code, warehouse, polygon').order('code')
+    .from('delivery_zones').select('code, warehouse, polygon')
+    .eq('day_kind', dayKind)
+    .order('code')
 
   return (data ?? []).map(z => ({
     code: z.code as string,
@@ -103,8 +123,9 @@ export function zoneAt(point: Point, zones: ZoneRow[]): ZoneHit | null {
 export async function zoneForPoint(
   service: Service,
   point: Point,
+  dayKind: DayKind = 'weekday',
 ): Promise<ZoneHit | null> {
-  return zoneAt(point, await loadZones(service))
+  return zoneAt(point, await loadZones(service, dayKind))
 }
 
 const GEOCODER_UA =
@@ -545,6 +566,8 @@ export interface AddressResolution {
 export async function resolveAddress(
   service: Service,
   address: string,
+  /** День доставки — від нього залежить, якою картою ділять місто */
+  deliveryDate?: string | null,
 ): Promise<AddressResolution> {
   const point = await geocode(service, address)
   if (!point) {
@@ -554,11 +577,14 @@ export async function resolveAddress(
     }
   }
 
-  const hit = await zoneForPoint(service, point)
+  const kind = dayKindFor(deliveryDate)
+  const hit = await zoneForPoint(service, point, kind)
   if (!hit) {
     return {
       point, zone: null, warehouse: null,
-      note: 'Адреса поза зонами доставки — оберіть склад вручну',
+      note: kind === 'sunday'
+        ? 'Адреса поза недільними зонами доставки — оберіть склад вручну'
+        : 'Адреса поза зонами доставки — оберіть склад вручну',
     }
   }
 

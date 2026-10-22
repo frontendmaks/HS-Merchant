@@ -159,7 +159,7 @@ export async function autoProcessSiteOrders(
        */
       if (order.address?.trim()) {
         try {
-          const zone = await resolveAddress(service, order.address)
+          const zone = await resolveAddress(service, order.address, order.delivery_date)
           // Район або село — для аналітики доставок
           patch.area = areaFromDisplay(zone.point?.display_name) ?? null
 

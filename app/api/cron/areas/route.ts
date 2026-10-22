@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
   const { data } = await service
     .from('orders')
-    .select('id, address, area, delivery_zone')
+    .select('id, address, area, delivery_zone, delivery_date')
     .in('platform', ['site', 'manual'])
     .not('address', 'is', null)
     .or('area.is.null,delivery_zone.is.null')
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     if (!address) continue
 
     try {
-      const hit = await resolveAddress(service, address)
+      const hit = await resolveAddress(service, address, order.delivery_date as string | null)
       const patch: Record<string, unknown> = {
         area: areaFromDisplay(hit.point?.display_name) ?? null,
       }

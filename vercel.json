@@ -71,6 +71,10 @@
     {
       "path": "/api/cron/bitrix-catalog",
       "schedule": "40 2 * * *"
+    },
+    {
+      "path": "/api/cron/zones-sunday",
+      "schedule": "20 3 * * *"
     }
   ]
 }

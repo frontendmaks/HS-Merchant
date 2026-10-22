@@ -34,7 +34,9 @@ export async function POST(req: NextRequest) {
 
   if (address?.trim()) {
     try {
-      resolved = await resolveAddress(service, address)
+      // Дата вже в запиті — від неї залежить, якою картою ділять місто:
+      // недільна інша, і склад за тією самою адресою буде інший
+      resolved = await resolveAddress(service, address, date)
     } catch (e) {
       resolved = {
         point: null, zone: null, warehouse: null,
