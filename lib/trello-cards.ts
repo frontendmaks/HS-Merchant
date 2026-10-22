@@ -728,7 +728,6 @@ export async function numberInPicking(
 
     for (const card of await listCards(list.id)) {
       if (numbered >= limit) return { numbered }
-      if (NUMBER_AT_START.test(card.name)) continue
 
       const text = `${card.name}
 ${card.desc}`
