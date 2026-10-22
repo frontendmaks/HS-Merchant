@@ -257,13 +257,25 @@ const shortDate = (date: string) => {
  * зайнятою; для журналу рядок лишається взятим; а для людини видно, що
  * сталось, замість мовчазної дірки.
  */
+export const MOVED_MARK = 'перенесено на '
+
 export async function blockMovedNumber(
   service: Service,
-  { number, date, toDate }: { number: number; date: string; toDate: string },
+  { number, date, toDate, orderId = null }: {
+    number: number; date: string; toDate: string; orderId?: string | null
+  },
 ): Promise<boolean> {
-  const mark = `перенесено на ${shortDate(toDate)}`
+  const mark = `${MOVED_MARK}${shortDate(toDate)}`
 
-  await takeNumber(service, { date, number, orderId: null, customerName: mark })
+  /*
+   * Рядок лишається за тим замовленням, яке поїхало.
+   *
+   * Без цього він виглядає як покинутий резерв — зайнято, а ким,
+   * невідомо, — і прибирання, яке шукає саме такі рядки, повертало його
+   * в обіг. Два номери так і звільнились того ж дня, хоч мали лишатись
+   * закритими до вечора.
+   */
+  await takeNumber(service, { date, number, orderId, customerName: mark })
 
   if (!sheetsConfigured()) return false
 
@@ -299,11 +311,13 @@ export async function blockMovedNumber(
  */
 export async function moveNumber(
   service: Service,
-  { number, fromDate, toDate, customerName }: {
+  { number, fromDate, toDate, customerName, orderId = null }: {
     number: number
     fromDate: string
     toDate: string
     customerName: string
+    /** Замовлення, що переїжджає — за ним лишається закритий рядок */
+    orderId?: string | null
   },
 ): Promise<{ ok: boolean; number: number; note: string | null }> {
   const same = { ok: false, number }
@@ -349,7 +363,7 @@ export async function moveNumber(
   )
   if (!written) return { ...same, note: 'Не вдалося записати в журнал' }
 
-  await noteTaken(service, toDate, target.number, customerName)
+  await noteTaken(service, toDate, target.number, customerName, orderId)
 
   /*
    * Старий рядок позначаємо після запису нового.
@@ -358,7 +372,7 @@ export async function moveNumber(
    * дні. І позначаємо, а не звільняємо: число, під яким замовлення вже
    * називали, того дня більше нікому не належить.
    */
-  await blockMovedNumber(service, { number, date: fromDate, toDate })
+  await blockMovedNumber(service, { number, date: fromDate, toDate, orderId })
 
   return { ok: true, number: target.number, note }
 }
@@ -449,6 +463,15 @@ export async function sweepStaleHolds(
     .is('order_id', null)
     .lt('taken_at', edge)
     .gte('delivery_date', today)
+    /*
+     * Перенесене не чіпаємо.
+     *
+     * «Перенесено на 23.10» — це не покинутий резерв, а навмисне
+     * закритий номер: ящика з ним того дня не буде, але й віддавати
+     * його нікому не можна, бо про це число вже говорили. Воно тримає
+     * рядок свідомо, і прибирання тут не для нього.
+     */
+    .not('customer_name', 'ilike', `${MOVED_MARK}%`)
 
   const holds = (data ?? []) as { delivery_date: string; number: number }[]
   result.looked = holds.length

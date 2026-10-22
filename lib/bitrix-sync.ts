@@ -316,6 +316,7 @@ export async function syncSiteOrders(
               fromDate: existing.delivery_date as string,
               toDate: fields.delivery_date,
               customerName: fields.customer_name || 'замовлення',
+              orderId: existing.id as string,
             })
             if (moved.note) {
               result.notes = [...(result.notes ?? []), `№${existing.manual_number}: ${moved.note}`]

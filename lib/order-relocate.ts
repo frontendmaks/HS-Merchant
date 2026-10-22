@@ -230,6 +230,7 @@ export async function relocateOrder(
         number: Number(order.manual_number),
         date: order.delivery_date as string,
         toDate,
+        orderId,
       })
     : true
 
