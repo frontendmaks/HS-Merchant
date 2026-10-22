@@ -5,7 +5,7 @@ import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { isValidSlot } from '@/lib/delivery-slots'
 import { resolveAddress } from '@/lib/delivery-zones'
-import { withDelivery } from '@/lib/delivery-fee'
+import { withDelivery, isDeliveryLine } from '@/lib/delivery-fee'
 import { sendOrderSheet } from '@/lib/bitrix-chat'
 import { relocateOrder } from '@/lib/order-relocate'
 import { orderTotal, lineTotal, manualWeight, type ManualLine } from '@/lib/manual-orders'
@@ -150,7 +150,17 @@ export async function PATCH(
       return NextResponse.json({ error: 'У замовленні має лишитись хоч один товар' }, { status: 400 })
     }
 
-    const lines = withDelivery(goods)
+    /*
+     * Видалену доставку не повертаємо.
+     *
+     * `withDelivery` дораховує рядок доставки за порогом суми — і це
+     * правильно, поки оператор його не чіпав. Але якщо він прибрав цей
+     * рядок свідомо (доставка Новою поштою, самовивіз, домовились
+     * окремо), дописати його назад означає сперечатися з людиною, яка
+     * щойно говорила з покупцем: рядок зникав з екрана й повертався
+     * після збереження, і виглядало це як поламане видалення.
+     */
+    const lines = body.lines.some(isDeliveryLine) ? withDelivery(goods) : goods
     patch.total = orderTotal(lines)
     patch.weight = manualWeight(goods)
     patch.items = lines

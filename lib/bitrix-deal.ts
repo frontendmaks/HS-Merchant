@@ -212,11 +212,26 @@ export async function pushOrderToBitrix(
       ? await contactFor(order.customer_name, order.customer_phone)
       : null
 
-    const fields: Record<string, unknown> = {
+    /*
+     * Чим угода народжується — і чим її більше не чіпають.
+     *
+     * Стадія, воронка, назва й відповідальний належать угоді, а не нашій
+     * правці. Поки вони стояли серед звичайних полів, будь-яке
+     * збереження замовлення тягнуло стадію назад у «В обробці»:
+     * передзамовлення переставало бути передзамовленням, а те, що вже
+     * комплектувалось, поверталось на початок. Склад читає стадію з
+     * Бітрікса, і такий відкат він сприймав за чисту монету.
+     */
+    const birth = order.bitrix_deal_id ? {} : {
       TITLE: `Замовлення №${order.manual_number ?? '—'} (телефон)`,
       CATEGORY_ID,
       STAGE_ID: NEW_STAGE,
       ASSIGNED_BY_ID: ASSIGNED_BY,
+      OPENED: 'Y',
+    }
+
+    const fields: Record<string, unknown> = {
+      ...birth,
       CURRENCY_ID: 'UAH',
       /**
        * Суму не передаємо.
@@ -226,8 +241,13 @@ export async function pushOrderToBitrix(
        * що отримала готове число й не знала, що з ним робити поруч із
        * порахованим. Хай рахує він: позиції однаково головніші.
        */
-      OPENED: 'Y',
-      COMMENTS: order.operator_comment ?? '',
+      /*
+       * Порожній коментар не стирає чужого.
+       *
+       * В угоді з сайту в коментарі лежить те, що написав покупець. Наш
+       * порожній рядок затирав його мовчки.
+       */
+      ...(order.operator_comment ? { COMMENTS: order.operator_comment } : {}),
       ...(contactId ? { CONTACT_ID: contactId } : {}),
       [FIELD.boxNumber]: order.manual_number != null ? String(order.manual_number) : '',
       [FIELD.warehouse]: order.warehouse ? WAREHOUSE_ID[order.warehouse] ?? '' : '',
