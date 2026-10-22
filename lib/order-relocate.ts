@@ -82,7 +82,11 @@ export async function relocateOrder(
   const contactId = Number(previous?.CONTACT_ID ?? 0) || null
 
   const fields: Record<string, unknown> = {
-    TITLE: `Замовлення №${reserved.number} (перенесено з ${order.delivery_date})`,
+    // Дата джерела буває порожня — тоді про неї просто мовчимо, а не
+    // пишемо в назву угоди слово «null»
+    TITLE: order.delivery_date
+      ? `Замовлення №${reserved.number} (перенесено з ${order.delivery_date})`
+      : `Замовлення №${reserved.number} (перенесено)`,
     CATEGORY_ID,
     STAGE_ID: NEW_STAGE,
     ASSIGNED_BY_ID: ASSIGNED_BY,
