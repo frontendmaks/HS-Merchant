@@ -135,6 +135,19 @@ export default async function SiteOrdersPage({
    * в одному дні означає не знайти. Тому пошук сам розширює огляд на
    * місяць: порожній результат у межах дня брехав би, що замовлення немає.
    */
+  /*
+   * Горизонт черги огляду — від сьогоднішньої київської дати.
+   *
+   * Рахуємо з дати, а не з «тридцяти шести годин тому»: друге — звичайний
+   * виклик годинника посеред рендера, і React справедливо вважає це
+   * нечистим. Доба з половиною назад від сьогодні — це позавчора.
+   */
+  const horizon = (() => {
+    const d = new Date(`${date}T12:00:00`)
+    d.setDate(d.getDate() - 2)
+    return d.toLocaleDateString('en-CA')
+  })()
+
   const monthly = period === 'month' || q.trim().length > 0
   const monthStart = `${date.slice(0, 7)}-01`
   const monthEnd = (() => {
@@ -145,60 +158,79 @@ export default async function SiteOrdersPage({
   })()
 
   const supabase = createServiceClient()
-  const lastSync = await lastCronRun(supabase, 'bitrix-sync')
 
-  // Черга огляду: скільки чекає і що саме зараз дивимось
-  const [{ count: queued }, { data: nowChecking }] = await Promise.all([
+  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, bitrix_deal_id, bitrix_error, review:order_reviews(rating, comment)'
+
+  const pager = <T,>(q: unknown) => q as unknown as {
+    range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
+  }
+
+  /*
+   * Усе, що не залежить одне від одного, — одним заходом.
+   *
+   * Запитів тут сім, і раніше вони йшли низкою: кожен чекав на
+   * попередній, хоч жодному з них попередній не потрібен. Перемикання
+   * фільтра коштувало семи подорожей до бази поспіль — і саме це було
+   * видно як затримку.
+   */
+  const [lastSync, queuedRes, nowCheckingRes, zonesRes, dated, undated] = await Promise.all([
+    lastCronRun(supabase, 'bitrix-sync'),
+
     supabase.from('orders')
       .select('id', { count: 'exact', head: true })
       .in('platform', [...SITE_PLATFORMS]).is('auto_done_at', null)
       // Той самий горизонт, що й в огляду: старе в черзі не рахуємо
-      .gte('delivery_date', new Date(Date.now() - 36 * 3600_000).toISOString().slice(0, 10))
+      .gte('delivery_date', horizon)
       .not('status', 'in', '("Виконано","Скасовано","Повернено","Не вдалося")'),
+
     supabase.from('app_settings').select('value').eq('key', 'autopilot_now').maybeSingle(),
+
+    supabase.from('delivery_zones').select('warehouse'),
+
+    /*
+     * День читаємо одним запитом, місяць — сторінками.
+     *
+     * PostgREST віддає щонайбільше тисячу рядків і мовчки обрізає решту,
+     * тож місяць без сторінок був би неповним. Але в дні замовлень
+     * десятки, і ганяти заради них чотири паралельні запити — це платити
+     * за місяць щоразу, коли дивишся день.
+     */
+    monthly
+      ? fetchAllRows<Row>(() => pager<Row>(
+          supabase.from('orders').select(COLUMNS)
+            .in('platform', [...SITE_PLATFORMS])
+            .gte('delivery_date', monthStart).lte('delivery_date', monthEnd)
+            .order('delivery_date', { ascending: false })
+            .order('created_at', { ascending: false })), 1000, 2)
+      : supabase.from('orders').select(COLUMNS)
+          .in('platform', [...SITE_PLATFORMS])
+          .eq('delivery_date', date)
+          .order('created_at', { ascending: false })
+          .limit(1000)
+          .then(r => (r.data ?? []) as unknown as Row[]),
+
+    /*
+     * Замовлення без дати доставки теж мають бути видимі.
+     *
+     * Поки дата порожня, замовлення не належить жодному дню — і в списку
+     * по днях його немає взагалі. Саме так півсотні замовлень пролежали
+     * непоміченими: вони були в базі, але питати про них було нічим. За
+     * місяць беремо їх за днем створення, бо іншої дати в них немає.
+     */
+    monthly
+      ? supabase.from('orders').select(COLUMNS)
+          .in('platform', [...SITE_PLATFORMS])
+          .is('delivery_date', null)
+          .gte('order_date', monthStart).lte('order_date', monthEnd)
+          .order('order_date', { ascending: false })
+          .limit(1000)
+          .then(r => (r.data ?? []) as unknown as Row[])
+      : Promise.resolve([] as Row[]),
   ])
-  const { data: zones } = await supabase.from('delivery_zones').select('warehouse')
-  const warehouses = [...new Set((zones ?? []).map(z => z.warehouse as string))].sort()
 
-  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, bitrix_deal_id, bitrix_error, review:order_reviews(rating, comment)'
-
-  /*
-   * Через сторінки, а не через limit.
-   *
-   * PostgREST віддає щонайбільше тисячу рядків і мовчки обрізає решту —
-   * `.limit()` цього не змінює. У місяці замовлень удвічі більше, і без
-   * посторінкового читання звіт за місяць був би неповним, не сказавши
-   * про це жодним словом.
-   */
-  /*
-   * Замовлення без дати доставки теж мають бути видимі.
-   *
-   * Поки дата порожня, замовлення не належить жодному дню — і в списку
-   * по днях його немає взагалі. Саме так півсотні замовлень пролежали
-   * непоміченими: вони були в базі, але питати про них було нічим. За
-   * місяць беремо їх за днем створення, бо іншої дати в них немає.
-   */
-  const undated = monthly ? await fetchAllRows<Row>(() =>
-    supabase.from('orders').select(COLUMNS)
-      .in('platform', [...SITE_PLATFORMS])
-      .is('delivery_date', null)
-      .gte('order_date', monthStart).lte('order_date', monthEnd)
-      .order('order_date', { ascending: false }) as unknown as {
-        range: (from: number, to: number) =>
-          PromiseLike<{ data: Row[] | null; error: unknown }>
-      }) : []
-
-  const dated = await fetchAllRows<Row>(() => {
-    const base = supabase.from('orders').select(COLUMNS).in('platform', [...SITE_PLATFORMS])
-    return (monthly
-      ? base.gte('delivery_date', monthStart).lte('delivery_date', monthEnd)
-      : base.eq('delivery_date', date))
-      .order('delivery_date', { ascending: false })
-      .order('created_at', { ascending: false }) as unknown as {
-        range: (from: number, to: number) =>
-          PromiseLike<{ data: Row[] | null; error: unknown }>
-      }
-  })
+  const queued = queuedRes.count
+  const nowChecking = nowCheckingRes.data
+  const warehouses = [...new Set((zonesRes.data ?? []).map(z => z.warehouse as string))].sort()
 
   const inScope = [...dated, ...undated]
 

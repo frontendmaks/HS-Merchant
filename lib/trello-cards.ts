@@ -727,8 +727,22 @@ ${card.desc}`
 
       if (!order) continue
 
+      /*
+       * Не лише дописуємо — виправляємо.
+       *
+       * Число в назві буває чуже: замовлення перенесли, об'єднали або
+       * номер розійшовся з журналом. Поки діяло правило «номер уже є, не
+       * чіпаємо», така картка лишалась із хибним числом до кінця дня, і
+       * комірник шукав ящик, якого немає.
+       */
+      const want = `№${order.manual_number}`
+      const has = card.name.match(NUMBER_AT_START)?.[0]?.replace(/\s+/g, '')
+      if (has === want) continue
+
       await updateCard(card.id, {
-        name: `№${order.manual_number} ${card.name}`.slice(0, 16_384),
+        name: (has
+          ? card.name.replace(NUMBER_AT_START, want)
+          : `${want} ${card.name}`).slice(0, 16_384),
       })
       if (!order.trello_card_id) {
         await service.from('orders')

@@ -35,7 +35,7 @@ export default function SiteFilters({
 }) {
   const router = useRouter()
   const params = useSearchParams()
-  const [, start] = useTransition()
+  const [pending, start] = useTransition()
   const typing = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // Зміна в будь-якому замовленні — привід перечитати список: оператор
@@ -43,12 +43,24 @@ export default function SiteFilters({
   // Але не на кожне з сотні повідомлень одного проходу — після затишшя
   useOrderUpdatesThrottled(() => start(() => router.refresh()))
 
+  /*
+   * Перехід — через перехід, а не просто push.
+   *
+   * Сторінка читає базу на сервері, і доки відповідь іде, екран лишається
+   * старим: натиснув «Місяць» — і нічого не відбувається, аж поки все не
+   * з'явиться. Схоже на те, що натискання не зарахувалось, і його
+   * повторюють.
+   *
+   * `useTransition` дає те, чого бракувало: ознаку, що відповідь у дорозі.
+   * Старі дані при цьому лишаються на екрані — з ними можна працювати, —
+   * але видно, що вони вже не остаточні.
+   */
   function go(next: Record<string, string>) {
     const q = new URLSearchParams(params.toString())
     for (const [k, v] of Object.entries(next)) {
       if (v) q.set(k, v); else q.delete(k)
     }
-    router.push(`/orders/site?${q}`)
+    start(() => router.push(`/orders/site?${q}`))
   }
 
   const shift = (days: number) => {
@@ -63,7 +75,16 @@ export default function SiteFilters({
   const field = 'bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-red-500'
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className={`flex flex-wrap items-center gap-2 relative transition-opacity ${
+      pending ? 'opacity-60' : ''
+    }`}>
+      {/* Смужка поверх фільтрів: вона й каже, що відповідь у дорозі */}
+      {pending && (
+        <span className="absolute -top-1 left-0 right-0 h-0.5 overflow-hidden rounded-full">
+          <span className="block h-full w-1/3 bg-red-500 animate-[slide_1s_ease-in-out_infinite]" />
+        </span>
+      )}
+      <style>{'@keyframes slide{0%{margin-left:0}50%{margin-left:66%}100%{margin-left:0}}'}</style>
       {/* День чи місяць. За день працюють, за місяць питають: «скільки
           возили» і «коли був цей клієнт» — на це день не відповідає */}
       <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1">
@@ -159,6 +180,10 @@ export default function SiteFilters({
           <span className="text-zinc-500 text-xs">
             шукаємо за {monthLabel}
           </span>
+        )}
+
+        {pending && (
+          <span className="text-zinc-400 text-xs">оновлюю…</span>
         )}
 
         {narrowed && (
