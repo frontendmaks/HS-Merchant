@@ -261,7 +261,9 @@ export async function enrichNewCards(
      */
     const undatedByPhone = new Map<string, OrderRow[]>()
     for (const o of orders) {
-      if (o.delivery_date) continue
+      // Скасоване за картку не змагається: воно вже нікуди не їде, а
+      // через нього картка живого замовлення лишалась без зчеплення
+      if (o.delivery_date || o.status === 'Скасовано') continue
       const key = phoneKey(o.customer_phone)
       if (key) undatedByPhone.set(key, [...(undatedByPhone.get(key) ?? []), o])
     }
