@@ -37,7 +37,9 @@ export default function MergePreorders({ candidates, date }: {
   const [when, setWhen] = useState(date)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<{ number: number; note: string | null } | null>(null)
+  const [done, setDone] = useState<
+    { number: number; note: string | null; lines: number; merged: number } | null
+  >(null)
 
   if (!candidates.length) return null
 
@@ -68,7 +70,12 @@ export default function MergePreorders({ candidates, date }: {
       setPicked(new Set())
       // Номер кажемо вголос: саме про нього питає оператор одразу після
       // об'єднання, і шукати його в оновленому списку незручно
-      setDone({ number: d.number, note: d.number_note ?? d.numberNote ?? null })
+      setDone({
+        number: d.number,
+        note: d.numberNote ?? null,
+        lines: d.lines ?? 0,
+        merged: d.merged ?? 0,
+      })
       router.refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -157,7 +164,7 @@ export default function MergePreorders({ candidates, date }: {
       {done && (
         <div className="px-4 py-2 bg-emerald-950/40 border-t border-emerald-900
                         text-emerald-400 text-xs">
-          Об&apos;єднано — нове замовлення під номером <b>№{done.number}</b>
+          Об&apos;єднано {done.merged} в одне — <b>№{done.number}</b>, позицій: {done.lines}
           {done.note && <span className="text-amber-400"> · {done.note}</span>}
         </div>
       )}

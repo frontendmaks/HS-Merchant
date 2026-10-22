@@ -34,6 +34,8 @@ export interface MergeResult {
   number: number
   /** Що завадило взяти його з таблиці, якщо завадило */
   numberNote: string | null
+  /** Скільки рядків дало кожне з вихідних — щоб було видно, що все зійшлось */
+  from: { deal: number | null; lines: number }[]
 }
 
 interface Row {
@@ -91,15 +93,44 @@ export async function mergeOrders(
   // Беремо найперше за порядком — його адресу й склад оператор уже бачив
   const base = rows.find(r => r.id === orderIds[0]) ?? rows[0]
 
-  const { data: items } = await service
-    .from('order_items')
-    .select('*')
-    .in('order_id', orderIds)
-    .eq('removed', false)
-    .order('position')
+  /*
+   * Позиції читаємо по замовленню, а не одним списком.
+   *
+   * Одним списком не видно, чиї рядки прийшли: якщо котресь замовлення
+   * віддало нуль, загальна кількість усе одно більша за нуль, і
+   * об'єднання тихо збирає половину. Саме так Ольховик дістав три
+   * позиції замість одинадцяти — і дізнались ми про це з бланка.
+   *
+   * Тому питаємо кожне окремо й вимагаємо від кожного бодай один рядок.
+   * Порожнє замовлення — це або помилка читання, або справді порожня
+   * угода; і в першому, і в другому випадку об'єднувати ще рано.
+   */
+  const byOrder = new Map<string, Record<string, unknown>[]>()
 
-  const lines = items ?? []
-  if (!lines.length) return { error: 'У цих замовленнях немає позицій' }
+  for (const id of orderIds) {
+    const { data: part } = await service
+      .from('order_items')
+      .select('*')
+      .eq('order_id', id)
+      .eq('removed', false)
+      .order('position')
+
+    byOrder.set(id, (part ?? []) as Record<string, unknown>[])
+  }
+
+  const empty = orderIds.filter(id => !byOrder.get(id)?.length)
+  if (empty.length) {
+    const who = empty
+      .map(id => rows.find(r => r.id === id)?.bitrix_deal_id)
+      .map(deal => (deal ? `#${deal}` : 'замовлення'))
+      .join(', ')
+    return {
+      error: `У ${who} не видно позицій — об'єднувати рано. `
+        + 'Відкрийте замовлення, переконайтесь, що товари на місці, і спробуйте ще раз.',
+    }
+  }
+
+  const lines = orderIds.flatMap(id => byOrder.get(id) ?? [])
 
   const contactId = base.customer_name && base.customer_phone
     ? await contactFor(base.customer_name, base.customer_phone)
@@ -189,6 +220,7 @@ export async function mergeOrders(
    * ті самі гроші вже лежать в об'єднаному.
    */
   const canceled = stageId('Скасовано')
+  const sheetNotes: string[] = []
   for (const row of rows) {
     /*
      * Ящик вихідного замовлення вільний.
@@ -200,9 +232,15 @@ export async function mergeOrders(
      * інше.
      */
     if (row.manual_number != null && row.delivery_date) {
-      await releaseNumber(service, {
-        number: Number(row.manual_number), date: row.delivery_date,
-      }).catch(() => null)
+      const freed = await releaseNumber(service, {
+        number: Number(row.manual_number),
+        date: row.delivery_date,
+        reason: 'об’єднано в одне замовлення',
+      }).catch(() => false)
+
+      // У нашому журналі номер звільнено завжди; тут ідеться про аркуш
+      // складу — якщо його не поправили, це має побачити людина
+      if (!freed) sheetNotes.push(`№${row.manual_number} у таблиці лишився за старим записом`)
     }
 
     if (row.bitrix_deal_id && canceled) {
@@ -263,6 +301,10 @@ export async function mergeOrders(
     merged: rows.length,
     lines: lines.length,
     number: reserved.number,
-    numberNote: reserved.note,
+    numberNote: [reserved.note, ...sheetNotes].filter(Boolean).join('; ') || null,
+    from: orderIds.map(id => ({
+      deal: rows.find(r => r.id === id)?.bitrix_deal_id ?? null,
+      lines: byOrder.get(id)?.length ?? 0,
+    })),
   }
 }

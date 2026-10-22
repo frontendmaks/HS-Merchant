@@ -349,8 +349,22 @@ export async function registerStatus(service: Service, date: string) {
  */
 export async function releaseNumber(
   service: Service,
-  { number, date }: { number: number; date: string },
+  { number, date, reason = 'рядок звільнено' }: {
+    number: number; date: string; reason?: string
+  },
 ): Promise<boolean> {
+  /*
+   * Свій журнал звільняємо завжди.
+   *
+   * Раніше це залежало від того, чи вдалося стерти ім'я в Google-таблиці:
+   * таблиця мовчить — і номер лишається зайнятим у нас, хоч замовлення
+   * вже немає. Дві причини в одному «не вийшло» розрізнити було нічим.
+   *
+   * Тепер наш запис не залежить від чужого сервісу, а невдача з таблицею
+   * видно окремо — її повертаємо назовні.
+   */
+  await freeNumber(service, { number, date, reason })
+
   if (!sheetsConfigured()) return false
 
   const spreadsheetId = await registerFor(service, date)
@@ -362,9 +376,7 @@ export async function releaseNumber(
 
   for (let i = 1; i < rows.length; i++) {
     if (Number((rows[i]?.[0] ?? '').toString().trim()) === number) {
-      const cleared = await writeCell(spreadsheetId, `'${tab}'!B${i + 1}`, '')
-      if (cleared) await freeNumber(service, { number, date, reason: 'рядок звільнено' })
-      return cleared
+      return await writeCell(spreadsheetId, `'${tab}'!B${i + 1}`, '')
     }
   }
   return false

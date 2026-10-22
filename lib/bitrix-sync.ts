@@ -486,9 +486,8 @@ async function saveRows(service: Service, orderId: string, rows: Row[]) {
     .from('order_items').select('id', { count: 'exact', head: true })
     .eq('order_id', orderId).eq('removed', false)
 
-  await service.from('order_items').delete().eq('order_id', orderId).eq('source', 'site')
-
   if (!rows.length) {
+    await service.from('order_items').delete().eq('order_id', orderId).eq('source', 'site')
     if (before) await service.from('orders').update({ auto_done_at: null }).eq('id', orderId)
     return
   }
@@ -506,20 +505,30 @@ async function saveRows(service: Service, orderId: string, rows: Row[]) {
    */
   const ourByBitrix = await linkProducts(service, rows)
 
-  await service.from('order_items').insert(rows.map((r, i) => ({
-    order_id: orderId,
-    position: i,
-    source: 'site',
-    title: r.PRODUCT_NAME,
-    bitrix_product_id: Number(r.PRODUCT_ID) || null,
-    product_id: ourByBitrix.get(Number(r.PRODUCT_ID)) ?? null,
-    unit: unitOf(r),
-    unit_weight: 0,
-    price_per_unit: Number(r.PRICE),
-    ordered_qty: Number(r.QUANTITY),
-    ordered_total: Math.round(Number(r.PRICE) * Number(r.QUANTITY) * 100) / 100,
-    removed: false,
-  })))
+  /*
+   * Заміна однією транзакцією.
+   *
+   * Раніше тут були два кроки — видалити старі рядки, вставити нові, — і
+   * між ними замовлення на коротку мить лишалось без позицій. Той, хто
+   * читав саме тоді, бачив порожнечу як правду: об'єднання взяло три
+   * позиції замість одинадцяти, бо друге замовлення читалось якраз у цю
+   * щілину. Тепер назовні видно або старий склад, або новий.
+   */
+  await service.rpc('replace_order_items', {
+    p_order_id: orderId,
+    p_source: 'site',
+    p_rows: rows.map((r, i) => ({
+      position: i,
+      title: r.PRODUCT_NAME,
+      bitrix_product_id: Number(r.PRODUCT_ID) || null,
+      product_id: ourByBitrix.get(Number(r.PRODUCT_ID)) ?? null,
+      unit: unitOf(r),
+      unit_weight: 0,
+      price_per_unit: Number(r.PRICE),
+      ordered_qty: Number(r.QUANTITY),
+      ordered_total: Math.round(Number(r.PRICE) * Number(r.QUANTITY) * 100) / 100,
+    })),
+  })
 }
 
 /** Замовлення, які ще в роботі — їх варто перепитувати навіть без змін. */
