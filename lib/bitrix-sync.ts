@@ -202,7 +202,16 @@ export async function syncSiteOrders(
           platform: 'site',
           bitrix_deal_id: Number(deal.ID),
           order_date: deal.DATE_CREATE.slice(0, 10),
-          delivery_date: deal.UF_CRM_1606047095?.slice(0, 10) ?? null,
+          /*
+           * Порожнє поле — це не дата.
+           *
+           * Бітрікс віддає незаповнену дату доставки порожнім рядком, а
+           * не відсутністю. `''.slice(0, 10)` дає знову порожній рядок,
+           * і Postgres відмовляє всій вставці: «invalid input syntax for
+           * type date». Два жовтневі замовлення так і не потрапили в
+           * Мерчант — вони просто не мали дати.
+           */
+          delivery_date: deal.UF_CRM_1606047095?.slice(0, 10) || null,
           delivery_slot: SLOT_BY_ID.get(deal.UF_CRM_1606047143435 ?? '') ?? null,
           warehouse: WAREHOUSE_BY_ID.get(deal.UF_BILL_ADRESS_LIST ?? '') ?? null,
           customer_name: person?.name || persona.name || deal.TITLE,
@@ -343,14 +352,28 @@ export async function syncSiteOrders(
            * нічого: замовлення доходило до комплектації, а комірник його не
            * бачив. Ручний прийом токен видавав, синхронізація — ні.
            */
-          const { data: created } = await service
+          const { data: created, error } = await service
             .from('orders')
             .insert({ ...fields, share_token: randomBytes(18).toString('base64url') })
             .select('id').single()
+
           if (created) {
             await saveRows(service, created.id as string, rows)
             touched = created.id as string
             result.created++
+          } else {
+            /*
+             * Невдала вставка більше не губиться.
+             *
+             * Доти помилка просто відкидалась, і прохід звітував «seen: 1,
+             * created: 0» — тобто все гаразд, просто нічого не сталось.
+             * Замовлення не існувало ніде, і дізнатись про це можна було
+             * лише з Бітрікса очима.
+             */
+            result.notes = [
+              ...(result.notes ?? []),
+              `#${deal.ID}: ${error?.message ?? 'не вдалося створити'}`,
+            ]
           }
         }
       }
