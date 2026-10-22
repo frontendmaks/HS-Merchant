@@ -8,6 +8,7 @@
  * Прийняти замовлення на майданчику — це обіцянка покупцеві, тож уся ця
  * робота вимкнена, поки її не ввімкнули свідомо.
  */
+import { randomBytes } from 'node:crypto'
 import { createServiceClient } from '@/lib/supabase/service'
 import { changeOrderStatus } from '@/lib/order-status-change'
 import { pushMarketplaceOrder } from '@/lib/marketplace-bitrix'
@@ -145,9 +146,23 @@ interface MarketplaceOrder {
  * складу, і повторний прохід через неї не пише нічого вдруге.
  */
 async function tellWarehouse(service: Service, order: MarketplaceOrder): Promise<void> {
-  if (order.chat_sent_at || !order.share_token) return
+  if (order.chat_sent_at) return
 
   try {
+    /*
+     * Бланк існує лише тоді, коли в замовлення є токен.
+     *
+     * Сайтові дістають його при створенні, бо бланк для них потрібен з
+     * першої хвилини. Маркетплейсні жили без нього: їх вів майданчик, і
+     * друкувати не було чого. Тепер під них набивають накладну — отже,
+     * бланк потрібен, і видати токен має той, хто вперше про нього
+     * питає.
+     */
+    const token = order.share_token ?? randomBytes(18).toString('base64url')
+    if (!order.share_token) {
+      await service.from('orders').update({ share_token: token }).eq('id', order.id)
+    }
+
     const warehouse = await getSetting(service, 'marketplace_chat_warehouse')
     const { data: chat } = await service
       .from('warehouse_chats').select('dialog_id').eq('warehouse', warehouse).maybeSingle()
@@ -162,7 +177,7 @@ async function tellWarehouse(service: Service, order: MarketplaceOrder): Promise
     const base = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hs-merchant.vercel.app'
     const text = `Замовлення з ${platformLabel(order.platform)}, `
       + 'потрібно набити накладну для узгодження з клієнтом - '
-      + `${base}/zamovlennya/${order.share_token}`
+      + `${base}/zamovlennya/${token}`
 
     await sendToChat(chat.dialog_id as string, text)
 
