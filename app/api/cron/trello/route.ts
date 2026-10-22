@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { enrichNewCards, tidyFailed } from '@/lib/trello-cards'
+import { enrichNewCards, tidyFailed, numberInPicking } from '@/lib/trello-cards'
 import { logCronRun } from '@/lib/cron-log'
 
 export const maxDuration = 120
@@ -34,7 +34,11 @@ export async function GET(request: NextRequest) {
     || new Date().getUTCHours() === 4
   const cleaned = tidy ? await tidyFailed(service) : null
 
-  await logCronRun(service, 'trello-cards', startedAt, { ...result, cleaned }, result.error)
+  // Номер міг з'явитись уже після того, як картка поїхала на склад
+  const late = await numberInPicking(service)
 
-  return NextResponse.json({ ...result, cleaned })
+  await logCronRun(service, 'trello-cards', startedAt,
+    { ...result, cleaned, late }, result.error)
+
+  return NextResponse.json({ ...result, cleaned, late })
 }

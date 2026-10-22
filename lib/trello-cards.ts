@@ -523,6 +523,84 @@ export async function spreadToPicking(
 }
 
 /**
+ * Номер на картці, яка вже поїхала на склад.
+ *
+ * Дописування працює зі списком «Нові замовлення», і цього досить,
+ * поки номер з'являється раніше за переїзд. Але буває навпаки: картку
+ * розклали по складах, а номер замовлення отримало за хвилину по тому —
+ * і комірник дивиться на картку без числа, якого на ящику не бракує.
+ *
+ * Тому раз на прохід перечитуємо списки комплектації й дописуємо те,
+ * чого там бракує. Зіставляємо за збереженою карткою, а якщо її немає —
+ * за телефоном і днем, як і всюди.
+ */
+export async function numberInPicking(
+  service: Service,
+  { limit = 40 }: { limit?: number } = {},
+): Promise<{ numbered: number }> {
+  if (!trelloConfigured()) return { numbered: 0 }
+
+  const day = (shift: number) =>
+    new Date(Date.now() + shift * 86_400_000).toISOString().slice(0, 10)
+
+  const { data } = await service
+    .from('orders')
+    .select('id, manual_number, customer_phone, delivery_date, trello_card_id')
+    .in('platform', ['site', 'manual'])
+    .not('manual_number', 'is', null)
+    .gte('delivery_date', day(-3)).lte('delivery_date', day(4))
+
+  const orders = (data ?? []) as {
+    id: string; manual_number: number; customer_phone: string | null
+    delivery_date: string | null; trello_card_id: string | null
+  }[]
+  if (!orders.length) return { numbered: 0 }
+
+  const byCard = new Map(
+    orders.filter(o => o.trello_card_id).map(o => [o.trello_card_id as string, o]),
+  )
+  const byPhoneDay = new Map<string, typeof orders[number]>()
+  for (const o of orders) {
+    const key = phoneKey(o.customer_phone)
+    if (key && o.delivery_date) byPhoneDay.set(`${key}|${o.delivery_date}`, o)
+  }
+
+  const board = await getSetting(service, 'trello_board')
+  const lists = await boardLists(board)
+
+  let numbered = 0
+  for (const list of lists) {
+    if (!/комплект/i.test(list.name)) continue
+
+    for (const card of await listCards(list.id)) {
+      if (numbered >= limit) return { numbered }
+      if (NUMBER_AT_START.test(card.name)) continue
+
+      const text = `${card.name}
+${card.desc}`
+      const date = dateFromDesc(card.desc)
+      const order = byCard.get(card.id)
+        ?? (date
+          ? phonesIn(text).map(p => byPhoneDay.get(`${p}|${date}`)).find(Boolean)
+          : undefined)
+
+      if (!order) continue
+
+      await updateCard(card.id, {
+        name: `№${order.manual_number} ${card.name}`.slice(0, 16_384),
+      })
+      if (!order.trello_card_id) {
+        await service.from('orders')
+          .update({ trello_card_id: card.id }).eq('id', order.id)
+      }
+      numbered++
+    }
+  }
+
+  return { numbered }
+}
+
+/**
  * Прибирання в «Не доставлено».
  *
  * Туди кладуть картки скасованих замовлень, і ніхто їх звідти не
