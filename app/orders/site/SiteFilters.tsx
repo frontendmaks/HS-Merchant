@@ -15,6 +15,7 @@ export interface FunnelTab { key: string; label: string; count: number }
  */
 export default function SiteFilters({
   date, stage, tabs, warehouses, slots, picked, total,
+  monthly, monthLabel, forcedBySearch,
 }: {
   date: string
   stage: string
@@ -23,8 +24,14 @@ export default function SiteFilters({
   warehouses: string[]
   slots: string[]
   picked: { wh: string; slot: string; src: string; q: string }
-  /** Скільки всього замовлень цього дня — щоб було видно, що зріз вужчий */
+  /** Скільки всього замовлень у зрізі — щоб було видно, що фільтр вужчий */
   total: number
+  /** Чи дивимось цілий місяць замість одного дня */
+  monthly: boolean
+  /** «жовтень 2026» — підпис обраного місяця */
+  monthLabel: string
+  /** Місяць увімкнувся сам, бо шукають: про це варто сказати вголос */
+  forcedBySearch: boolean
 }) {
   const router = useRouter()
   const params = useSearchParams()
@@ -57,6 +64,20 @@ export default function SiteFilters({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {/* День чи місяць. За день працюють, за місяць питають: «скільки
+          возили» і «коли був цей клієнт» — на це день не відповідає */}
+      <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1">
+        {([['', 'День'], ['month', 'Місяць']] as const).map(([value, label]) => (
+          <button key={label} onClick={() => go({ period: value })}
+            className={`px-3 py-1.5 rounded-lg text-xs transition-colors whitespace-nowrap ${
+              (value === 'month') === monthly ? 'bg-zinc-700 text-white'
+                : 'text-zinc-400 hover:text-white'
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1">
         <button onClick={() => shift(-1)}
           className="px-2 py-1 text-zinc-400 hover:text-white text-sm transition-colors">‹</button>
@@ -67,6 +88,7 @@ export default function SiteFilters({
         />
         <button onClick={() => shift(1)}
           className="px-2 py-1 text-zinc-400 hover:text-white text-sm transition-colors">›</button>
+        {monthly && <span className="px-1.5 text-zinc-500 text-xs">{monthLabel}</span>}
         {date !== today && (
           <button onClick={() => go({ date: today })}
             className="px-2 py-1 text-zinc-400 hover:text-white text-xs transition-colors">
@@ -106,7 +128,7 @@ export default function SiteFilters({
         <input
           type="search"
           defaultValue={picked.q}
-          placeholder="Клієнт, телефон, адреса, номер"
+          placeholder="Клієнт, телефон, адреса, номер — за весь місяць"
           onChange={e => {
             const value = e.target.value
             // Чекаємо, поки людина допише: запит на кожну літеру змушував
@@ -132,6 +154,12 @@ export default function SiteFilters({
           <option value="site">Лише сайт</option>
           <option value="manual">Лише телефон</option>
         </select>
+
+        {forcedBySearch && (
+          <span className="text-zinc-500 text-xs">
+            шукаємо за {monthLabel}
+          </span>
+        )}
 
         {narrowed && (
           <button

@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
 import { createServiceClient } from '@/lib/supabase/service'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { getCurrentRole } from '@/lib/getRole'
 import { isInProgress } from '@/lib/order-statuses'
 import { SITE_PLATFORMS, platformLabel } from '@/lib/order-source'
@@ -112,17 +113,34 @@ export default async function SiteOrdersPage({
 }: {
   searchParams: Promise<{
     date?: string; stage?: string
-    wh?: string; slot?: string; src?: string; q?: string
+    wh?: string; slot?: string; src?: string; q?: string; period?: string
   }>
 }) {
   const role = await getCurrentRole()
   const readOnly = role === 'viewer'
   const {
-    date: dateParam, stage = 'new', wh = '', slot = '', src = '', q = '',
+    date: dateParam, stage = 'new', wh = '', slot = '', src = '', q = '', period = '',
   } = await searchParams
 
   // За замовчуванням — сьогодні: саме сьогоднішні замовлення возять
   const date = dateParam || new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' })
+
+  /*
+   * День чи місяць.
+   *
+   * День лишається тим, що відкривається саме: возять сьогоднішнє. Але
+   * клієнт телефонує не «по вівторку», а «ви мені возили» — і шукати його
+   * в одному дні означає не знайти. Тому пошук сам розширює огляд на
+   * місяць: порожній результат у межах дня брехав би, що замовлення немає.
+   */
+  const monthly = period === 'month' || q.trim().length > 0
+  const monthStart = `${date.slice(0, 7)}-01`
+  const monthEnd = (() => {
+    const d = new Date(`${monthStart}T12:00:00`)
+    d.setMonth(d.getMonth() + 1)
+    d.setDate(0)
+    return d.toLocaleDateString('en-CA')
+  })()
 
   const supabase = createServiceClient()
   const lastSync = await lastCronRun(supabase, 'bitrix-sync')
@@ -140,15 +158,27 @@ export default async function SiteOrdersPage({
   const { data: zones } = await supabase.from('delivery_zones').select('warehouse')
   const warehouses = [...new Set((zones ?? []).map(z => z.warehouse as string))].sort()
 
-  const { data } = await supabase
-    .from('orders')
-    .select('id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, review:order_reviews(rating, comment)')
-    .in('platform', [...SITE_PLATFORMS])
-    .eq('delivery_date', date)
-    .order('created_at', { ascending: false })
-    .limit(500)
+  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, review:order_reviews(rating, comment)'
 
-  const forDay = (data ?? []) as Row[]
+  /*
+   * Через сторінки, а не через limit.
+   *
+   * PostgREST віддає щонайбільше тисячу рядків і мовчки обрізає решту —
+   * `.limit()` цього не змінює. У місяці замовлень удвічі більше, і без
+   * посторінкового читання звіт за місяць був би неповним, не сказавши
+   * про це жодним словом.
+   */
+  const inScope = await fetchAllRows<Row>(() => {
+    const base = supabase.from('orders').select(COLUMNS).in('platform', [...SITE_PLATFORMS])
+    return (monthly
+      ? base.gte('delivery_date', monthStart).lte('delivery_date', monthEnd)
+      : base.eq('delivery_date', date))
+      .order('delivery_date', { ascending: false })
+      .order('created_at', { ascending: false }) as unknown as {
+        range: (from: number, to: number) =>
+          PromiseLike<{ data: Row[] | null; error: unknown }>
+      }
+  })
 
   /*
    * Зріз дня: склад, період, джерело, пошук.
@@ -158,7 +188,7 @@ export default async function SiteOrdersPage({
    * тридцять — і незрозуміло, тридцять чого.
    */
   const needle = q.trim().toLowerCase()
-  const scoped = forDay.filter(o =>
+  const scoped = inScope.filter(o =>
     (!wh || o.warehouse === wh)
     && (!slot || o.delivery_slot === slot)
     && (!src || o.platform === src)
@@ -176,8 +206,27 @@ export default async function SiteOrdersPage({
 
   // Пропонуємо лише те, що цього дня справді є: порожній варіант у списку
   // обіцяє замовлення, яких немає
-  const slotsToday = [...new Set(forDay.map(o => o.delivery_slot).filter(Boolean))].sort() as string[]
-  const warehousesToday = [...new Set(forDay.map(o => o.warehouse).filter(Boolean))].sort() as string[]
+  const slotsToday = [...new Set(inScope.map(o => o.delivery_slot).filter(Boolean))].sort() as string[]
+  const warehousesToday = [...new Set(inScope.map(o => o.warehouse).filter(Boolean))].sort() as string[]
+
+  /*
+   * Підсумок зрізу — по тому, що видно.
+   *
+   * Рахуємо не весь місяць, а відфільтроване: якщо обрано склад, число
+   * має відповідати тому, що під ним у таблиці. Скасовані в суму не
+   * йдуть — грошей за ними немає.
+   */
+  const live = scoped.filter(o => o.status !== 'Скасовано')
+  const summary = {
+    orders: scoped.length,
+    sum: live.reduce((acc, o) => acc + Number(o.total ?? 0), 0),
+    done: scoped.filter(o => o.status === 'Виконано').length,
+    canceled: scoped.length - live.length,
+    days: new Set(scoped.map(o => o.delivery_date)).size,
+  }
+  const avg = live.length ? summary.sum / live.length : 0
+  const monthLabel = new Date(`${monthStart}T12:00:00`)
+    .toLocaleDateString('uk-UA', { month: 'long', year: 'numeric' })
 
   return (
     <div className="bg-zinc-950 text-white space-y-4">
@@ -218,8 +267,32 @@ export default async function SiteOrdersPage({
         warehouses={warehousesToday}
         slots={slotsToday}
         picked={{ wh, slot, src, q }}
-        total={forDay.length}
+        total={inScope.length}
+        monthly={monthly}
+        monthLabel={monthLabel}
+        forcedBySearch={!!q.trim() && period !== 'month'}
       />
+
+      {/* Підсумок місяця — над таблицею, бо за місяць дивляться на числа,
+          а не на рядки */}
+      {monthly && (
+        <div className="bg-zinc-900 rounded-xl border border-zinc-800 px-4 py-3
+                        flex flex-wrap gap-x-8 gap-y-2">
+          {[
+            ['Замовлень', summary.orders.toLocaleString('uk-UA')],
+            ['Сума', money(summary.sum)],
+            ['Середній чек', money(avg)],
+            ['Виконано', summary.done.toLocaleString('uk-UA')],
+            ['Скасовано', summary.canceled.toLocaleString('uk-UA')],
+            ['Днів із доставкою', summary.days.toLocaleString('uk-UA')],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <div className="text-zinc-500 text-xs">{label}</div>
+              <div className="text-white text-lg font-semibold tabular-nums">{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Об'єднання живе на своїй вкладці: саме там його шукають, і на
           решті воно було б зайвим рядком між роботою */}
@@ -244,7 +317,10 @@ export default async function SiteOrdersPage({
           <h2 className="text-sm font-semibold text-zinc-300">
             {matcher.label} <span className="ml-1 text-zinc-500">({orders.length})</span>
             <span className="ml-2 text-zinc-600 font-normal">
-              на {date.split('-').reverse().slice(0, 2).join('.')} · у роботі {active.length}
+              {monthly
+                ? `за ${monthLabel}`
+                : `на ${date.split('-').reverse().slice(0, 2).join('.')}`}
+              {' · у роботі '}{active.length}
             </span>
           </h2>
         </div>
@@ -269,7 +345,7 @@ export default async function SiteOrdersPage({
               {orders.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="text-center py-12 text-zinc-500">
-                    На цю дату тут порожньо —{' '}
+                    {monthly ? 'За цей місяць тут порожньо' : 'На цю дату тут порожньо'} —{' '}
                     <Link href="/orders/manual" className="text-red-400 hover:text-red-300">
                       створити замовлення
                     </Link>
