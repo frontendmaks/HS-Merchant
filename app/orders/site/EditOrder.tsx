@@ -172,6 +172,12 @@ export default function EditOrder({ id, warehouses, onClose }: {
                 <label className="text-zinc-400 text-xs block mb-1">Період</label>
                 <select value={slot} onChange={e => setSlot(e.target.value)} className={field}>
                   <option value="">— не вказано —</option>
+                  {/* Період угоди може бути не з наших трьох — «16:00-19:30»
+                      домовили з клієнтом окремо. Показуємо його як є, інакше
+                      поле виглядає порожнім, хоч період у замовленні стоїть */}
+                  {slot && !SLOTS.some(s => s.label === slot) && (
+                    <option value={slot}>{slot} (домовлено окремо)</option>
+                  )}
                   {SLOTS.map(s => <option key={s.label} value={s.label}>{s.label}</option>)}
                 </select>
               </div>
