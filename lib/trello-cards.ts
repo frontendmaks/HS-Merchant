@@ -237,6 +237,15 @@ export async function enrichNewCards(
      */
     const phoneDay = new Map<string, OrderRow[]>()
     for (const o of orders) {
+      /*
+       * Скасоване за картку не змагається.
+       *
+       * Після об'єднання в того самого покупця на той самий день
+       * лишається одне живе замовлення, а поруч — два закритих. Поки
+       * вони рахувались нарівні, день виглядав двозначним, і картка
+       * живого замовлення лишалась без номера й без бланка.
+       */
+      if (o.status === 'Скасовано') continue
       const key = phoneKey(o.customer_phone)
       if (key && o.delivery_date) {
         const k = `${key}|${o.delivery_date}`
@@ -281,6 +290,7 @@ export async function enrichNewCards(
      */
     const byAddress = new Map<string, OrderRow[]>()
     for (const o of orders) {
+      if (o.status === 'Скасовано') continue
       const key = addressKey(o.address)
       // Короткі ключі не беремо: «львів» трапляється підрядком у десятку
       // чужих карток, і картка діставала б чужий номер
