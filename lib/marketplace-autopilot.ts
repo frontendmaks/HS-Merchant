@@ -54,7 +54,16 @@ export async function processMarketplaceOrders(
       .select('id, external_id, platform, status, bitrix_deal_id')
       .in('platform', ['maudau', 'rozetka'])
       .is('bitrix_deal_id', null)
-      .gte('order_date', new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10))
+      /*
+       * Два тижні, а не три дні.
+       *
+       * Вікно в три дні мовчки кидало все, що не встигли опрацювати:
+       * опрацювання вмикали вже після того, як замовлення приїхали, і
+       * сім жовтневих так і лишились без угоди — склад їх не бачив.
+       * Беремо старші першими, тож черга розбирається з хвоста.
+       */
+      .gte('order_date', new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10))
+      .neq('status', 'Скасовано')
       .order('order_date', { ascending: true })
       .limit(limit)
 

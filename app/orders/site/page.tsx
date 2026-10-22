@@ -170,7 +170,25 @@ export default async function SiteOrdersPage({
    * посторінкового читання звіт за місяць був би неповним, не сказавши
    * про це жодним словом.
    */
-  const inScope = await fetchAllRows<Row>(() => {
+  /*
+   * Замовлення без дати доставки теж мають бути видимі.
+   *
+   * Поки дата порожня, замовлення не належить жодному дню — і в списку
+   * по днях його немає взагалі. Саме так півсотні замовлень пролежали
+   * непоміченими: вони були в базі, але питати про них було нічим. За
+   * місяць беремо їх за днем створення, бо іншої дати в них немає.
+   */
+  const undated = monthly ? await fetchAllRows<Row>(() =>
+    supabase.from('orders').select(COLUMNS)
+      .in('platform', [...SITE_PLATFORMS])
+      .is('delivery_date', null)
+      .gte('order_date', monthStart).lte('order_date', monthEnd)
+      .order('order_date', { ascending: false }) as unknown as {
+        range: (from: number, to: number) =>
+          PromiseLike<{ data: Row[] | null; error: unknown }>
+      }) : []
+
+  const dated = await fetchAllRows<Row>(() => {
     const base = supabase.from('orders').select(COLUMNS).in('platform', [...SITE_PLATFORMS])
     return (monthly
       ? base.gte('delivery_date', monthStart).lte('delivery_date', monthEnd)
@@ -181,6 +199,8 @@ export default async function SiteOrdersPage({
           PromiseLike<{ data: Row[] | null; error: unknown }>
       }
   })
+
+  const inScope = [...dated, ...undated]
 
   /*
    * Зріз дня: склад, період, джерело, пошук.
@@ -447,6 +467,12 @@ export default async function SiteOrdersPage({
                       <span className="block text-amber-500 text-xs"
                         title="Той самий телефон на цю дату — схоже, замовлення завели двічі">
                         ⚠ той самий клієнт цього дня
+                      </span>
+                    )}
+                    {!o.delivery_date && (
+                      <span className="block text-amber-500 text-xs"
+                        title="В угоді не заповнена дата доставки — замовлення не належить жодному дню">
+                        ⚠ немає дати доставки
                       </span>
                     )}
                     {Number(o.total ?? 0) === 0 && o.status !== 'Скасовано' && (
