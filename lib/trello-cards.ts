@@ -190,16 +190,29 @@ export async function enrichNewCards(
      * пошта, а не наш кур'єр. Тому й шукаємо їх за датою замовлення, а не
      * за датою доставки, якої в них просто немає.
      */
-    const [{ data: ours }, { data: markets }] = await Promise.all([
+    const [{ data: ours }, { data: undated }, { data: markets }] = await Promise.all([
       service.from('orders').select(COLUMNS)
         .in('platform', ['site', 'manual'])
         .gte('delivery_date', day(-10)).lte('delivery_date', day(4)),
+      /*
+       * Порожня дата — теж дата, якої шукають.
+       *
+       * Умова на проміжок дат відкидає NULL мовчки, і замовлення без дня
+       * не потрапляло в розгляд зовсім: картка на дошці є, замовлення в
+       * базі є, а зчепити їх нема чим. Беремо їх за днем створення.
+       */
+      service.from('orders').select(COLUMNS)
+        .in('platform', ['site', 'manual'])
+        .is('delivery_date', null)
+        .gte('order_date', day(-10)),
       service.from('orders').select(COLUMNS)
         .in('platform', ['maudau', 'rozetka'])
         .gte('order_date', day(-14)).lte('order_date', day(1)),
     ])
 
-    const all = [...(ours ?? []), ...(markets ?? [])] as unknown as OrderRow[]
+    const all = [
+      ...(ours ?? []), ...(undated ?? []), ...(markets ?? []),
+    ] as unknown as OrderRow[]
 
     /*
      * Коли нас покликали через конкретні замовлення, рештою не займаємось.
