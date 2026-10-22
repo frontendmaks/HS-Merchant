@@ -19,6 +19,9 @@ import {
 import { slotId } from '@/lib/bitrix-slots'
 import { stageId, stageName } from '@/lib/bitrix-stages'
 import { phoneKey } from '@/lib/phone'
+import {
+  DELIVERY_TITLE, DELIVERY_FEE, FREE_DELIVERY_FROM, BITRIX_DELIVERY_PRODUCT_ID,
+} from '@/lib/delivery-fee'
 import { reserveNumber, releaseNumber, linkNumber } from '@/lib/manual-register'
 
 type Service = ReturnType<typeof createServiceClient>
@@ -130,7 +133,36 @@ export async function mergeOrders(
     }
   }
 
-  const lines = orderIds.flatMap(id => byOrder.get(id) ?? [])
+  const collected = orderIds.flatMap(id => byOrder.get(id) ?? [])
+
+  /*
+   * Доставка в об'єднаному — одна й перерахована.
+   *
+   * Кожне з вихідних везли окремо, і в кожному міг стояти свій рядок
+   * доставки. Разом це одна поїздка, тож двох рядків бути не може. А ще
+   * сума разом часто перевалює за поріг безкоштовної доставки — і тоді
+   * рядка не має бути зовсім: клієнт заплатив би за те, що вже безкоштовне.
+   */
+  const goods = collected.filter(l => String(l.title ?? '').trim() !== DELIVERY_TITLE)
+  const goodsSum = goods.reduce((sum, l) => sum + Number(l.ordered_total ?? 0), 0)
+  const fee = goodsSum > FREE_DELIVERY_FROM ? 0 : DELIVERY_FEE
+
+  const deliveryRow = collected.find(l => String(l.title ?? '').trim() === DELIVERY_TITLE)
+
+  const lines = fee > 0
+    ? [...goods, {
+        ...(deliveryRow ?? {}),
+        title: DELIVERY_TITLE,
+        unit: 'шт',
+        unit_weight: 0,
+        bitrix_product_id: BITRIX_DELIVERY_PRODUCT_ID,
+        product_id: null,
+        price_per_unit: fee,
+        ordered_qty: 1,
+        ordered_total: fee,
+        removed: false,
+      }]
+    : goods
 
   const contactId = base.customer_name && base.customer_phone
     ? await contactFor(base.customer_name, base.customer_phone)
