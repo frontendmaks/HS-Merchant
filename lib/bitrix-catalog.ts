@@ -13,6 +13,7 @@
  */
 import { createServiceClient } from '@/lib/supabase/service'
 import { bitrix, bitrixCatalog, catalogConfigured } from '@/lib/bitrix'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -155,8 +156,20 @@ async function syncOnlinePrices(service: Service): Promise<number> {
   if (!byProduct.size) return 0
 
   const now = new Date().toISOString()
-  const { data: known } = await service
-    .from('bitrix_products').select('uid_1c, product_id')
+
+  /*
+   * Через сторінки: товарів у каталозі чотири тисячі.
+   *
+   * PostgREST віддає тисячу й мовчки обрізає решту — і ціна діставалась
+   * лише тим вісімсот, що вмістились у першу сторінку. Решта лишалась
+   * без ціни, хоч у Бітріксі вона стояла.
+   */
+  const known = await fetchAllRows<{ uid_1c: string; product_id: number }>(() =>
+    service.from('bitrix_products').select('uid_1c, product_id') as unknown as {
+      range: (from: number, to: number) => PromiseLike<{
+        data: { uid_1c: string; product_id: number }[] | null; error: unknown
+      }>
+    })
 
   const rows = (known ?? [])
     .filter(k => byProduct.has(Number(k.product_id)))
