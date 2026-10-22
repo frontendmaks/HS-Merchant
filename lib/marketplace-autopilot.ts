@@ -177,6 +177,10 @@ async function tellWarehouse(service: Service, order: MarketplaceOrder): Promise
 
 const PICKING = 'Комплектується'
 
+/** «Свіже» — скільки днів назад ще варто чіпати */
+const recent = (days: number) =>
+  new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10)
+
 async function startPicking(service: Service, result: MarketplaceResult): Promise<void> {
   const { data } = await service
     .from('orders')
@@ -184,7 +188,16 @@ async function startPicking(service: Service, result: MarketplaceResult): Promis
     .in('platform', ['maudau', 'rozetka'])
     .not('bitrix_deal_id', 'is', null)
     .neq('status', 'Скасовано')
-    .gte('order_date', new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10))
+    /*
+     * Лише свіже.
+     *
+     * Комплектація й повідомлення в чат стосуються замовлення, яке
+     * збирають зараз. Тижневої давнини замовлення вже поїхало, і
+     * переставляти йому стадію означає написати в стрічку угоди новину
+     * ні про що, а в чат складу — прохання набити накладну на те, що
+     * давно відвантажили.
+     */
+    .gte('order_date', recent(3))
     .limit(30)
 
   const orders = data ?? []
