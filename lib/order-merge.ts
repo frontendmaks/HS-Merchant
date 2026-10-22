@@ -43,6 +43,7 @@ interface Row {
   area: string | null
   customer_comment: string | null
   delivery_date: string | null
+  manual_number: number | null
   status: string | null
   moved_to_order_id: string | null
   total: number | null
@@ -60,7 +61,7 @@ export async function mergeOrders(
 
   const { data } = await service
     .from('orders')
-    .select('id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, warehouse_pinned, delivery_zone, area, customer_comment, delivery_date, status, moved_to_order_id, total')
+    .select('id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, warehouse_pinned, delivery_zone, area, customer_comment, delivery_date, manual_number, status, moved_to_order_id, total')
     .in('id', orderIds)
 
   const rows = (data ?? []) as unknown as Row[]
@@ -191,6 +192,22 @@ export async function mergeOrders(
    */
   const canceled = stageId('Скасовано')
   for (const row of rows) {
+    /*
+     * Ящик вихідного замовлення вільний.
+     *
+     * Передзамовлення здебільшого приходять без номера, але не завжди:
+     * якщо огляд устиг його видати, після об'єднання цей ящик нікуди не
+     * їде. Номер лишався зайнятим до кінця дня — і в журналі, і в аркуші
+     * складу, де навпроти нього стояло ім'я людини, якій уже везуть
+     * інше.
+     */
+    if (row.manual_number != null && row.delivery_date) {
+      const { releaseNumber } = await import('@/lib/manual-register')
+      await releaseNumber(service, {
+        number: Number(row.manual_number), date: row.delivery_date,
+      }).catch(() => null)
+    }
+
     if (row.bitrix_deal_id && canceled) {
       await bitrix('crm.deal.update', {
         id: row.bitrix_deal_id,
