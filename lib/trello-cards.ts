@@ -38,6 +38,12 @@ function dateFromDesc(desc: string): string | null {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : null
 }
 
+/** «Період доставки **17:00-20:00**» → «17:00-20:00» */
+function slotInDesc(desc: string): string | null {
+  const m = desc.match(/Період доставки\s*\*{0,2}\s*(\d{1,2}[:.]\d{2}\s*[-–—]\s*\d{1,2}[:.]\d{2})/u)
+  return m ? m[1] : null
+}
+
 /** Усі телефони, що трапляються в картці, у вигляді ключів */
 function phonesIn(text: string): string[] {
   const out = new Set<string>()
@@ -356,13 +362,35 @@ export async function enrichNewCards(
        * різні замовлення, картку можна дістати назад.
        */
       if (order.trello_card_id && order.trello_card_id !== card.id) {
-        await updateCard(card.id, { closed: true })
+        /*
+         * З двох карток лишаємо ту, що описує це замовлення.
+         *
+         * Перша-ліпша тут не годиться: після об'єднання на дошці висять
+         * картки всіх трьох періодів, і картка з «11:00-14:00» поверх
+         * замовлення на 17:00-20:00 відправляє кур'єра не в ту годину.
+         * Порівнюємо період у картці з періодом замовлення.
+         */
+        const kept = cards.find(c => c.id === order.trello_card_id)
+        const fits = (c: TrelloCard | undefined) =>
+          !!order.delivery_slot && !!c && slotKey(slotInDesc(c.desc) ?? '') === slotKey(order.delivery_slot)
+
+        const replace = fits(card) && !fits(kept)
+        const drop = replace ? kept : card
+
+        if (drop) await updateCard(drop.id, { closed: true })
+        if (replace) {
+          await service.from('orders')
+            .update({ trello_card_id: card.id }).eq('id', order.id)
+          order.trello_card_id = card.id
+        }
+
         result.problems.push({
-          card: card.name.slice(0, 60),
+          card: (drop ?? card).name.slice(0, 60),
           number: order.manual_number,
           issues: ['друга картка на те саме замовлення — заархівовано'],
         })
-        continue
+
+        if (!replace) continue
       }
 
       if (!order.trello_card_id) {
