@@ -209,13 +209,29 @@ export async function enrichNewCards(
      */
     const orders = orderIds?.length ? all.filter(o => orderIds.includes(o.id)) : all
 
-    // Ключ — телефон і день: одна людина за тиждень замовляє двічі, і без
-    // дня картка причепилась би до чужої доставки
-    const byPhoneDay = new Map<string, OrderRow>()
+    /*
+     * Ключ — телефон і день.
+     *
+     * Одна людина за тиждень замовляє двічі, і без дня картка
+     * причепилась би до чужої доставки. А коли на той самий день і той
+     * самий телефон замовлень два — ключ мовчки лишав останнє, і обидві
+     * картки діставали один номер: на складі два ящики під одним
+     * числом, а третього ящика немає зовсім.
+     *
+     * Такий день не вгадуємо. Картка лишається без номера, а про саму
+     * двозначність сказано вголос — її розводить людина.
+     */
+    const phoneDay = new Map<string, OrderRow[]>()
     for (const o of orders) {
       const key = phoneKey(o.customer_phone)
-      if (key && o.delivery_date) byPhoneDay.set(`${key}|${o.delivery_date}`, o)
+      if (key && o.delivery_date) {
+        const k = `${key}|${o.delivery_date}`
+        phoneDay.set(k, [...(phoneDay.get(k) ?? []), o])
+      }
     }
+    const byPhoneDay = new Map<string, OrderRow | 'ambiguous'>(
+      [...phoneDay].map(([k, found]) => [k, found.length === 1 ? found[0] : 'ambiguous']),
+    )
 
     /*
      * Запасний ключ — адреса.
@@ -256,9 +272,19 @@ export async function enrichNewCards(
       const date = dateFromDesc(card.desc)
       const phones = phonesIn(text)
 
-      const order = (date
+      const hit = date
         ? phones.map(p => byPhoneDay.get(`${p}|${date}`)).find(Boolean)
-        : undefined)
+        : undefined
+
+      if (hit === 'ambiguous') {
+        result.unmatched.push({
+          card: card.name.slice(0, 60),
+          why: 'на цей день за цим телефоном два замовлення — номер не вгадуємо',
+        })
+        continue
+      }
+
+      const order = hit
         ?? soleByAddress(addressKey(card.name + ' ' + card.desc), date)
 
       if (!order) {
@@ -559,11 +585,19 @@ export async function numberInPicking(
   const byCard = new Map(
     orders.filter(o => o.trello_card_id).map(o => [o.trello_card_id as string, o]),
   )
-  const byPhoneDay = new Map<string, typeof orders[number]>()
+  // Той самий захист, що й у дописуванні: двох замовлень одного клієнта
+  // за один день картка не розрізнить, і вгадувати тут нічого
+  const phoneDay = new Map<string, typeof orders>()
   for (const o of orders) {
     const key = phoneKey(o.customer_phone)
-    if (key && o.delivery_date) byPhoneDay.set(`${key}|${o.delivery_date}`, o)
+    if (key && o.delivery_date) {
+      const k = `${key}|${o.delivery_date}`
+      phoneDay.set(k, [...(phoneDay.get(k) ?? []), o])
+    }
   }
+  const byPhoneDay = new Map<string, typeof orders[number]>(
+    [...phoneDay].filter(([, f]) => f.length === 1).map(([k, f]) => [k, f[0]]),
+  )
 
   const board = await getSetting(service, 'trello_board')
   const lists = await boardLists(board)
