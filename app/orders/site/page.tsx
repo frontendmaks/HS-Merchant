@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { createServiceClient } from '@/lib/supabase/service'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
+import { dealUrl } from '@/lib/bitrix-portal'
 import { getCurrentRole } from '@/lib/getRole'
 import { isInProgress } from '@/lib/order-statuses'
 import { SITE_PLATFORMS, platformLabel } from '@/lib/order-source'
@@ -42,6 +43,7 @@ interface Row {
   delivery_zone: string | null; delivery_date: string | null; delivery_slot: string | null
   total: number | null; status: string | null; share_token: string | null
   auto_done_at: string | null; auto_problem: string | null; chat_sent_at: string | null
+  bitrix_deal_id: number | null; bitrix_error: string | null
   /** Оцінка клієнта, якщо він її лишив */
   review?: { rating: number; comment: string | null }[] | null
 }
@@ -158,7 +160,7 @@ export default async function SiteOrdersPage({
   const { data: zones } = await supabase.from('delivery_zones').select('warehouse')
   const warehouses = [...new Set((zones ?? []).map(z => z.warehouse as string))].sort()
 
-  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, review:order_reviews(rating, comment)'
+  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, bitrix_deal_id, bitrix_error, review:order_reviews(rating, comment)'
 
   /*
    * Через сторінки, а не через limit.
@@ -193,6 +195,7 @@ export default async function SiteOrdersPage({
     && (!slot || o.delivery_slot === slot)
     && (!src || o.platform === src)
     && (!needle || [o.customer_name, o.customer_phone, o.address, o.external_id,
+      o.bitrix_deal_id != null ? String(o.bitrix_deal_id) : null,
       o.manual_number != null ? `№${o.manual_number}` : null]
       .some(v => (v ?? '').toLowerCase().includes(needle))))
 
@@ -369,6 +372,28 @@ export default async function SiteOrdersPage({
                     )}
                     {!o.auto_done_at && !o.auto_problem && (
                       <span className="block text-zinc-600 text-xs">не оглянуто</span>
+                    )}
+                    {/* Угода — там, де на неї дивляться. Без контакту вона
+                        зветься «Угода #200596», і в CRM її не знайти ні за
+                        прізвищем, ні за телефоном; посилання знімає пошук */}
+                    {o.bitrix_deal_id ? (
+                      <a
+                        href={dealUrl(o.bitrix_deal_id) ?? '#'}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
+                        title="Відкрити угоду в Бітріксі"
+                      >
+                        угода #{o.bitrix_deal_id} ↗
+                      </a>
+                    ) : (
+                      <span className="block text-amber-500 text-xs"
+                        title="Замовлення живе лише в Мерчанті — у CRM його немає">
+                        ⚠ немає угоди в Бітріксі
+                      </span>
+                    )}
+                    {o.bitrix_error && (
+                      <span className="block text-red-400 text-xs">⚠ {o.bitrix_error}</span>
                     )}
                     {/* Оцінка клієнта — поруч із номером, бо саме за номером
                         про замовлення й згадують */}
