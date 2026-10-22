@@ -67,6 +67,10 @@
     {
       "path": "/api/cron/bitrix-check",
       "schedule": "17 * * * *"
+    },
+    {
+      "path": "/api/cron/bitrix-catalog",
+      "schedule": "40 2 * * *"
     }
   ]
 }

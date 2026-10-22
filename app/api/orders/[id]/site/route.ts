@@ -60,6 +60,8 @@ export async function PATCH(
     delivery_date?: string | null
     delivery_slot?: string | null
     lines?: ManualLine[]
+    /** false — оператор прибрав рядок доставки свідомо */
+    delivery_fee?: boolean
   } | null
 
   const service = createServiceClient()
@@ -159,8 +161,13 @@ export async function PATCH(
      * окремо), дописати його назад означає сперечатися з людиною, яка
      * щойно говорила з покупцем: рядок зникав з екрана й повертався
      * після збереження, і виглядало це як поламане видалення.
+     *
+     * Про це каже саме форма, а не наявність рядка у списку: вона шле
+     * самі товари, і доставку серед них не видно ні тоді, коли її
+     * прибрали, ні тоді, коли її просто не передають.
      */
-    const lines = body.lines.some(isDeliveryLine) ? withDelivery(goods) : goods
+    const keepFee = body.delivery_fee !== false || body.lines.some(isDeliveryLine)
+    const lines = keepFee ? withDelivery(goods) : goods
     patch.total = orderTotal(lines)
     patch.weight = manualWeight(goods)
     patch.items = lines

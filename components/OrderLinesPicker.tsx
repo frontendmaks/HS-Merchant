@@ -14,6 +14,9 @@ export interface Product {
   id: string; name: string; sku: string | null; code_1c: string | null
   price: number; unit: string; pack: number | null
   stock: number | null; status: string; category: string | null
+  /** «bitrix» — товар є лише в CRM: ціни немає, її називає оператор */
+  source?: 'site' | 'bitrix'
+  bitrix_product_id?: number
 }
 
 export interface Line {
@@ -246,7 +249,15 @@ export function ProductPicker({ lines, onChange, total }: {
     setAdded(key)
     onChange([...lines, {
       key,
-      product_id: p.id,
+      /*
+       * Товар із Бітрікса нашого коду не має.
+       *
+       * Зате має свій номер у CRM — і саме він потрапить в угоду, а
+       * звідти в 1С. Без нього рядок лишився б назвою, яку на складі
+       * прочитають, а в обліку не впізнають.
+       */
+      product_id: p.source === 'bitrix' ? null : p.id,
+      bitrix_product_id: p.bitrix_product_id ?? null,
       title: p.name,
       unit: p.unit,
       unit_weight: pack,
@@ -263,6 +274,24 @@ export function ProductPicker({ lines, onChange, total }: {
 
   const patch = (key: string, next: Partial<Line>) =>
     onChange(lines.map(l => (l.key === key ? { ...l, ...next } : l)))
+
+  /** Порожній рядок, у якому все вписує людина */
+  function addBlank() {
+    const key = `manual-${Date.now()}`
+    setAdded(key)
+    onChange([...lines, {
+      key,
+      product_id: null,
+      bitrix_product_id: null,
+      title: '',
+      unit: 'кг',
+      unit_weight: 0,
+      price_per_unit: 0,
+      qty: 1,
+      order_unit: null,
+      pieces: null,
+    }])
+  }
 
   return (
     <div className="bg-zinc-800/30 border border-zinc-800 rounded-xl p-3 flex flex-col gap-3
@@ -288,11 +317,15 @@ export function ProductPicker({ lines, onChange, total }: {
                 <div className="flex items-start gap-2">
                   <span className="text-white text-sm min-w-0 flex-1">{p.name}</span>
                   <span className="text-zinc-300 text-xs whitespace-nowrap">
-                    {p.price} ₴/{p.unit}
+                    {p.source === 'bitrix'
+                      ? <span className="text-amber-500">ціну вкажіть · {p.unit}</span>
+                      : `${p.price} ₴/${p.unit}`}
                   </span>
                 </div>
                 <div className="text-zinc-500 text-xs mt-0.5">
-                  {p.sku ?? '—'}
+                  {p.source === 'bitrix'
+                    ? <span className="text-zinc-400">лише в Бітріксі — на сайті не продається</span>
+                    : (p.sku ?? '—')}
                   {p.pack ? ` · фасування ${p.pack} ${p.unit}` : ''}
                   {p.status !== 'active' && (
                     <span className="text-amber-500"> · знято з продажу</span>
@@ -305,7 +338,19 @@ export function ProductPicker({ lines, onChange, total }: {
         )}
       </div>
 
-      <div className="text-zinc-400 text-xs">Замовлення</div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-zinc-400 text-xs">Замовлення</span>
+        {/* Буває, що товару немає ніде — ні на сайті, ні в CRM: щойно
+            розібрана туша, домовленість на вагу, разова позиція. Вписати
+            її руками має бути можна, інакше замовлення складають у
+            коментарі, а склад збирає з коментаря */}
+        <button
+          onClick={addBlank}
+          className="text-zinc-500 hover:text-white text-xs transition-colors"
+        >
+          + Вписати вручну
+        </button>
+      </div>
 
       <div className="flex-1 overflow-y-auto space-y-1.5 min-h-[120px]">
         {lines.length === 0 && (
@@ -318,7 +363,20 @@ export function ProductPicker({ lines, onChange, total }: {
             <div className="flex items-start gap-2">
               <span className="text-zinc-600 text-xs w-4 shrink-0 pt-0.5">{i + 1}</span>
               <div className="min-w-0 flex-1">
-                <div className="text-white text-xs leading-snug">{l.title}</div>
+                {l.product_id || l.bitrix_product_id ? (
+                  <div className="text-white text-xs leading-snug">{l.title}</div>
+                ) : (
+                  /* Ручний рядок: назву читає комірник, тож вона має бути
+                     такою, як її написала людина, а не підставленою */
+                  <input
+                    value={l.title}
+                    onChange={e => patch(l.key, { title: e.target.value })}
+                    placeholder="Назва позиції"
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1
+                               text-white text-xs placeholder-zinc-600
+                               focus:outline-none focus:border-red-500"
+                  />
+                )}
                 <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                   {byPieces(l) ? (
                     <>
@@ -354,16 +412,46 @@ export function ProductPicker({ lines, onChange, total }: {
                       />
                       {weighted(l)
                         ? <UnitToggle line={l} onPick={u => patch(l.key, toggleUnit(l, u))} />
-                        : <span className="text-zinc-500 text-xs w-7">{l.unit}</span>}
+                        : l.product_id
+                          ? <span className="text-zinc-500 text-xs w-7">{l.unit}</span>
+                          : (
+                            /* Товар не з нашого каталогу — одиницю називає
+                               людина: «голови курячі» беруть кілограмами,
+                               а разову позицію можуть і штуками */
+                            <select
+                              value={l.unit}
+                              onChange={e => patch(l.key, { unit: e.target.value })}
+                              className="bg-zinc-900 border border-zinc-700 rounded px-1 py-1
+                                         text-zinc-300 text-xs focus:outline-none
+                                         focus:border-red-500"
+                            >
+                              <option value="кг">кг</option>
+                              <option value="шт">шт</option>
+                            </select>
+                          )}
                     </>
                   )}
                   <span className="text-zinc-600 text-xs">×</span>
-                  {/* Ціна — з каталогу й не редагується: замовлення не місце
-                      для торгу, а розбіжність із сайтом потім нікому не
-                      пояснити */}
-                  <span className="text-zinc-300 text-xs tabular-nums">
-                    {l.price_per_unit} ₴
-                  </span>
+                  {/* Ціна товару з каталогу не редагується: замовлення не
+                      місце для торгу, а розбіжність із сайтом потім нікому
+                      не пояснити. Але там, де каталог її не дав — товар
+                      лише в CRM або вписаний руками, — назвати її може
+                      тільки людина. */}
+                  {l.product_id ? (
+                    <span className="text-zinc-300 text-xs tabular-nums">
+                      {l.price_per_unit} ₴
+                    </span>
+                  ) : (
+                    <>
+                      <NumField
+                        value={l.price_per_unit}
+                        onChange={v => patch(l.key, { price_per_unit: v })}
+                        className="w-16 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
+                                   text-white text-xs focus:outline-none focus:border-red-500"
+                      />
+                      <span className="text-zinc-500 text-xs">₴</span>
+                    </>
+                  )}
                   <span className="text-white text-xs ml-auto tabular-nums">
                     {money(l.qty * l.price_per_unit)}
                   </span>

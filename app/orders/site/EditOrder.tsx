@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Overlay, { ProductPicker, field, money, type Line } from '@/components/OrderLinesPicker'
-import { deliveryFeeFor } from '@/lib/delivery-fee'
+import { deliveryFeeFor, DELIVERY_TITLE } from '@/lib/delivery-fee'
 import { SLOTS } from '@/lib/delivery-slots'
 
 /**
@@ -25,6 +25,8 @@ export default function EditOrder({ id, warehouses, onClose }: {
   const [slot, setSlot] = useState('')
   const [zone, setZone] = useState<string | null>(null)
   const [title, setTitle] = useState('')
+  /** Чи був рядок доставки в замовленні, коли ми його відкрили */
+  const [hadDelivery, setHadDelivery] = useState(false)
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -49,6 +51,7 @@ export default function EditOrder({ id, warehouses, onClose }: {
         ordered_pieces: number | null; order_unit: 'кг' | 'шт' | null
         product_id: string | null; bitrix_product_id: number | null
       }
+      setHadDelivery((d.items as Item[]).some(i => i.title === DELIVERY_TITLE))
       setLines((d.items as Item[]).map(i => ({
         key: i.id,
         product_id: i.product_id,
@@ -67,9 +70,19 @@ export default function EditOrder({ id, warehouses, onClose }: {
 
   // Доставка перераховується на льоту: оператор міняє склад замовлення й має
   // бачити, що саме скаже клієнту
-  const goods = lines.filter(l => l.title !== 'Доставка замовлення')
+  const goods = lines.filter(l => l.title !== DELIVERY_TITLE)
   const goodsSum = goods.reduce((s, l) => s + l.qty * l.price_per_unit, 0)
-  const delivery = goods.length ? deliveryFeeFor(goods) : 0
+
+  /*
+   * Прибрану доставку не повертаємо.
+   *
+   * Поріг суми рахується сам, і це правильно, поки оператор рядка не
+   * чіпав. Але він міг прибрати його свідомо — Новою поштою, самовивіз,
+   * домовились окремо. Тоді рядок має лишитись прибраним: інакше він
+   * зникає з екрана й повертається після збереження.
+   */
+  const dropped = hadDelivery && !lines.some(l => l.title === DELIVERY_TITLE)
+  const delivery = dropped || !goods.length ? 0 : deliveryFeeFor(goods)
   const total = goodsSum + delivery
 
   async function save() {
@@ -83,6 +96,7 @@ export default function EditOrder({ id, warehouses, onClose }: {
           address, warehouse: warehouse || null,
           delivery_date: date || null, delivery_slot: slot || null,
           lines: goods.map(({ key, ...l }) => l),   // eslint-disable-line @typescript-eslint/no-unused-vars
+          delivery_fee: !dropped,
         }),
       })
       const d = await r.json()
@@ -180,7 +194,9 @@ export default function EditOrder({ id, warehouses, onClose }: {
             <span className="text-zinc-500"> (товари {money(goodsSum)} + доставка {money(delivery)})</span>
           )}
           {goods.length > 0 && delivery === 0 && (
-            <span className="text-emerald-500"> · доставка безкоштовна</span>
+            <span className="text-emerald-500">
+              {dropped ? ' · доставку прибрано' : ' · доставка безкоштовна'}
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2">

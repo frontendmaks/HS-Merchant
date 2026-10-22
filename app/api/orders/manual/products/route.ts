@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor } from '@/lib/order-events'
+import { measureUnit } from '@/lib/bitrix-catalog'
 
 /**
  * GET /api/orders/manual/products
@@ -28,6 +29,10 @@ export interface CatalogueItem {
   stock: number | null
   status: string
   category: string | null
+  /** Звідки товар: із нашого каталогу чи лише з Бітрікса */
+  source?: 'site' | 'bitrix'
+  /** Номер товару в Бітріксі — щоб угода отримала саме його, а не назву */
+  bitrix_product_id?: number
 }
 
 /** Каталог змінюється раз на синхронізацію, не раз на натискання клавіші. */
@@ -43,6 +48,23 @@ async function catalogue(): Promise<CatalogueItem[]> {
     .select('id, name, sku, code_1c, price, stock, unit, status, category_name, attributes')
     // Активні першими: по телефону здебільшого замовляють те, що є
     .order('status')
+    .order('name')
+
+  /*
+   * Те, чого на сайті немає.
+   *
+   * Наш каталог приходить із сайту, тож у ньому лише викладене. А питають
+   * і про інше — голови курячі, субпродукти, рештки розбирання. У Бітріксі
+   * вони є, з власним номером і кодом 1С, і саме цей номер має потрапити в
+   * угоду: назва, вписана з голови, для 1С нічого не означає.
+   *
+   * Ціни там немає — її називає оператор, бо такий товар і продається за
+   * домовленістю.
+   */
+  const { data: fromBitrix } = await service
+    .from('bitrix_products')
+    .select('product_id, uid_1c, name, measure')
+    .eq('active', true)
     .order('name')
 
   const items = (data ?? []).map(p => {
@@ -71,8 +93,31 @@ async function catalogue(): Promise<CatalogueItem[]> {
     }
   })
 
-  cache = { at: Date.now(), items }
-  return items
+  // Наш каталог головніший: якщо товар є на сайті, він має прийти з ціною,
+  // фасуванням і залишком, а не голою назвою з CRM
+  const known = new Set(items.map(i => i.code_1c).filter(Boolean))
+
+  const extra: CatalogueItem[] = (fromBitrix ?? [])
+    .filter(b => !known.has(b.uid_1c as string))
+    .map(b => ({
+      id: `bx-${b.product_id}`,
+      name: b.name as string,
+      sku: null,
+      code_1c: b.uid_1c as string,
+      price: 0,
+      unit: measureUnit(b.measure as string | null),
+      pack: null,
+      stock: null,
+      status: 'bitrix',
+      category: null,
+      source: 'bitrix' as const,
+      bitrix_product_id: Number(b.product_id),
+    }))
+
+  const all = [...items.map(i => ({ ...i, source: 'site' as const })), ...extra]
+
+  cache = { at: Date.now(), items: all }
+  return all
 }
 
 export async function GET() {
