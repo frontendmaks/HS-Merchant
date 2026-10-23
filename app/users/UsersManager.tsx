@@ -376,13 +376,13 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
                         <div className="flex items-center gap-2 justify-end">
                           <button
                             onClick={() => handleToggleActive(user.id, !user.is_active)}
-                            className="text-xs text-zinc-400 hover:text-white px-2 py-1 rounded hover:bg-zinc-800 transition-colors"
+                            className="text-xs text-zinc-400 hover:text-white px-2 h-11 lg:h-auto lg:py-1 rounded hover:bg-zinc-800 transition-colors"
                           >
                             {user.is_active ? 'Деактивувати' : 'Активувати'}
                           </button>
                           <button
                             onClick={() => handleDelete(user.id, user.email)}
-                            className="text-xs text-red-500 hover:text-red-400 px-2 py-1 rounded hover:bg-zinc-800 transition-colors"
+                            className="text-xs text-red-500 hover:text-red-400 px-2 h-11 lg:h-auto lg:py-1 rounded hover:bg-zinc-800 transition-colors"
                           >
                             Видалити
                           </button>
