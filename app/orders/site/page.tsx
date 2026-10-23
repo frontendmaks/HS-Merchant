@@ -475,7 +475,7 @@ export default async function SiteOrdersPage({
                   самого екрана, на якому дивляться замовлення */}
               {o.customer_phone && (
                 <a href={`tel:${o.customer_phone.replace(/[^\d+]/g, '')}`}
-                  className="text-red-400 text-sm inline-block">
+                  className="text-red-400 text-sm inline-flex items-center h-11">
                   {o.customer_phone}
                 </a>
               )}
@@ -499,6 +499,19 @@ export default async function SiteOrdersPage({
                 {o.chat_sent_at && <span className="text-emerald-600">бланк у чаті</span>}
               </div>
 
+              {/*
+                * Дії — у два рядки, і кожна по сорок чотири пікселі.
+                *
+                * В один рядок вони не вміщаються: на 375 пікселях селект
+                * статусу стискався до двадцяти восьми, і вибрати в ньому
+                * щось пальцем було неможливо. Тепер статус і бланк —
+                * зверху, решта дій — під ними на всю ширину.
+                *
+                * Висота задається самим кнопкам, а не обгортці. Обгортка
+                * на сорок чотири пікселі нічого не дає: натискають
+                * кнопку, а вона всередині лишалась шістнадцять
+                * пікселів заввишки — смужка, у яку з ходу не влучиш.
+                */}
               <div className="flex items-center gap-2 pt-1">
                 <div className="flex-1 min-w-0 [&_select]:w-full [&_select]:h-11 [&_select]:text-sm">
                   <StatusSelect
@@ -509,11 +522,6 @@ export default async function SiteOrdersPage({
                     disabled={readOnly}
                   />
                 </div>
-                {/* Дії в картці — по сорок чотири пікселі: у них цілять
-                    пальцем, часто однією рукою й на ходу */}
-                <div className="flex items-center h-11 px-2 rounded-lg bg-zinc-800/60">
-                  <EditButton id={o.id} warehouses={warehouses} recheck={!!o.auto_problem} />
-                </div>
                 {o.share_token && (
                   <a href={`/zamovlennya/${o.share_token}`} target="_blank" rel="noreferrer"
                     className="flex items-center h-11 px-3 rounded-lg bg-zinc-800/60
@@ -521,6 +529,11 @@ export default async function SiteOrdersPage({
                     Бланк ↗
                   </a>
                 )}
+              </div>
+              <div className="flex items-center gap-2
+                              [&_button]:h-11 [&_button]:px-3 [&_button]:rounded-lg
+                              [&_button]:bg-zinc-800/60 [&_button]:text-sm">
+                <EditButton id={o.id} warehouses={warehouses} recheck={!!o.auto_problem} />
               </div>
             </div>
           ))}
