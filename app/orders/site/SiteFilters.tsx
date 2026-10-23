@@ -72,7 +72,14 @@ export default function SiteFilters({
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' })
 
   const narrowed = !!(picked.wh || picked.slot || picked.src || picked.q)
-  const field = 'bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-red-500'
+  /*
+   * Висота сорок чотири — тільки на телефоні.
+   *
+   * Пальцем цілять у смужку заввишки тридцять сім пікселів і
+   * промахуються; мишею — ні, і на широкому екрані висока смужка
+   * фільтрів лише забирає місце в списку. Тому `lg:h-auto`.
+   */
+  const field = 'bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-white text-xs h-11 lg:h-auto focus:outline-none focus:border-red-500'
 
   return (
     <div className={`flex flex-wrap items-center gap-2 relative transition-opacity ${
@@ -90,7 +97,8 @@ export default function SiteFilters({
       <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1">
         {([['', 'День'], ['month', 'Місяць']] as const).map(([value, label]) => (
           <button key={label} onClick={() => go({ period: value })}
-            className={`px-3 py-1.5 rounded-lg text-xs transition-colors whitespace-nowrap ${
+            className={`px-3 h-11 lg:h-auto lg:py-1.5 rounded-lg text-xs transition-colors
+                        whitespace-nowrap ${
               (value === 'month') === monthly ? 'bg-zinc-700 text-white'
                 : 'text-zinc-400 hover:text-white'
             }`}>
@@ -101,18 +109,21 @@ export default function SiteFilters({
 
       <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1">
         <button onClick={() => shift(-1)}
-          className="px-2 py-1 text-zinc-400 hover:text-white text-sm transition-colors">‹</button>
+          className="w-11 h-11 lg:w-auto lg:h-auto lg:px-2 lg:py-1 text-zinc-400 hover:text-white
+                     text-sm transition-colors">‹</button>
         <input
           type="date" value={date}
           onChange={e => go({ date: e.target.value })}
-          className="bg-transparent text-white text-xs px-1 focus:outline-none"
+          className="bg-transparent text-white text-xs px-1 h-11 lg:h-auto focus:outline-none"
         />
         <button onClick={() => shift(1)}
-          className="px-2 py-1 text-zinc-400 hover:text-white text-sm transition-colors">›</button>
+          className="w-11 h-11 lg:w-auto lg:h-auto lg:px-2 lg:py-1 text-zinc-400 hover:text-white
+                     text-sm transition-colors">›</button>
         {monthly && <span className="px-1.5 text-zinc-500 text-xs">{monthLabel}</span>}
         {date !== today && (
           <button onClick={() => go({ date: today })}
-            className="px-2 py-1 text-zinc-400 hover:text-white text-xs transition-colors">
+            className="px-2 h-11 lg:h-auto lg:py-1 text-zinc-400 hover:text-white text-xs
+                       transition-colors">
             сьогодні
           </button>
         )}
@@ -131,8 +142,8 @@ export default function SiteFilters({
 
           return (
             <button key={t.key} onClick={() => go({ stage: t.key })}
-              className={`px-3 py-1.5 rounded-lg text-xs transition-colors whitespace-nowrap
-                          flex items-center gap-1.5 ${
+              className={`px-3 h-11 lg:h-auto lg:py-1.5 rounded-lg text-xs transition-colors
+                          whitespace-nowrap flex items-center gap-1.5 ${
                 stage === t.key ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white'
               }`}>
               <span>{t.label}</span>
@@ -195,7 +206,7 @@ export default function SiteFilters({
         {narrowed && (
           <button
             onClick={() => go({ wh: '', slot: '', src: '', q: '' })}
-            className="px-2.5 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-400
+            className="px-2.5 h-11 lg:h-auto lg:py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-400
                        hover:text-white transition-colors"
           >
             Скинути · з {total}
