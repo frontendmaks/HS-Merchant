@@ -139,7 +139,10 @@ export default function EditOrder({ id, warehouses, onClose }: {
           <h2 className="text-white font-semibold truncate">Правка замовлення</h2>
           <div className="text-zinc-500 text-xs truncate">{title}</div>
         </div>
-        <button onClick={onClose} className="text-zinc-500 hover:text-white text-xl px-1">×</button>
+        {/* Закриття — сорок чотири пікселі: у хрестик цілять пальцем */}
+        <button onClick={onClose}
+          className="text-zinc-500 hover:text-white text-xl w-11 h-11 lg:w-auto lg:h-auto
+                     lg:px-1 shrink-0">×</button>
       </div>
 
       {loading ? (

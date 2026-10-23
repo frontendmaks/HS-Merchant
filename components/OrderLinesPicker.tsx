@@ -41,9 +41,17 @@ export const field = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 
 
 export default function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-start justify-center p-4 overflow-y-auto"
+    /*
+     * Поля довкола вікна — вужчі на телефоні.
+     *
+     * Чотири пікселі з кожного боку плюс тридцять два згори на екрані
+     * 375 з'їдали майже десяту частину ширини, якої й так бракує, і
+     * відсували вікно так, що заголовок опинявся за межею екрана.
+     */
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-start justify-center
+                    p-2 sm:p-4 overflow-y-auto"
       onClick={onClose}>
-      <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-5xl my-8"
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-5xl my-3 sm:my-8"
         onClick={e => e.stopPropagation()}>
         {children}
       </div>
