@@ -23,6 +23,9 @@ type Service = ReturnType<typeof createServiceClient>
 
 const MARK = '— — — Мерчант — — —'
 
+/** Усе, що потрібно, аби зіставити картку із замовленням і дописати її */
+const COLUMNS = 'id, platform, manual_number, delivery_date, delivery_slot, address, customer_name, customer_phone, warehouse, share_token, status, trello_card_id'
+
 export interface CardResult {
   looked: number
   numbered: number
@@ -202,7 +205,6 @@ export async function enrichNewCards(
     const day = (shift: number) =>
       new Date(Date.now() + shift * 86_400_000).toISOString().slice(0, 10)
 
-    const COLUMNS = 'id, platform, manual_number, delivery_date, delivery_slot, address, customer_name, customer_phone, warehouse, share_token, status, trello_card_id'
 
     /*
      * Маркетплейсні замовлення теж потрапляють у цей список.
@@ -720,24 +722,22 @@ export async function spreadToPicking(
 export async function numberInPicking(
   service: Service,
   { limit = 40 }: { limit?: number } = {},
-): Promise<{ numbered: number }> {
-  if (!trelloConfigured()) return { numbered: 0 }
+): Promise<{ numbered: number; relisted: number; problems: string[] }> {
+  const result = { numbered: 0, relisted: 0, problems: [] as string[] }
+  if (!trelloConfigured()) return result
 
   const day = (shift: number) =>
     new Date(Date.now() + shift * 86_400_000).toISOString().slice(0, 10)
 
   const { data } = await service
     .from('orders')
-    .select('id, manual_number, customer_phone, delivery_date, trello_card_id')
+    .select(COLUMNS)
     .in('platform', ['site', 'manual'])
     .not('manual_number', 'is', null)
     .gte('delivery_date', day(-3)).lte('delivery_date', day(4))
 
-  const orders = (data ?? []) as {
-    id: string; manual_number: number; customer_phone: string | null
-    delivery_date: string | null; trello_card_id: string | null
-  }[]
-  if (!orders.length) return { numbered: 0 }
+  const orders = (data ?? []) as unknown as OrderRow[]
+  if (!orders.length) return result
 
   const byCard = new Map(
     orders.filter(o => o.trello_card_id).map(o => [o.trello_card_id as string, o]),
@@ -759,7 +759,16 @@ export async function numberInPicking(
   const board = await getSetting(service, 'trello_board')
   const lists = await boardLists(board)
 
-  let numbered = 0
+  /*
+   * Куди кожне замовлення належить зараз.
+   *
+   * Склад у замовленні міняється й після того, як картка поїхала: адресу
+   * виправили, геокодер нарешті впізнав вулицю, оператор обрав склад
+   * руками. Картка при цьому лишалась у старій колонці — і ящик збирали
+   * там, звідки його вже не везуть.
+   */
+  const destinations = await pickingLists(board)
+  const listName = new Map(lists.map(l => [l.id, l.name]))
   /*
    * Дивимось не лише в списки комплектації.
    *
@@ -777,7 +786,7 @@ export async function numberInPicking(
     if (SKIP.test(list.name)) continue
 
     for (const card of await listCards(list.id)) {
-      if (numbered >= limit) return { numbered }
+      if (result.numbered + result.relisted >= limit) return result
 
       const text = `${card.name}
 ${card.desc}`
@@ -797,24 +806,104 @@ ${card.desc}`
        * чіпаємо», така картка лишалась із хибним числом до кінця дня, і
        * комірник шукав ящик, якого немає.
        */
-      const want = `№${order.manual_number}`
-      const has = card.name.match(NUMBER_AT_START)?.[0]?.replace(/\s+/g, '')
-      if (has === want) continue
-
-      await updateCard(card.id, {
-        name: (has
-          ? card.name.replace(NUMBER_AT_START, want)
-          : `${want} ${card.name}`).slice(0, 16_384),
-      })
       if (!order.trello_card_id) {
         await service.from('orders')
           .update({ trello_card_id: card.id }).eq('id', order.id)
       }
-      numbered++
+
+      const want = `№${order.manual_number}`
+      const has = card.name.match(NUMBER_AT_START)?.[0]?.replace(/\s+/g, '')
+
+      const fields: { name?: string; desc?: string } = {}
+
+      if (has !== want) {
+        fields.name = (has
+          ? card.name.replace(NUMBER_AT_START, want)
+          : `${want} ${card.name}`).slice(0, 16_384)
+      }
+
+      /*
+       * Наш блок в описі теж має казати правду.
+       *
+       * Там стоїть склад — і коли він змінився, картка переїжджає в іншу
+       * колонку, а в описі лишається стара назва. Комірник читає опис,
+       * а не те, у якій колонці картка лежить.
+       */
+      const desc = `${stripOurs(card.desc)}\n\n${ourBlock(order, issuesOf(card, order))}`
+      if (desc.trim() !== card.desc.trim()) fields.desc = desc
+
+      if (Object.keys(fields).length) {
+        await updateCard(card.id, fields)
+        if (fields.name) result.numbered++
+      }
+
+      /*
+       * Склад у картці має бути той, що в замовленні.
+       *
+       * Поки картка стоїть у комплектації, її ніхто більше не чіпає — а
+       * склад тим часом змінюється: виправили адресу, геокодер упізнав
+       * вулицю, оператор обрав інший руками. Ящик тоді збирають там,
+       * звідки його вже не везуть, і дізнаються про це ввечері.
+       */
+      const moved = await relist(service, card, order, destinations, listName)
+      if (moved === 'moved') result.relisted++
+      else if (moved) result.problems.push(`${want}: ${moved}`)
     }
   }
 
-  return { numbered }
+  return result
+}
+
+/**
+ * Переставляє картку в колонку свого складу й під свій період.
+ *
+ * Повертає «moved», якщо переставили; текст — якщо не змогли; null, якщо
+ * вона й так стоїть правильно.
+ */
+async function relist(
+  service: Service,
+  card: TrelloCard,
+  order: {
+    id: string; warehouse: string | null; delivery_slot: string | null
+    status: string | null
+  },
+  destinations: Map<string, Destination>,
+  listName: Map<string, string>,
+): Promise<'moved' | string | null> {
+  if (!order.warehouse || !order.delivery_slot) return null
+
+  // Скасоване веде інший шлях — у «Не доставлено», і не звідси
+  if (order.status === 'Скасовано') return null
+
+  const key = stripNoise(order.warehouse)
+  const dest = destinations.get(ALIAS[key] ?? key)
+  if (!dest) return `на дошці немає списку для складу «${order.warehouse}»`
+
+  const separator = separatorFor(dest, order.delivery_slot)
+  if (!separator) return `у списку «${order.warehouse}» немає періоду ${order.delivery_slot}`
+
+  /*
+   * Картку, яку вже забрав кур'єр, назад не тягнемо.
+   *
+   * Його список — не склад, і переставити звідти означає забрати в нього
+   * з рук те, що він щойно взяв. Склад у замовленні при цьому поправили
+   * не дарма, тож кажемо про розбіжність уголос.
+   */
+  const where = listName.get(card.idList) ?? ''
+  const inPicking = /комплект/i.test(where)
+  if (!inPicking) {
+    return card.idList === dest.listId
+      ? null
+      : `картка вже в «${where}», а склад замовлення — «${order.warehouse}»`
+  }
+
+  if (card.idList === dest.listId) return null
+
+  const pos = positionUnder(dest, separator)
+  await updateCard(card.id, { idList: dest.listId, pos })
+  dest.cards.push({ ...card, idList: dest.listId, pos })
+
+  return 'moved'
 }
 
 /**

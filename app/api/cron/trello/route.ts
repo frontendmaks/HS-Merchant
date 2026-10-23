@@ -34,7 +34,13 @@ export async function GET(request: NextRequest) {
     || new Date().getUTCHours() === 4
   const cleaned = tidy ? await tidyFailed(service) : null
 
-  // Номер міг з'явитись уже після того, як картка поїхала на склад
+  /*
+   * Те, що змінилось уже після переїзду картки.
+   *
+   * Номер міг з'явитись пізніше, а склад — змінитись зовсім: виправили
+   * адресу, геокодер упізнав вулицю, оператор обрав інший руками. Картка
+   * при цьому стоїть там, куди її поклали вперше.
+   */
   const late = await numberInPicking(service)
 
   await logCronRun(service, 'trello-cards', startedAt,

@@ -584,6 +584,50 @@ export function inSettlement(display: string | null | undefined, place: string):
 }
 
 /**
+ * Слова, за якими впізнають вулицю.
+ *
+ * Тип («вулиця», «провулок»), місто й надто короткі слова нічого не
+ * розрізняють: за ними збігається будь-що. Лишаємо тільки назву — те, що
+ * справді відрізняє одну вулицю від іншої.
+ */
+const STREET_NOISE = new Set([
+  'вул', 'вулиця', 'просп', 'проспект', 'пров', 'провулок', 'площа', 'дорога',
+  'набережна', 'бульвар', 'буд', 'будинок', 'львів', 'львівська', 'область',
+  'район', 'громада', 'міська', 'сільська', 'селищна', 'україна',
+])
+
+function streetWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[’'ʼ`]/g, "'")
+    .split(/[^\p{L}]+/u)
+    .filter(w => w.length >= 4 && !STREET_NOISE.has(w))
+}
+
+/**
+ * Чи про ту саму вулицю питали й відповіли.
+ *
+ * Геокодер майже завжди щось знаходить — і коли написаної вулиці він не
+ * знає, віддає сусідню або схожу. Точка при цьому лягає в зону доставки,
+ * і склад виходить чужий, а сказати про це нікому.
+ *
+ * Звіряємо за початком слів, а не за цілими: «Стрийська» й «Стрийській» —
+ * та сама вулиця, а «Зелена» й «Зелінського» — різні.
+ */
+export function sameStreet(address: string, display: string | null | undefined): boolean {
+  if (!display) return false
+
+  const asked = streetWords(address)
+  // Нема за чим звіряти — не наша справа судити
+  if (!asked.length) return true
+
+  const found = streetWords(display)
+  const stem = (w: string) => w.slice(0, Math.min(5, w.length))
+
+  return asked.some(a => found.some(f => stem(a) === stem(f)))
+}
+
+/**
  * Версія логіки пошуку адреси.
  *
  * Піднімається щоразу, коли змінюється те, як складається запит до геокодера:
@@ -691,6 +735,14 @@ export async function geocode(
   return null
 }
 
+/** Назва вулиці з відповіді геокодера — для підпису, а не для порівняння */
+export function streetFromDisplay(display: string | null | undefined): string {
+  const parts = (display ?? '').split(',').map(p => p.trim()).filter(Boolean)
+  // Перша частина — номер будинку, друга зазвичай вулиця
+  const street = parts.find(p => /вулиц|проспект|провул|площа|дорога|набережна|бульвар/i.test(p))
+  return street ?? parts[1] ?? parts[0] ?? '—'
+}
+
 export interface AddressResolution {
   point: Geocoded | null
   zone: string | null
@@ -724,6 +776,16 @@ export async function resolveAddress(
     }
   }
 
+  /*
+   * Знайдена вулиця має бути тією, яку писали.
+   *
+   * Геокодер майже завжди щось знаходить, і коли написаної вулиці він не
+   * знає, віддає схожу. Точка лягає в зону доставки, склад виходить
+   * чужий — і нічого про це не сказано: замовлення виглядає оглянутим без
+   * жодної хиби. Тому звіряємо назву й кажемо, що саме знайшлось.
+   */
+  const wrongStreet = !point.vague && !sameStreet(tidyAddress(address), point.display_name)
+
   return {
     point,
     zone: hit.zone,
@@ -732,6 +794,8 @@ export async function resolveAddress(
       ? 'Адресу розпізнано лише до міста — вулиці геокодер не знає, перевірте склад'
       : point.approximate
         ? 'Зона визначена за вулицею, без номера будинку — перевірте склад'
-        : null,
+        : wrongStreet
+          ? `Знайдено іншу вулицю — «${streetFromDisplay(point.display_name)}», перевірте склад`
+          : null,
   }
 }
