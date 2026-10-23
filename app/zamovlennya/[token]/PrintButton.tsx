@@ -5,7 +5,8 @@ export default function PrintButton() {
   return (
     <button
       onClick={() => window.print()}
-      className="print:hidden mt-8 px-4 py-2 bg-black text-white text-sm rounded"
+      // Сорок чотири пікселі заввишки — щоб натискати пальцем, а не нігтем
+      className="print:hidden mt-8 px-5 min-h-[44px] bg-black text-white text-sm rounded"
     >
       Друк / зберегти PDF
     </button>

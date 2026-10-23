@@ -64,7 +64,11 @@ export default function ReviewForm({ token, rating: saved, comment: savedComment
             onMouseEnter={() => setHover(n)}
             onMouseLeave={() => setHover(0)}
             aria-label={`${n} з 5`}
-            className={`text-4xl leading-none transition-colors ${
+            /* Зірка — найменша ціль на цій сторінці й головна: у неї
+               цілять пальцем з телефона, часто на ходу. Тому сама зірка
+               лишається тією ж, а натискати можна по всьому квадрату */
+            className={`text-4xl leading-none transition-colors
+                        w-12 h-12 flex items-center justify-center ${
               n <= (hover || rating) ? 'text-amber-400' : 'text-zinc-700'
             }`}
           >
@@ -86,7 +90,7 @@ export default function ReviewForm({ token, rating: saved, comment: savedComment
         onClick={() => void send()}
         disabled={busy}
         className="w-full mt-3 bg-red-600 hover:bg-red-500 disabled:opacity-50
-                   text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
+                   text-white text-sm font-medium min-h-[44px] rounded-lg transition-colors"
       >
         {busy ? 'Надсилаю…' : 'Надіслати відгук'}
       </button>

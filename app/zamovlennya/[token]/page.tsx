@@ -44,6 +44,24 @@ const SHEET: React.CSSProperties = {
 
 const MUTED: React.CSSProperties = { color: '#52525b' }
 
+/*
+ * Номер має бути зручно натиснути пальцем.
+ *
+ * Сам рядок тексту заввишки вісімнадцять пікселів — це смужка, у яку
+ * великим пальцем не влучити з першого разу, а дзвонять із бланка
+ * стоячи біля ваг. Доважуємо його до сорока чотирьох — звичної міри
+ * дотику, — але тільки на екрані: на папері це просто текст.
+ */
+const SCREEN_CSS = `@media screen {
+  .tel-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 2px 0;
+    text-decoration: underline;
+  }
+}`
+
 const PRINT_CSS = `@media print {
   .sheet-surround { background: #fff !important; padding: 0 !important; min-height: 0 !important }
   .sheet { box-shadow: none !important; padding: 0 !important; max-width: none !important;
@@ -103,7 +121,8 @@ export default async function OrderSheet({
     <div style={SURROUND} className="sheet-surround">
       {/* Друк іде на папір: тло й тінь там зайві, а кольори класами задати
           не можна — тема їх перевизначає */}
-      <style>{PRINT_CSS}</style>
+      <style>{SCREEN_CSS}</style>
+        <style>{PRINT_CSS}</style>
       <div style={SHEET} className="sheet">
         <div style={{ borderBottom: THICK }} className="flex items-start justify-between gap-4 pb-3">
           <div>
@@ -140,6 +159,7 @@ export default async function OrderSheet({
                 {/* Дотик набирає номер: комірник і кур'єр дзвонять із того
                     самого екрана, на якому читають бланк */}
                 <a href={`tel:${(order.customer_phone ?? '').replace(/[^\d+]/g, '')}`}
+                  className="tel-link"
                   style={{ color: INK }}>
                   {order.customer_phone}
                 </a>

@@ -500,7 +500,7 @@ export default async function SiteOrdersPage({
               </div>
 
               <div className="flex items-center gap-2 pt-1">
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 [&_select]:w-full [&_select]:h-11 [&_select]:text-sm">
                   <StatusSelect
                     id={o.id}
                     platform={o.platform}
@@ -509,10 +509,15 @@ export default async function SiteOrdersPage({
                     disabled={readOnly}
                   />
                 </div>
-                <EditButton id={o.id} warehouses={warehouses} recheck={!!o.auto_problem} />
+                {/* Дії в картці — по сорок чотири пікселі: у них цілять
+                    пальцем, часто однією рукою й на ходу */}
+                <div className="flex items-center h-11 px-2 rounded-lg bg-zinc-800/60">
+                  <EditButton id={o.id} warehouses={warehouses} recheck={!!o.auto_problem} />
+                </div>
                 {o.share_token && (
                   <a href={`/zamovlennya/${o.share_token}`} target="_blank" rel="noreferrer"
-                    className="text-zinc-400 text-xs whitespace-nowrap">
+                    className="flex items-center h-11 px-3 rounded-lg bg-zinc-800/60
+                               text-zinc-300 text-xs whitespace-nowrap">
                     Бланк ↗
                   </a>
                 )}
