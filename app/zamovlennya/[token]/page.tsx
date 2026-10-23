@@ -65,7 +65,7 @@ export default async function OrderSheet({
     .from('orders')
     .select(`id, external_id, manual_number, market_number, platform, delivery_date, delivery_slot,
              warehouse, customer_name, customer_phone, address,
-             total, weight, operator_comment, status, created_at`)
+             total, weight, operator_comment, customer_comment, status, created_at`)
     .eq('share_token', token)
     .maybeSingle()
 
@@ -188,9 +188,24 @@ export default async function OrderSheet({
           </tfoot>
         </table>
 
+        {/*
+          * Коментар покупця — і для комірника, і для клієнта.
+          *
+          * Його пише сама людина, замовляючи: «подзвоніть перед
+          * приїздом», «без цибулі», «домофон не працює». Доти він жив
+          * лише в замовленні, а на бланк не потрапляв — і те, про що
+          * просили, читав хіба що оператор.
+          */}
+        {order.customer_comment && (
+          <div className="mt-5 rounded p-3 text-sm" style={{ border: `2px solid ${INK}` }}>
+            <div className="font-semibold mb-1">Коментар клієнта</div>
+            <div className="whitespace-pre-wrap">{order.customer_comment}</div>
+          </div>
+        )}
+
         {!forCustomer && order.operator_comment && (
-          <div className="mt-5 rounded p-3 text-sm" style={{ border: `1px solid ${GREY}` }}>
-            <div className="font-semibold mb-1">Коментар</div>
+          <div className="mt-3 rounded p-3 text-sm" style={{ border: `1px solid ${GREY}` }}>
+            <div className="font-semibold mb-1">Коментар оператора</div>
             <div className="whitespace-pre-wrap">{order.operator_comment}</div>
           </div>
         )}

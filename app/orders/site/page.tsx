@@ -44,6 +44,7 @@ interface Row {
   total: number | null; status: string | null; share_token: string | null
   auto_done_at: string | null; auto_problem: string | null; chat_sent_at: string | null
   bitrix_deal_id: number | null; bitrix_error: string | null
+  customer_comment: string | null
   /** Оцінка клієнта, якщо він її лишив */
   review?: { rating: number; comment: string | null }[] | null
 }
@@ -159,7 +160,7 @@ export default async function SiteOrdersPage({
 
   const supabase = createServiceClient()
 
-  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, bitrix_deal_id, bitrix_error, review:order_reviews(rating, comment)'
+  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, bitrix_deal_id, bitrix_error, customer_comment, review:order_reviews(rating, comment)'
 
   const pager = <T,>(q: unknown) => q as unknown as {
     range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
@@ -560,6 +561,16 @@ export default async function SiteOrdersPage({
                   <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{o.customer_phone || '—'}</td>
                   <td className="px-3 py-2 text-zinc-400 text-xs max-w-[18rem]">
                     {o.address || '—'}
+                    {/* Коментар покупця — поруч з адресою, бо найчастіше
+                        він саме про неї: домофон, під'їзд, «подзвоніть
+                        перед приїздом». Читати його треба до того, як
+                        замовлення поїде, а не після дзвінка клієнта */}
+                    {o.customer_comment && (
+                      <span className="block mt-1 text-amber-200 border-l-2 border-amber-600/60 pl-2
+                                       whitespace-pre-wrap break-words">
+                        {o.customer_comment}
+                      </span>
+                    )}
                     {o.auto_problem && (
                       <span className="block text-amber-500 mt-0.5">
                         ⚠ бракує: {o.auto_problem}
