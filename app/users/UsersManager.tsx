@@ -68,6 +68,15 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
   const [inviteRole, setInviteRole] = useState<string>('operator')
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteError, setInviteError] = useState('')
+  /*
+   * Відмова має бути видимою.
+   *
+   * Усі три дії — роль, активність, видалення — мовчки нічого не робили,
+   * якщо сервер відмовив: `if (res.ok)` і жодного «else». Натискаєш,
+   * нічого не змінюється, і здається, що кнопка не працює. Насправді база
+   * щоразу пояснювала причину — тільки нікому.
+   */
+  const [actionError, setActionError] = useState('')
   const [inviteSuccess, setInviteSuccess] = useState('')
 
   async function handleInvite(e: React.FormEvent) {
@@ -97,6 +106,7 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
   }
 
   async function handleRoleChange(id: string, role: string) {
+    setActionError('')
     const res = await fetch('/api/users', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -104,10 +114,14 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
     })
     if (res.ok) {
       setUsers(u => u.map(x => x.id === id ? { ...x, role: role as Profile['role'] } : x))
+      return
     }
+    const d = await res.json().catch(() => ({}))
+    setActionError(d.error ?? 'Не вдалося змінити роль')
   }
 
   async function handleToggleActive(id: string, is_active: boolean) {
+    setActionError('')
     const res = await fetch('/api/users', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -115,11 +129,20 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
     })
     if (res.ok) {
       setUsers(u => u.map(x => x.id === id ? { ...x, is_active } : x))
+      return
     }
+    const d = await res.json().catch(() => ({}))
+    setActionError(d.error ?? 'Не вдалося змінити стан')
   }
 
   async function handleDelete(id: string, email: string) {
-    if (!confirm(`Видалити користувача ${email}? Цю дію не можна відмінити.`)) return
+    if (!confirm(
+      `Видалити користувача ${email}?\n\n`
+      + 'Замовлення, графіки й записи журналу лишаться — зникне лише сам '
+      + 'акаунт і можливість увійти. Цю дію не можна відмінити.',
+    )) return
+
+    setActionError('')
     const res = await fetch('/api/users', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -127,11 +150,23 @@ export default function UsersManager({ users: initial, currentUserId, currentRol
     })
     if (res.ok) {
       setUsers(u => u.filter(x => x.id !== id))
+      return
     }
+    const d = await res.json().catch(() => ({}))
+    setActionError(d.error ?? 'Не вдалося видалити користувача')
   }
 
   return (
     <div className="space-y-5">
+      {actionError && (
+        <div className="bg-red-950/50 border border-red-800 rounded-lg px-3 py-2
+                        text-red-400 text-sm flex items-start justify-between gap-3">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError('')}
+            className="text-red-500 hover:text-red-300 shrink-0">✕</button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>

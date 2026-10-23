@@ -146,7 +146,24 @@ export async function DELETE(request: NextRequest) {
   }
 
   const { error } = await service.auth.admin.deleteUser(id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  /*
+   * Причину кажемо своїми словами.
+   *
+   * База відповідає англійським текстом про зовнішній ключ — для того,
+   * хто натиснув «Видалити», це не відповідь. Найчастіша причина одна:
+   * на людину десь посилаються, і посилання не дає її прибрати.
+   */
+  if (error) {
+    const detail = error.message
+    const fk = /foreign key|violates|constraint/i.test(detail)
+    return NextResponse.json({
+      error: fk
+        ? 'На цього користувача ще посилаються записи, які не можна лишити без нього. '
+          + 'Спробуйте деактивувати акаунт — вхід закриється, а історія лишиться.'
+        : detail,
+    }, { status: 500 })
+  }
 
   return NextResponse.json({ success: true })
 }
