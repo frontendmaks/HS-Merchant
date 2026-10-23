@@ -59,7 +59,7 @@ function LoginForm() {
               onChange={e => setEmail(e.target.value)}
               required
               placeholder="your@email.com"
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-red-500 transition-colors"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 h-11 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-red-500 transition-colors"
             />
           </div>
 
@@ -71,7 +71,7 @@ function LoginForm() {
               onChange={e => setPassword(e.target.value)}
               required
               placeholder="••••••••"
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-red-500 transition-colors"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 h-11 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-red-500 transition-colors"
             />
           </div>
 
@@ -84,7 +84,7 @@ function LoginForm() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg min-h-[44px] transition-colors"
+            className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg h-11 transition-colors"
           >
             {loading ? 'Вхід...' : 'Увійти'}
           </button>

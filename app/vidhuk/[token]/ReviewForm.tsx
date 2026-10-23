@@ -90,7 +90,7 @@ export default function ReviewForm({ token, rating: saved, comment: savedComment
         onClick={() => void send()}
         disabled={busy}
         className="w-full mt-3 bg-red-600 hover:bg-red-500 disabled:opacity-50
-                   text-white text-sm font-medium min-h-[44px] rounded-lg transition-colors"
+                   text-white text-sm font-medium h-11 rounded-lg transition-colors"
       >
         {busy ? 'Надсилаю…' : 'Надіслати відгук'}
       </button>
