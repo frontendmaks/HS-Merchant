@@ -37,7 +37,14 @@ export interface Line {
 }
 
 export const money = (n: number) => `${Math.round(n * 100) / 100} ₴`
-export const field = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-red-500'
+/*
+ * Спільне поле форми.
+ *
+ * Висота дотику задана мінімумом, а не фіксованим `h-11`: цей самий
+ * клас носять і текстові поля на кілька рядків, яким фіксована висота
+ * зрізала б текст. До `lg` мінімум сорок чотири, далі — як було.
+ */
+export const field = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 min-h-11 lg:min-h-0 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-red-500'
 
 export default function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
@@ -321,7 +328,8 @@ export function ProductPicker({ lines, onChange, total }: {
               <button
                 key={p.id}
                 onClick={() => add(p)}
-                className="w-full text-left px-3 py-2 hover:bg-zinc-700 transition-colors
+                className="w-full text-left px-3 py-2 min-h-11 lg:min-h-0
+                           hover:bg-zinc-700 transition-colors
                            border-b border-zinc-700/50 last:border-0"
               >
                 <div className="flex items-start gap-2">
@@ -391,7 +399,7 @@ export function ProductPicker({ lines, onChange, total }: {
                     value={l.title}
                     onChange={e => patch(l.key, { title: e.target.value })}
                     placeholder="Назва позиції"
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 min-h-11 lg:min-h-0
                                text-white text-xs placeholder-zinc-600
                                focus:outline-none focus:border-red-500"
                   />
@@ -407,7 +415,7 @@ export function ProductPicker({ lines, onChange, total }: {
                           // Вага йде за штуками, поки її не виправили руками
                           qty: Math.round(v * (l.unit_weight || 0) * 1000) / 1000,
                         })}
-                        className="w-16 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
+                        className="w-16 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 min-h-11 lg:min-h-0
                                    text-white text-xs focus:outline-none focus:border-red-500"
                       />
                       <UnitToggle line={l} onPick={u => patch(l.key, toggleUnit(l, u))} />
@@ -415,7 +423,7 @@ export function ProductPicker({ lines, onChange, total }: {
                       <NumField
                         value={l.qty}
                         onChange={v => patch(l.key, { qty: v })}
-                        className="w-16 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
+                        className="w-16 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 min-h-11 lg:min-h-0
                                    text-white text-xs focus:outline-none focus:border-red-500"
                       />
                       <span className="text-zinc-500 text-xs">кг</span>
@@ -426,7 +434,7 @@ export function ProductPicker({ lines, onChange, total }: {
                         value={l.qty}
                         autoFocus={l.key === added}
                         onChange={v => patch(l.key, { qty: v })}
-                        className="w-20 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
+                        className="w-20 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 min-h-11 lg:min-h-0
                                    text-white text-xs focus:outline-none focus:border-red-500"
                       />
                       {weighted(l)
@@ -465,7 +473,7 @@ export function ProductPicker({ lines, onChange, total }: {
                       <NumField
                         value={l.price_per_unit}
                         onChange={v => patch(l.key, { price_per_unit: v })}
-                        className="w-16 bg-zinc-900 border border-zinc-700 rounded px-2 py-1
+                        className="w-16 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 min-h-11 lg:min-h-0
                                    text-white text-xs focus:outline-none focus:border-red-500"
                       />
                       <span className="text-zinc-500 text-xs">₴</span>
@@ -478,7 +486,8 @@ export function ProductPicker({ lines, onChange, total }: {
               </div>
               <button
                 onClick={() => onChange(lines.filter(x => x.key !== l.key))}
-                className="text-zinc-600 hover:text-red-400 text-xs shrink-0 transition-colors"
+                className="text-zinc-600 hover:text-red-400 text-xs shrink-0 transition-colors
+                           w-11 h-11 lg:w-auto lg:h-auto"
                 title="Прибрати"
               >
                 ✕

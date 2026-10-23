@@ -209,7 +209,8 @@ export default function EditOrder({ id, warehouses, onClose }: {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={onClose} className="text-zinc-400 hover:text-white text-sm px-3 py-2">
+          <button onClick={onClose}
+            className="text-zinc-400 hover:text-white text-sm px-3 h-11 lg:h-auto lg:py-2">
             Скасувати
           </button>
           <button
