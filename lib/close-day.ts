@@ -34,7 +34,23 @@ export interface CloseResult {
 
 export async function closeDay(
   service: Service,
-  { date, limit = 200 }: { date: string; limit?: number },
+  { date, limit = 200, includeDay = true }: {
+    date: string
+    limit?: number
+    /**
+     * Чи закривати сам цей день.
+     *
+     * Опівночі — так: день скінчився. Серед дня — ні, хоч би хто й як
+     * покликав: склад саме збирає ці замовлення, і «Виконано» на них
+     * означає, що ящик уже в клієнта. Я на цьому попався сам — запустив
+     * прохід примусово о пів на другу й закрив шістдесят три замовлення,
+     * які в ту мить лежали на столах.
+     *
+     * Прострочене при цьому прибрати можна будь-коли: вчорашній день уже
+     * не зміниться.
+     */
+    includeDay?: boolean
+  },
 ): Promise<CloseResult> {
   const result: CloseResult = { looked: 0, done: 0, stale: 0, problems: [] }
 
@@ -51,6 +67,12 @@ export async function closeDay(
    * Тож беремо все, чия дата доставки не пізніша за цю. Горизонт у два
    * тижні: глибше лежить те, з чим має розбиратись людина, а не прохід.
    */
+  const nextDay = (d: string) => {
+    const x = new Date(`${d}T12:00:00`)
+    x.setDate(x.getDate() + 1)
+    return x.toLocaleDateString('en-CA')
+  }
+
   const horizon = (() => {
     const d = new Date(`${date}T12:00:00`)
     d.setDate(d.getDate() - 14)
@@ -61,7 +83,7 @@ export async function closeDay(
     .from('orders')
     .select('id, external_id, platform, status, delivery_date')
     .in('platform', ['site', 'manual'])
-    .lte('delivery_date', date)
+    .lt('delivery_date', includeDay ? nextDay(date) : date)
     .gte('delivery_date', horizon)
     .in('status', WORKING)
     .order('delivery_date')

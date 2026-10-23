@@ -28,12 +28,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ waiting: `у Києві ${hour} година, чекаємо 23` })
   }
 
+  /*
+   * Серед дня закриваємо лише прострочене.
+   *
+   * `force` існує, щоб догнати пропущене, а не щоб скінчити день
+   * достроково. Поки на годиннику не 23, сам цей день лишається в
+   * роботі — хоч би хто й як покликав прохід.
+   */
+  const endOfDay = hour === 23
+
   const date = request.nextUrl.searchParams.get('date')
     ?? now.toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' })
 
   const service = createServiceClient()
   const startedAt = Date.now()
-  const result = await closeDay(service, { date })
+  const result = await closeDay(service, { date, includeDay: endOfDay })
   await logCronRun(service, 'close-day', startedAt, { ...result, date })
 
   return NextResponse.json({ ...result, date })
