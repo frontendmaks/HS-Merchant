@@ -27,6 +27,8 @@ const DONE = 'Виконано'
 export interface CloseResult {
   looked: number
   done: number
+  /** Скільки з них лишались у роботі з минулих днів */
+  stale: number
   problems: { order: string; error: string }[]
 }
 
@@ -34,14 +36,35 @@ export async function closeDay(
   service: Service,
   { date, limit = 200 }: { date: string; limit?: number },
 ): Promise<CloseResult> {
-  const result: CloseResult = { looked: 0, done: 0, problems: [] }
+  const result: CloseResult = { looked: 0, done: 0, stale: 0, problems: [] }
+
+  /*
+   * Закриваємо не лише цей день, а й усе прострочене.
+   *
+   * Прохід о 23:59 бере те, що в роботі саме зараз, — і цього досить,
+   * поки нічого не змінюється після опівночі. Але склад позначає
+   * «Спаковано» і вранці наступного дня: замовлення Андрейкіної та
+   * Горин за 22 жовтня перевели в Бітріксі о 10:30 двадцять третього,
+   * коли нічний прохід уже відпрацював. Такі лишались у роботі назавжди
+   * — наступної ночі їх ніхто не чіпав, бо день уже був інший.
+   *
+   * Тож беремо все, чия дата доставки не пізніша за цю. Горизонт у два
+   * тижні: глибше лежить те, з чим має розбиратись людина, а не прохід.
+   */
+  const horizon = (() => {
+    const d = new Date(`${date}T12:00:00`)
+    d.setDate(d.getDate() - 14)
+    return d.toLocaleDateString('en-CA')
+  })()
 
   const { data } = await service
     .from('orders')
-    .select('id, external_id, platform, status')
+    .select('id, external_id, platform, status, delivery_date')
     .in('platform', ['site', 'manual'])
-    .eq('delivery_date', date)
+    .lte('delivery_date', date)
+    .gte('delivery_date', horizon)
     .in('status', WORKING)
+    .order('delivery_date')
     .limit(limit)
 
   const orders = data ?? []
@@ -64,7 +87,10 @@ export async function closeDay(
     })
 
     const body = await res.json().catch(() => ({})) as { success?: boolean; error?: string }
-    if (body.success) result.done++
+    if (body.success) {
+      result.done++
+      if (order.delivery_date !== date) result.stale++
+    }
     else {
       result.problems.push({
         order: (order.external_id as string) ?? '—',

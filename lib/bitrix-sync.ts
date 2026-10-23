@@ -14,6 +14,7 @@ import { WAREHOUSE_ID, CATEGORY_ID } from '@/lib/bitrix-deal'
 import { slotLabel } from '@/lib/bitrix-slots'
 import { noteExternalNumber } from '@/lib/number-register'
 import { onStatusChanged } from '@/lib/bitrix-chat'
+import { logOrderEvent } from '@/lib/order-events'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { moveNumber } from '@/lib/manual-register'
 import { splitPersona } from '@/lib/phone'
@@ -385,6 +386,18 @@ export async function syncSiteOrders(
 
           // Статус міняють здебільшого в CRM — бланк має піти й тоді
           if (existing.status !== status) {
+            /*
+             * Зміна з Бітрікса теж належить журналу.
+             *
+             * Досі записувались лише ті, що робили в Мерчанті, — і коли
+             * замовлення вранці поверталось із «Виконано» у «Спаковано»,
+             * у журналі про це не було ні слова. Шукати причину
+             * доводилось у стрічці угоди, і то якщо здогадатись.
+             */
+            await logOrderEvent(service, existing.id as string, 'status',
+              { old: existing.status as string | null, new: status },
+              { id: '', name: 'Бітрікс' })
+
             await onStatusChanged(service, existing.id as string, status)
             touched = existing.id as string
           }
