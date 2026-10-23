@@ -11,6 +11,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 type Service = ReturnType<typeof createServiceClient>
 
 import { hasLatin, toCyrillic } from '@/lib/address-latin'
+import { GIVEN_NAMES } from '@/lib/given-names'
 
 export const ZONES_URL =
   'https://halytska-svizhyna.ua/wp-content/uploads/2026/06/zona-dostavky-1.json'
@@ -367,6 +368,64 @@ export function streetSpellings(address: string): string[] {
 }
 
 /**
+ * Чи це слово — ім'я людини в родовому відмінку.
+ *
+ * Вулиці часто звуться «Ім'я Прізвище», і джерела розходяться саме в імені:
+ * в адресі «Миколи Коперника», а в карті — «Миколая Коперника». Прізвище ж
+ * збігається завжди, бо воно й несе назву.
+ *
+ * Перевіряємо за списком імен, який уже є: з родового відмінка вгадуємо
+ * називний кількома очевидними закінченнями й питаємо, чи знаємо таке ім'я.
+ * Це не морфологія, а саме перевірка — помилитись тут означає додати зайвий
+ * варіант запиту, не більше.
+ */
+function givenNameInGenitive(word: string): boolean {
+  const w = word.toLowerCase()
+  const guesses = [
+    w,
+    w.replace(/а$/, ''),      // Степана → Степан
+    w.replace(/и$/, 'а'),     // Миколи → Микола
+    w.replace(/я$/, 'ь'),     // Василя → Василь
+    w.replace(/я$/, 'й'),     // Андрія → Андрій
+    w.replace(/і$/, 'я'),     // Лесі → Леся
+    w.replace(/ї$/, 'я'),     // Марії → Марія
+  ]
+
+  // Список зберігається в нижньому регістрі — там же й питаємо
+  return guesses.some(g => GIVEN_NAMES.has(g))
+}
+
+/**
+ * Назва вулиці без імені — саме прізвище.
+ *
+ * «вулиця Миколи Коперника» → «вулиця Коперника». Геокодер знає цю вулицю як
+ * «Миколая Коперника» й на «Миколи» не знаходить нічого, а на саме прізвище
+ * знаходить одразу й точно — із номером будинку.
+ *
+ * Ім'я прибираємо лише тоді, коли воно справді ім'я: «Зелена Балка» чи «Під
+ * Голоском» так не скорочуються, інакше ми питали б про зовсім іншу вулицю.
+ */
+export function withoutGivenName(address: string): string | null {
+  const parts = address.split(',').map(p => p.trim())
+  let changed = false
+
+  const rebuilt = parts.map(part => {
+    const words = part.split(/\s+/).filter(Boolean)
+    const type = words.length && STREET_WORD.test(words[0]) ? words[0] : null
+    const name = type ? words.slice(1) : words
+
+    // Потрібні рівно ім'я та прізвище: з трьох слів ім'я вже не вгадаєш
+    if (name.length !== 2) return part
+    if (!givenNameInGenitive(name[0])) return part
+
+    changed = true
+    return [type, name[1]].filter(Boolean).join(' ')
+  })
+
+  return changed ? rebuilt.join(', ') : null
+}
+
+/**
  * Чому цей збіг приблизний — своїми словами, а не загальною фразою.
  *
  * Раніше будь-яке приблизне прочитання діставало підпис «зона визначена за
@@ -376,7 +435,20 @@ export function streetSpellings(address: string): string[] {
  */
 type Vagueness = 'street' | 'area'
 
-interface Variant { query: string; approximate?: boolean; vague?: Vagueness }
+interface Variant {
+  query: string
+  approximate?: boolean
+  vague?: Vagueness
+  /**
+   * Населений пункт, у якому відповідь має бути.
+   *
+   * Потрібно там, де ми скоротили саму назву вулиці: саме прізвище без
+   * імені буває не одне на область. «Шептицького, 4» без «Андрія» геокодер
+   * знаходить у Пасіках-Зубрицьких — вулиця є і там, і це не наша адреса.
+   * Тож відповідь приймаємо лише тоді, коли місто в ній те саме.
+   */
+  within?: string
+}
 
 function queryVariants(address: string): Variant[] {
   const a = tidyAddress(address)
@@ -426,15 +498,41 @@ function queryVariants(address: string): Variant[] {
    * вкаже чужий склад. Такі збіги позначаємо, щоб вони не перебивали склад,
    * обраний людиною.
    */
+  /*
+   * Те саме, але без імені у назві вулиці.
+   *
+   * «Миколи Коперника» проти «Миколая Коперника» — різниця в одному слові,
+   * і геокодер на ній спиняється цілком, хоча прізвище однакове. Варіант
+   * лишається точним: номер будинку в ньому зберігся, тож і відповідь буде
+   * про будинок, а не «десь на вулиці».
+   */
+  const bySurname = withoutGivenName(a)
+
+
   const exact = [
     city(a),
     a,
     ...(withoutLetter !== a ? [city(withoutLetter)] : []),
+
     ...(cyrillic && cyrillic !== a ? [city(cyrillic), cyrillic] : []),
     ...streetSpellings(a).map(city),
     ...streetSpellings(withoutLetter).map(city),
     ...shorter.map(city),
   ]
+  /*
+   * Скорочена назва — після всіх точних, але перед приблизними.
+   *
+   * Вона точна за змістом: номер будинку на місці. Але назва вже не та,
+   * яку написали, тож пробуємо її лише тоді, коли написане не знайшлося.
+   */
+  const shortened: Variant[] = bySurname
+    ? [{
+        query: city(bySurname),
+        // Де має опинитись відповідь: там само, де й сама адреса
+        within: mentionsCity ? (settlement || 'Львів') : 'Львів',
+      }]
+    : []
+
   const rough: Variant[] = [
     ...(streetOnly && streetOnly !== a
       ? [{ query: city(streetOnly), vague: 'street' as const }] : []),
@@ -451,6 +549,18 @@ function queryVariants(address: string): Variant[] {
     seen.add(query)
     out.push({ query, approximate: false })
   }
+  /*
+   * Скорочена назва стоїть між точними й приблизними.
+   *
+   * Вона точна за змістом — номер будинку на місці, — але назва вже не та,
+   * яку написали, тож пробуємо її лише після написаного.
+   */
+  for (const variant of shortened) {
+    if (seen.has(variant.query)) continue
+    seen.add(variant.query)
+    out.push({ ...variant, approximate: false })
+  }
+
   for (const variant of rough) {
     if (variant.query.replace(/[^\p{L}]/gu, '').length < 4 || seen.has(variant.query)) continue
     seen.add(variant.query)
@@ -461,13 +571,26 @@ function queryVariants(address: string): Variant[] {
 }
 
 /**
+ * Чи лежить знайдена точка в названому населеному пункті.
+ *
+ * Геокодер віддає адресу частинами через кому, і місто в ній стоїть
+ * окремою частиною. Порівнюємо саме частини, а не підрядок: «Львівський
+ * район» містить «Львів», але Львовом не є.
+ */
+export function inSettlement(display: string | null | undefined, place: string): boolean {
+  if (!display) return false
+  const want = place.trim().toLowerCase()
+  return display.split(',').some(part => part.trim().toLowerCase() === want)
+}
+
+/**
  * Версія логіки пошуку адреси.
  *
  * Піднімається щоразу, коли змінюється те, як складається запит до геокодера:
  * записи кешу з нижчою версією перепитуються, замість того щоб вічно
  * повертати координати, знайдені за старим правилом.
  */
-const RESOLVER_VERSION = 9
+const RESOLVER_VERSION = 10
 
 async function remember(
   service: Service,
@@ -530,6 +653,19 @@ export async function geocode(
     }
 
     if (answer.kind === 'found') {
+      /*
+       * Відповідь має бути в тому ж населеному пункті, що й питання.
+       *
+       * Стосується скорочених назв: саме прізвище без імені буває не одне
+       * на область. «Шептицького, 4» без «Андрея» знаходиться в Пасіках-
+       * Зубрицьких — вулиця є і там, будинок теж, і зона доставки поруч.
+       * Без цієї перевірки ми тихо повезли б замовлення в інше село.
+       */
+      if (variant.within && !inSettlement(answer.point.display_name, variant.within)) {
+        await new Promise(r => setTimeout(r, 1100))
+        continue
+      }
+
       const point = { ...answer.point, approximate: variant.approximate, vague: variant.vague }
       firstHit ??= point
       if (zoneAt(point, zones)) {
