@@ -51,7 +51,7 @@ export default function EditButton({ id, warehouses, recheck }: {
             setBusy(false)
           }}
           className="text-amber-500 hover:text-amber-400 text-xs transition-colors
-                     disabled:opacity-40"
+                     disabled:opacity-40 min-w-11"
           title="Перевірити заново — після виправлення"
         >
           {busy ? '…' : '↻'}

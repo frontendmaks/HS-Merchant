@@ -56,7 +56,7 @@ export default function SyncButton({ last, queued = 0, checking = null }: {
         onClick={() => void run()}
         disabled={busy}
         className="bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white text-sm
-                   px-3 py-2 rounded-lg transition-colors"
+                   px-3 h-11 lg:h-auto lg:py-2 rounded-lg transition-colors"
       >
         {busy ? 'Оновлюємо…' : '↻ З Бітрікса'}
       </button>

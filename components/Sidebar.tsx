@@ -140,7 +140,8 @@ function NavGroup({ group, path, onNavigate }: {
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
-        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+        className={`w-full flex items-center gap-3 px-3 h-11 lg:h-auto lg:py-2.5 rounded-lg
+                    text-sm transition-colors ${
           holdsCurrent && !open
             ? 'text-white bg-zinc-800/60'
             : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -160,7 +161,8 @@ function NavGroup({ group, path, onNavigate }: {
                 key={item.href}
                 href={item.href}
                 onClick={onNavigate}
-                className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
+                className={`flex items-center px-3 h-11 lg:h-auto lg:py-2 rounded-lg text-sm
+                                transition-colors ${
                   active ? 'bg-red-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
                 }`}
               >
@@ -339,7 +341,8 @@ export default function Sidebar() {
               href={href}
               // Closes the drawer on tap, so it does not stay over the page it opened
               onClick={() => setOpen(false)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+              className={`flex items-center gap-3 px-3 h-11 lg:h-auto lg:py-2.5 rounded-lg
+                          text-sm transition-colors ${
                 active
                   ? 'bg-red-600 text-white'
                   : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -385,7 +388,8 @@ export default function Sidebar() {
                     key={sub.href}
                     href={sub.href}
                     onClick={() => setOpen(false)}
-                    className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
+                    className={`flex items-center px-3 h-11 lg:h-auto lg:py-2 rounded-lg text-sm
+                                transition-colors ${
                       path === sub.href || path.startsWith(sub.href + '/')
                         ? 'bg-red-600 text-white'
                         : 'text-zinc-400 hover:text-white hover:bg-zinc-800'

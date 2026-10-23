@@ -350,15 +350,15 @@ export default async function SiteOrdersPage({
           />
           <Link
             href={`/orders/numbers?date=${date}`}
-            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm
-                       px-3 py-2 rounded-lg transition-colors"
+            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm inline-flex
+                       items-center px-3 h-11 lg:h-auto lg:py-2 rounded-lg transition-colors"
           >
             Номери
           </Link>
           <Link
             href="/orders/manual"
-            className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium
-                       px-4 py-2 rounded-lg transition-colors"
+            className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium inline-flex
+                       items-center px-4 h-11 lg:h-auto lg:py-2 rounded-lg transition-colors"
           >
             + Нове замовлення
           </Link>
