@@ -3,7 +3,8 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor } from '@/lib/order-events'
 import { phoneKey } from '@/lib/phone'
 import {
-  effectiveAddresses, pushCustomerToBitrix, type CustomerEdits,
+  effectiveAddresses, effectivePhones, canDropPhone, samePhone,
+  pushCustomerToBitrix, EDIT_COLUMNS, type CustomerEdits,
 } from '@/lib/customer-edit'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
 
@@ -67,6 +68,8 @@ export async function PATCH(
     name?: string | null
     addAddress?: string
     removeAddress?: string
+    addPhone?: string
+    removePhone?: string
   } | null
 
   if (!body) return NextResponse.json({ error: 'Bad request' }, { status: 400 })
@@ -74,7 +77,7 @@ export async function PATCH(
   const service = createServiceClient()
   const { data } = await service
     .from('customers')
-    .select('name, name_override, addresses, addresses_added, addresses_hidden, bitrix_contact_id, phone, phones')
+    .select(EDIT_COLUMNS)
     .eq('phone_key', phone)
     .maybeSingle()
 
@@ -121,12 +124,58 @@ export async function PATCH(
       .filter(a => same(a) !== same(remove))
   }
 
+  const addPhone = body.addPhone?.trim()
+  if (addPhone) {
+    if (addPhone.replace(/\D/g, '').length < 9) {
+      return NextResponse.json({ error: 'У номері замало цифр' }, { status: 400 })
+    }
+    patch.phones_hidden = (customer.phones_hidden ?? [])
+      .filter(p => !samePhone(p, addPhone))
+    patch.phones_added = [...new Set([...(customer.phones_added ?? []), addPhone])]
+  }
+
+  const removePhone = body.removePhone?.trim()
+  if (removePhone) {
+    /*
+     * Останній номер прибрати не можна.
+     *
+     * Клієнт у нас і є номером телефону: за ним склеюються замовлення з
+     * трьох джерел, за ним його знаходять у CRM і йому ж телефонують.
+     * Картка без жодного номера перестає бути карткою когось.
+     */
+    if (!canDropPhone(customer, removePhone)) {
+      return NextResponse.json(
+        { error: 'Це останній номер — без телефону клієнта не впізнати' },
+        { status: 409 },
+      )
+    }
+
+    patch.phones_hidden = [...new Set([...(customer.phones_hidden ?? []), removePhone])]
+    patch.phones_added = (customer.phones_added ?? [])
+      .filter(p => !samePhone(p, removePhone))
+
+    /*
+     * Головний номер теж міг піти.
+     *
+     * Він стоїть у рядку списку й у всіх підписах; лишити прибраний
+     * означало б показувати саме те, що щойно визнали хибним.
+     */
+    const left = effectivePhones({
+      ...customer,
+      phones_added: patch.phones_added as string[],
+      phones_hidden: patch.phones_hidden as string[],
+    })
+    if (customer.phone && samePhone(customer.phone, removePhone) && left[0]) {
+      patch.phone = left[0]
+    }
+  }
+
   const { error } = await service.from('customers').update(patch).eq('phone_key', phone)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const { data: fresh } = await service
     .from('customers')
-    .select('name, name_override, addresses, addresses_added, addresses_hidden, bitrix_contact_id, phone, phones')
+    .select(EDIT_COLUMNS)
     .eq('phone_key', phone)
     .maybeSingle()
 
@@ -135,6 +184,7 @@ export async function PATCH(
   return NextResponse.json({
     ok: true,
     addresses: effectiveAddresses((fresh ?? customer) as unknown as CustomerEdits),
+    phones: effectivePhones((fresh ?? customer) as unknown as CustomerEdits),
     name: ((fresh as unknown as CustomerEdits)?.name_override ?? '').trim()
       || (fresh as unknown as CustomerEdits)?.name || null,
     crm_error: 'error' in crm ? crm.error : null,

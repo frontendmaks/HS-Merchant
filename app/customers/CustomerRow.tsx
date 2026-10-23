@@ -11,6 +11,8 @@ export interface Customer {
   name_override?: string | null
   addresses_added?: string[] | null
   addresses_hidden?: string[] | null
+  phones_added?: string[] | null
+  phones_hidden?: string[] | null
   phones: string[]
   names: string[] | null
   addresses: string[] | null
@@ -51,6 +53,9 @@ function ago(date: string | null) {
 /** Та сама адреса приходить трьома написаннями — зводимо до одного */
 const sameAddress = (a: string) => a.trim().toLowerCase().replace(/\s+/g, ' ')
 
+/** «0677372857» і «+38 (067) 737-28-57» — один номер, не два */
+const phoneDigits = (p: string) => p.replace(/\D/g, '').slice(-9)
+
 export default function CustomerRow({ c }: { c: Customer }) {
   const [open, setOpen] = useState(false)
   const [data, setData] = useState<{ orders: Order[]; products: Product[] } | null>(null)
@@ -74,6 +79,17 @@ export default function CustomerRow({ c }: { c: Customer }) {
     return [...out.values()]
   })
   const [draft, setDraft] = useState('')
+  const [phoneDraft, setPhoneDraft] = useState('')
+  const [phones, setPhones] = useState<string[]>(() => {
+    const hidden = new Set((c.phones_hidden ?? []).map(phoneDigits))
+    const out = new Map<string, string>()
+    for (const p of [...(c.phones ?? []), ...(c.phones_added ?? [])]) {
+      const value = (p ?? '').trim()
+      const key = phoneDigits(value)
+      if (value && key.length >= 9 && !hidden.has(key) && !out.has(key)) out.set(key, value)
+    }
+    return [...out.values()]
+  })
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState<string | null>(null)
 
@@ -91,6 +107,7 @@ export default function CustomerRow({ c }: { c: Customer }) {
       const d = await r.json()
       if (!r.ok) throw new Error(d.error ?? 'Не вдалося зберегти')
       setAddresses(d.addresses ?? [])
+      if (d.phones) setPhones(d.phones)
       setName(d.name ?? '')
       // Бітрікс міг не прийняти — це не привід ховати правку, але сказати
       // треба: у CRM лишилось старе
@@ -134,9 +151,9 @@ export default function CustomerRow({ c }: { c: Customer }) {
           )}
         </td>
         <td className="px-3 py-2 text-zinc-300 whitespace-nowrap">
-          {c.phone}
-          {c.phones.length > 1 && (
-            <span className="text-zinc-600 text-xs"> +{c.phones.length - 1}</span>
+          {phones[0] ?? c.phone}
+          {phones.length > 1 && (
+            <span className="text-zinc-600 text-xs"> +{phones.length - 1}</span>
           )}
         </td>
         <td className="px-3 py-2 whitespace-nowrap">
@@ -336,13 +353,51 @@ export default function CustomerRow({ c }: { c: Customer }) {
                       <div className="text-amber-500 text-xs mt-1.5">{note}</div>
                     )}
 
-                    <div className="text-zinc-400 text-xs mt-3 mb-1.5">Телефони</div>
+                    <div className="text-zinc-400 text-xs mt-3 mb-1.5">
+                      Телефони
+                      <span className="text-zinc-600"> — останній прибрати не можна</span>
+                    </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {c.phones.map(p => (
-                        <span key={p} className="px-2 py-1 rounded text-xs bg-zinc-800 text-zinc-400">
+                      {phones.map(p => (
+                        <span key={p}
+                          className="px-2 py-1 rounded text-xs bg-zinc-800 text-zinc-300
+                                     inline-flex items-center gap-1.5">
                           {p}
+                          {phones.length > 1 && (
+                            <button
+                              onClick={() => void edit({ removePhone: p })}
+                              disabled={saving}
+                              title="Прибрати номер"
+                              className="text-zinc-600 hover:text-red-400 transition-colors"
+                            >
+                              ✕
+                            </button>
+                          )}
                         </span>
                       ))}
+                    </div>
+
+                    <div className="flex items-center gap-2 mt-2">
+                      <input
+                        value={phoneDraft}
+                        onChange={e => setPhoneDraft(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key !== 'Enter' || !phoneDraft.trim()) return
+                          void edit({ addPhone: phoneDraft }).then(() => setPhoneDraft(''))
+                        }}
+                        placeholder="Додати номер — і Enter"
+                        className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5
+                                   text-white text-xs placeholder-zinc-600 min-w-[200px]
+                                   focus:outline-none focus:border-red-500"
+                      />
+                      <button
+                        onClick={() => void edit({ addPhone: phoneDraft }).then(() => setPhoneDraft(''))}
+                        disabled={saving || !phoneDraft.trim()}
+                        className="px-2.5 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-300
+                                   hover:text-white disabled:opacity-40 transition-colors"
+                      >
+                        Додати
+                      </button>
                     </div>
                   </div>
                 )}

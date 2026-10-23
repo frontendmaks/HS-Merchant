@@ -15,6 +15,11 @@ import { bitrix } from '@/lib/bitrix'
 
 type Service = ReturnType<typeof createServiceClient>
 
+/** Усе, з чого складається правлена картка */
+export const EDIT_COLUMNS =
+  'name, name_override, addresses, addresses_added, addresses_hidden, '
+  + 'phones, phones_added, phones_hidden, bitrix_contact_id, phone'
+
 export interface CustomerEdits {
   name: string | null
   name_override: string | null
@@ -24,6 +29,8 @@ export interface CustomerEdits {
   bitrix_contact_id: number | null
   phone: string | null
   phones: string[] | null
+  phones_added?: string[] | null
+  phones_hidden?: string[] | null
 }
 
 /**
@@ -47,6 +54,40 @@ export function effectiveAddresses(c: CustomerEdits): string[] {
 
   return [...out.values()]
 }
+
+/**
+ * Телефони, які варто показувати.
+ *
+ * Той самий номер приходить трьома написаннями — «0677372857»,
+ * «380677372857», «+38 (067) 737-28-57», — і це один телефон, а не три.
+ * Зводимо за цифрами, а показуємо те написання, яке трапилось першим.
+ *
+ * Прибрані номери бувають просто хибні: оператор помилився цифрою, і
+ * дзвінок іде не туди. Тому прибрати їх можна, але не всі: без жодного
+ * телефону клієнта не впізнати — ні в замовленні, ні в CRM.
+ */
+const digits = (p: string) => p.replace(/\D/g, '').slice(-9)
+
+export function effectivePhones(c: CustomerEdits): string[] {
+  const hidden = new Set((c.phones_hidden ?? []).map(digits))
+  const out = new Map<string, string>()
+
+  for (const p of [...(c.phones ?? []), ...(c.phones_added ?? [])]) {
+    const value = (p ?? '').trim()
+    const key = digits(value)
+    if (!value || key.length < 9 || hidden.has(key)) continue
+    if (!out.has(key)) out.set(key, value)
+  }
+
+  return [...out.values()]
+}
+
+/** Чи лишиться бодай один номер, якщо прибрати цей */
+export function canDropPhone(c: CustomerEdits, phone: string): boolean {
+  return effectivePhones(c).filter(p => digits(p) !== digits(phone)).length > 0
+}
+
+export const samePhone = (a: string, b: string) => digits(a) === digits(b)
 
 /** ПІБ, вписане людиною, головніше за зібране */
 export const effectiveName = (c: CustomerEdits): string | null =>
@@ -81,7 +122,7 @@ export async function pushCustomerToBitrix(
 ): Promise<{ ok: true; contact: number } | { error: string }> {
   const { data } = await service
     .from('customers')
-    .select('name, name_override, addresses, addresses_added, addresses_hidden, bitrix_contact_id, phone, phones')
+    .select(EDIT_COLUMNS)
     .eq('phone_key', phoneKey)
     .maybeSingle()
 
@@ -92,9 +133,22 @@ export async function pushCustomerToBitrix(
 
   const addresses = effectiveAddresses(customer)
   const name = effectiveName(customer)
+  const phones = effectivePhones(customer)
+
   const fields: Record<string, unknown> = {
     UF_AD_ADDRESS: addresses,
     UF_MAIN_ADDRESS: addresses[0] ?? '',
+  }
+
+  /*
+   * Телефони переписуємо цілком, а не дописуємо.
+   *
+   * Прибраний номер має зникнути й у CRM — інакше звідти й далі
+   * дзвонитимуть на той, що виявився чужим. Порожній список не
+   * надсилаємо зовсім: контакт без телефону в Бітріксі не знайти.
+   */
+  if (phones.length) {
+    fields.PHONE = phones.map(value => ({ VALUE: value, VALUE_TYPE: 'WORK' }))
   }
 
   if (name) {
