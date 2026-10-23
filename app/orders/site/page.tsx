@@ -342,7 +342,7 @@ export default async function SiteOrdersPage({
             Сайт і телефон — склад, період доставки, бланк для комірника
           </p>
         </div>
-        <div className="flex items-start gap-2">
+        <div className="flex items-start gap-2 flex-wrap">
           <SyncButton
             last={lastSync?.ran_at ?? null}
             queued={queued ?? 0}
@@ -434,6 +434,94 @@ export default async function SiteOrdersPage({
             </span>
           </h2>
         </div>
+        {/*
+          * Телефон і стіл — різні екрани, не той самий у масштабі.
+          *
+          * Одинадцять колонок на 375 пікселів не влазять ніяк: таблиця
+          * їде вбік, і щоб побачити суму чи статус, треба тягнути її
+          * пальцем, загубивши з очей, у чиєму рядку ти був. На складі й
+          * у дорозі дивляться саме з телефона, тож там замовлення —
+          * картка: усе про одне замовлення на одному екрані.
+          */}
+        <div className="lg:hidden divide-y divide-zinc-800/60">
+          {orders.length === 0 ? (
+            <div className="text-center py-10 text-zinc-500 text-sm">
+              {monthly ? 'За цей місяць тут порожньо' : 'На цю дату тут порожньо'}
+            </div>
+          ) : orders.map(o => (
+            <div key={o.id} className="p-3 space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-white font-semibold">
+                    {o.manual_number ? `№${o.manual_number}` : o.external_id || '—'}
+                    <span className="ml-2 text-xs font-normal text-zinc-500">
+                      {platformLabel(o.platform)}
+                    </span>
+                  </div>
+                  <div className="text-zinc-400 text-xs mt-0.5">
+                    {shortDate(o.delivery_date)}
+                    {o.delivery_slot && ` · ${o.delivery_slot}`}
+                    {o.warehouse && ` · ${o.warehouse}`}
+                  </div>
+                </div>
+                <div className="text-white tabular-nums whitespace-nowrap font-semibold">
+                  {money(o.total)}
+                </div>
+              </div>
+
+              <div className="text-sm text-zinc-200">{o.customer_name || '—'}</div>
+
+              {/* Телефон набирається дотиком: на складі дзвонять із того
+                  самого екрана, на якому дивляться замовлення */}
+              {o.customer_phone && (
+                <a href={`tel:${o.customer_phone.replace(/[^\d+]/g, '')}`}
+                  className="text-red-400 text-sm inline-block">
+                  {o.customer_phone}
+                </a>
+              )}
+
+              <div className="text-zinc-400 text-xs">{o.address || '—'}</div>
+
+              {o.customer_comment && (
+                <div className="text-amber-200 text-xs border-l-2 border-amber-600/60 pl-2
+                                whitespace-pre-wrap break-words">
+                  {o.customer_comment}
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                {o.auto_problem && (
+                  <span className="text-amber-500">⚠ бракує: {o.auto_problem}</span>
+                )}
+                {o.bitrix_error && <span className="text-red-400">⚠ {o.bitrix_error}</span>}
+                {sharesNumber(o) && <span className="text-red-400">⚠ номер зайнято двічі</span>}
+                {!o.delivery_date && <span className="text-amber-500">⚠ немає дати доставки</span>}
+                {o.chat_sent_at && <span className="text-emerald-600">бланк у чаті</span>}
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <div className="flex-1 min-w-0">
+                  <StatusSelect
+                    id={o.id}
+                    platform={o.platform}
+                    externalId={o.external_id}
+                    status={o.status}
+                    disabled={readOnly}
+                  />
+                </div>
+                <EditButton id={o.id} warehouses={warehouses} recheck={!!o.auto_problem} />
+                {o.share_token && (
+                  <a href={`/zamovlennya/${o.share_token}`} target="_blank" rel="noreferrer"
+                    className="text-zinc-400 text-xs whitespace-nowrap">
+                    Бланк ↗
+                  </a>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="hidden lg:block">
         <WideScroll>
           <table className="w-full text-sm">
             <thead>
@@ -617,6 +705,7 @@ export default async function SiteOrdersPage({
             </tbody>
           </table>
         </WideScroll>
+        </div>
       </div>
     </div>
   )

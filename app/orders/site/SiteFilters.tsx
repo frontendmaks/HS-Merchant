@@ -118,8 +118,11 @@ export default function SiteFilters({
         )}
       </div>
 
+      {/* На телефоні вкладки їдуть однією смужкою вбік: вісім стадій,
+          поставлені в стовпчик, з'їдали б пів екрана до того, як видно
+          перше замовлення */}
       <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1
-                      flex-wrap">
+                      overflow-x-auto max-w-full sm:flex-wrap">
         {tabs.map(t => {
           // Нулі приглушені, решта помітна: число на вкладці — це робота,
           // яка там чекає, і її не має доводитись видивлятись
@@ -157,20 +160,23 @@ export default function SiteFilters({
             clearTimeout(typing.current)
             typing.current = setTimeout(() => go({ q: value }), 350)
           }}
-          className={`${field} min-w-[220px] flex-1 max-w-xs`}
+          className={`${field} w-full sm:w-auto sm:min-w-[220px] sm:flex-1 sm:max-w-xs`}
         />
 
-        <select value={picked.wh} onChange={e => go({ wh: e.target.value })} className={field}>
+        <select value={picked.wh} onChange={e => go({ wh: e.target.value })}
+          className={`${field} flex-1 sm:flex-none min-w-0`}>
           <option value="">Усі склади</option>
           {warehouses.map(w => <option key={w} value={w}>{w}</option>)}
         </select>
 
-        <select value={picked.slot} onChange={e => go({ slot: e.target.value })} className={field}>
+        <select value={picked.slot} onChange={e => go({ slot: e.target.value })}
+          className={`${field} flex-1 sm:flex-none min-w-0`}>
           <option value="">Будь-який період</option>
           {slots.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
 
-        <select value={picked.src} onChange={e => go({ src: e.target.value })} className={field}>
+        <select value={picked.src} onChange={e => go({ src: e.target.value })}
+          className={`${field} flex-1 sm:flex-none min-w-0`}>
           <option value="">Сайт і телефон</option>
           <option value="site">Лише сайт</option>
           <option value="manual">Лише телефон</option>

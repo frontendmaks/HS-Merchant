@@ -21,7 +21,8 @@ const THIN = '1px solid #d4d4d8'
 const SURROUND: React.CSSProperties = {
   minHeight: '100vh',
   background: '#18181b',
-  padding: '24px 16px',
+  // На телефоні поля довкола аркуша з'їдають ширину, якої і так бракує
+  padding: '12px 8px',
 }
 
 const SHEET: React.CSSProperties = {
@@ -29,7 +30,14 @@ const SHEET: React.CSSProperties = {
   color: INK,
   maxWidth: '48rem',
   margin: '0 auto',
-  padding: '32px 28px',
+  /*
+   * Бланк читають із телефона — стоячи біля ваг, однією рукою.
+   *
+   * Поля в 28 пікселів з кожного боку на екрані 375 лишали таблиці
+   * товарів менше трьохсот, і назви переносились по складах. На друк це
+   * не впливає: там свої поля, і їх задає принтер.
+   */
+  padding: 'clamp(14px, 4vw, 32px)',
   borderRadius: 6,
   boxShadow: '0 10px 40px rgba(0,0,0,.45)',
 }
@@ -126,7 +134,17 @@ export default async function OrderSheet({
         <table className="w-full text-sm mt-4">
           <tbody>
             <tr><td className="py-1 pr-4 font-semibold w-28">ПІБ</td><td>{order.customer_name}</td></tr>
-            <tr><td className="py-1 pr-4 font-semibold">Контакти</td><td>{order.customer_phone}</td></tr>
+            <tr>
+              <td className="py-1 pr-4 font-semibold">Контакти</td>
+              <td>
+                {/* Дотик набирає номер: комірник і кур'єр дзвонять із того
+                    самого екрана, на якому читають бланк */}
+                <a href={`tel:${(order.customer_phone ?? '').replace(/[^\d+]/g, '')}`}
+                  style={{ color: INK }}>
+                  {order.customer_phone}
+                </a>
+              </td>
+            </tr>
             <tr><td className="py-1 pr-4 font-semibold align-top">Адреса</td><td>{order.address}</td></tr>
           </tbody>
         </table>
