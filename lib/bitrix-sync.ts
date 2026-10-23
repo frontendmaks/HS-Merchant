@@ -107,8 +107,27 @@ async function productRows(dealIds: string[]) {
     const cmd: Record<string, string> = {}
     for (const id of chunk) cmd[`d${id}`] = `crm.deal.productrows.get?id=${id}`
 
-    const res = await bitrix<{ result: Record<string, Row[]> }>('batch', { halt: 0, cmd })
-    for (const id of chunk) out.set(id, res?.result?.[`d${id}`] ?? [])
+    const res = await bitrix<{
+      result: Record<string, Row[]>
+      result_error?: Record<string, unknown>
+    }>('batch', { halt: 0, cmd })
+
+    /*
+     * Порожньо — це не те саме, що «не відповіли».
+     *
+     * Коли підзапит падає (а під навантаженням Бітрікс зрізає саме їх),
+     * у відповіді для цієї угоди немає нічого. Раніше ми писали сюди
+     * порожній список — і далі він означав «товарів немає», тобто склад
+     * замовлення стирався. Шість одночасних проходів так вичистили
+     * замовлення до нуля.
+     *
+     * Тепер угоду, про яку нам не сказали, просто не згадуємо: позиції
+     * лишаються як були, а наступний прохід спитає ще раз.
+     */
+    for (const id of chunk) {
+      const rows = res?.result?.[`d${id}`]
+      if (Array.isArray(rows) && !res?.result_error?.[`d${id}`]) out.set(id, rows)
+    }
   }
   return out
 }
@@ -185,6 +204,13 @@ export async function syncSiteOrders(
       for (const deal of deals) {
         const person = deal.CONTACT_ID ? people.get(deal.CONTACT_ID) : undefined
         const status = stageName(deal.STAGE_ID) ?? deal.STAGE_ID
+        /*
+         * Чи знаємо ми склад цієї угоди просто зараз.
+         *
+         * Якщо Бітрікс про неї не відповів, позиції не чіпаємо зовсім:
+         * краще показати вчорашній склад, ніж стерти сьогоднішній.
+         */
+        const knownRows = rowsByDeal.has(deal.ID)
         const rows = rowsByDeal.get(deal.ID) ?? []
 
         /*
@@ -230,7 +256,7 @@ export async function syncSiteOrders(
            * рахуємо по них. Поле угоди лишається запасним варіантом для
            * угоди, у якій позицій немає зовсім.
            */
-          total: rows.length
+          total: knownRows && rows.length
             ? Math.round(rows.reduce(
                 (sum, r) => sum + Number(r.PRICE) * Number(r.QUANTITY), 0) * 100) / 100
             : Number(deal.OPPORTUNITY ?? 0),
@@ -239,9 +265,12 @@ export async function syncSiteOrders(
             ? Number(deal.UF_CRM_1607510002583) || null
             : null,
           customer_comment: deal.COMMENTS?.trim() || null,
-          items: rows.map(r =>
-            `${r.PRODUCT_NAME}, ${Number(r.QUANTITY)} ${unitOf(r)} x ${Number(r.PRICE)} грн`)
-            .join('\n'),
+          // Перелік теж лишаємо старим, коли складу не знаємо
+          ...(knownRows ? {
+            items: rows.map(r =>
+              `${r.PRODUCT_NAME}, ${Number(r.QUANTITY)} ${unitOf(r)} x ${Number(r.PRICE)} грн`)
+              .join('\n'),
+          } : {}),
           updated_at: new Date().toISOString(),
         }
 
@@ -293,7 +322,7 @@ export async function syncSiteOrders(
               : readdressed ? { ...fields, auto_done_at: null } : fields)
             .eq('id', existing.id)
 
-          if (!ours) await saveRows(service, existing.id as string, rows)
+          if (!ours && knownRows) await saveRows(service, existing.id as string, rows)
 
           /**
            * Дату перенесли в Бітріксі — номер має переїхати в журналі.
@@ -374,7 +403,7 @@ export async function syncSiteOrders(
             .select('id').single()
 
           if (created) {
-            await saveRows(service, created.id as string, rows)
+            if (knownRows) await saveRows(service, created.id as string, rows)
             touched = created.id as string
             result.created++
 
