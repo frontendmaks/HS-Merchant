@@ -295,6 +295,46 @@ export async function blockMovedNumber(
 }
 
 /**
+ * Вписує ім'я в аркуш складу під уже відомий номер.
+ *
+ * Номер ящика ставлять і в 1С — тоді він приїжджає до нас на замовленні
+ * готовим, повз наш журнал і повз таблицю. У Мерчанті й на картці Trello
+ * стоїть «№100», а комірник дивиться в аркуш і бачить навпроти сотого
+ * порожній рядок: замовлення для нього не існує.
+ *
+ * Пишемо лише в порожню комірку. Зайнята означає, що номер за кимось
+ * іншим, і це розбіжність, яку має розводити людина, а не ми мовчки.
+ */
+export async function noteNumberInSheet(
+  service: Service,
+  { date, number, customerName }: {
+    date: string; number: number; customerName: string
+  },
+): Promise<'written' | 'taken' | 'skipped'> {
+  if (!sheetsConfigured() || !customerName.trim()) return 'skipped'
+
+  const spreadsheetId = await registerFor(service, date)
+  if (!spreadsheetId) return 'skipped'
+
+  const tab = tabNameFor(date)
+  const rows = await readRange(spreadsheetId, `'${tab}'!A1:B300`)
+  if (!rows) return 'skipped'
+
+  for (let i = 1; i < rows.length; i++) {
+    if (Number((rows[i]?.[0] ?? '').toString().trim()) !== number) continue
+
+    const busy = (rows[i]?.[1] ?? '').toString().trim()
+    if (busy) return busy === customerName.trim() ? 'written' : 'taken'
+
+    return await writeCell(spreadsheetId, `'${tab}'!B${i + 1}`, customerName)
+      ? 'written'
+      : 'skipped'
+  }
+
+  return 'skipped'
+}
+
+/**
  * Переносить номер замовлення з одного дня на інший.
  *
  * Замовлення переносять цілком — разом із номером, під яким його знають на
@@ -458,9 +498,8 @@ export async function sweepStaleHolds(
 
   const { data } = await service
     .from('order_numbers')
-    .select('delivery_date, number, customer_name')
+    .select('delivery_date, number, customer_name, order_id')
     .is('released_at', null)
-    .is('order_id', null)
     .lt('taken_at', edge)
     .gte('delivery_date', today)
     /*
@@ -473,15 +512,22 @@ export async function sweepStaleHolds(
      */
     .not('customer_name', 'ilike', `${MOVED_MARK}%`)
 
-  const holds = (data ?? []) as { delivery_date: string; number: number }[]
+  const holds = (data ?? []) as {
+    delivery_date: string; number: number; customer_name: string | null; order_id: string | null
+  }[]
   result.looked = holds.length
 
   for (const hold of holds) {
+    // Перенесене закрите навмисно — його прибирання не стосується
+    if ((hold.customer_name ?? '').startsWith(MOVED_MARK)) continue
+
     /*
      * Живе замовлення на це число — не чіпаємо.
      *
-     * Рядок без замовлення в журналі не завжди означає покинутий резерв:
-     * номер міг приїхати з 1С, а зв'язок із замовленням ще не склався.
+     * Питаємо не «чи є в рядка замовлення», а «чи тримає це число хоч
+     * якесь живе замовлення». Різниця з'явилась на Іванишин: її рядок
+     * вказував на замовлення, яке тим часом переїхало на сусідній
+     * номер, — і число лишалось зайнятим за тим, хто його не має.
      */
     const { count } = await service
       .from('orders')

@@ -16,7 +16,7 @@ import { noteExternalNumber } from '@/lib/number-register'
 import { onStatusChanged } from '@/lib/bitrix-chat'
 import { logOrderEvent } from '@/lib/order-events'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
-import { moveNumber } from '@/lib/manual-register'
+import { moveNumber, noteNumberInSheet } from '@/lib/manual-register'
 import { splitPersona } from '@/lib/phone'
 
 type Service = ReturnType<typeof createServiceClient>
@@ -382,6 +382,20 @@ export async function syncSiteOrders(
               orderId: existing.id as string,
               customerName: fields.customer_name ?? null,
             })
+
+            /*
+             * І в аркуш складу теж.
+             *
+             * Комірник працює за аркушем, а не за нашим журналом. Номер,
+             * проставлений у 1С, доходив до Мерчанта й до картки Trello,
+             * але навпроти сотого рядка в таблиці лишалась порожнеча — і
+             * замовлення для складу не існувало.
+             */
+            await noteNumberInSheet(service, {
+              date: fields.delivery_date,
+              number: Number(fields.manual_number),
+              customerName: fields.customer_name ?? '',
+            })
           }
 
           // Статус міняють здебільшого в CRM — бланк має піти й тоді
@@ -426,6 +440,11 @@ export async function syncSiteOrders(
                 number: Number(fields.manual_number),
                 orderId: created.id as string,
                 customerName: fields.customer_name ?? null,
+              })
+              await noteNumberInSheet(service, {
+                date: fields.delivery_date,
+                number: Number(fields.manual_number),
+                customerName: fields.customer_name ?? '',
               })
             }
           } else {
