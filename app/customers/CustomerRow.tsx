@@ -7,6 +7,10 @@ export interface Customer {
   phone_key: string
   phone: string
   name: string | null
+  /** ПІБ, вписане людиною — головніше за зібране із замовлень */
+  name_override?: string | null
+  addresses_added?: string[] | null
+  addresses_hidden?: string[] | null
   phones: string[]
   names: string[] | null
   addresses: string[] | null
@@ -44,10 +48,59 @@ function ago(date: string | null) {
   return months < 12 ? `${months} міс. тому` : `${Math.floor(months / 12)} р. тому`
 }
 
+/** Та сама адреса приходить трьома написаннями — зводимо до одного */
+const sameAddress = (a: string) => a.trim().toLowerCase().replace(/\s+/g, ' ')
+
 export default function CustomerRow({ c }: { c: Customer }) {
   const [open, setOpen] = useState(false)
   const [data, setData] = useState<{ orders: Order[]; products: Product[] } | null>(null)
   const [loading, setLoading] = useState(false)
+
+  /*
+   * Правки живуть тут, поруч із рядком.
+   *
+   * Сторінка — серверна, і перечитувати її на кожну прибрану адресу
+   * означало б чекати відповідь, дивлячись на те, чого вже немає.
+   */
+  const [name, setName] = useState((c.name_override ?? '').trim() || c.name || '')
+  const [editingName, setEditingName] = useState(false)
+  const [addresses, setAddresses] = useState<string[]>(() => {
+    const hidden = new Set((c.addresses_hidden ?? []).map(sameAddress))
+    const out = new Map<string, string>()
+    for (const a of [...(c.addresses ?? []), ...(c.addresses_added ?? [])]) {
+      const value = (a ?? '').trim()
+      if (value && !hidden.has(sameAddress(value))) out.set(sameAddress(value), value)
+    }
+    return [...out.values()]
+  })
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+
+  const shownName = name || c.name
+
+  async function edit(body: Record<string, unknown>) {
+    setSaving(true)
+    setNote(null)
+    try {
+      const r = await fetch(`/api/customers/${c.phone_key}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error ?? 'Не вдалося зберегти')
+      setAddresses(d.addresses ?? [])
+      setName(d.name ?? '')
+      // Бітрікс міг не прийняти — це не привід ховати правку, але сказати
+      // треба: у CRM лишилось старе
+      if (d.crm_error) setNote(`У Бітрікс не пішло: ${d.crm_error}`)
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   async function toggle() {
     const next = !open
@@ -73,10 +126,10 @@ export default function CustomerRow({ c }: { c: Customer }) {
       >
         <td className="px-3 py-2 text-zinc-600 w-4">{open ? '▾' : '▸'}</td>
         <td className="px-3 py-2">
-          <div className="text-white">{c.name ?? '—'}</div>
+          <div className="text-white">{shownName ?? '—'}</div>
           {(c.names?.length ?? 0) > 1 && (
             <div className="text-zinc-600 text-xs">
-              також: {c.names!.filter(n => n !== c.name).slice(0, 2).join(', ')}
+              також: {c.names!.filter(n => n !== shownName).slice(0, 2).join(', ')}
             </div>
           )}
         </td>
@@ -105,9 +158,9 @@ export default function CustomerRow({ c }: { c: Customer }) {
           {ago(c.last_order)}
         </td>
         <td className="px-3 py-2 text-zinc-400 text-xs max-w-[22rem] truncate">
-          {c.addresses?.[0] ?? '—'}
-          {(c.addresses?.length ?? 0) > 1 && (
-            <span className="text-zinc-600"> +{c.addresses!.length - 1}</span>
+          {addresses[0] ?? '—'}
+          {addresses.length > 1 && (
+            <span className="text-zinc-600"> +{addresses.length - 1}</span>
           )}
         </td>
       </tr>
@@ -116,6 +169,64 @@ export default function CustomerRow({ c }: { c: Customer }) {
         <tr className="border-b border-zinc-800">
           <td />
           <td colSpan={8} className="px-3 py-3">
+            {/* ПІБ правиться тут, а не в рядку: рядок читають швидко, і
+                поле для введення в ньому заважало б тим, хто просто
+                переглядає список */}
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-zinc-400 text-xs">ПІБ</span>
+              {editingName ? (
+                <>
+                  <input
+                    value={name}
+                    autoFocus
+                    onChange={e => setName(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        void edit({ name }).then(() => setEditingName(false))
+                      }
+                      if (e.key === 'Escape') {
+                        setName((c.name_override ?? '').trim() || c.name || '')
+                        setEditingName(false)
+                      }
+                    }}
+                    className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5
+                               text-white text-sm min-w-[260px]
+                               focus:outline-none focus:border-red-500"
+                  />
+                  <button
+                    onClick={() => void edit({ name }).then(() => setEditingName(false))}
+                    disabled={saving}
+                    className="px-2.5 py-1.5 rounded-lg text-xs bg-red-600 hover:bg-red-500
+                               text-white disabled:opacity-40 transition-colors"
+                  >
+                    Зберегти
+                  </button>
+                  <button
+                    onClick={() => {
+                      setName((c.name_override ?? '').trim() || c.name || '')
+                      setEditingName(false)
+                    }}
+                    className="text-zinc-500 hover:text-white text-xs"
+                  >
+                    Скасувати
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-white text-sm">{shownName ?? '—'}</span>
+                  <button
+                    onClick={() => setEditingName(true)}
+                    className="text-zinc-500 hover:text-white text-xs transition-colors"
+                  >
+                    Правити
+                  </button>
+                  {c.name_override && (
+                    <span className="text-zinc-600 text-xs">вписано вручну</span>
+                  )}
+                </>
+              )}
+            </div>
+
             {loading && <div className="text-zinc-500 text-xs">Завантажуємо…</div>}
             {data && (
               <div className="grid gap-4 lg:grid-cols-2">
@@ -170,15 +281,63 @@ export default function CustomerRow({ c }: { c: Customer }) {
                   </div>
                 </div>
 
-                {(c.addresses?.length ?? 0) > 0 && (
+                {(
                   <div className="lg:col-span-2">
-                    <div className="text-zinc-400 text-xs mb-1.5">Адреси</div>
+                    <div className="text-zinc-400 text-xs mb-1.5">
+                      Адреси
+                      <span className="text-zinc-600"> — ті, що йдуть у Бітрікс</span>
+                    </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {c.addresses!.map(a => (
-                        <span key={a} className="px-2 py-1 rounded text-xs bg-zinc-800 text-zinc-400">
+                      {addresses.map(a => (
+                        <span key={a}
+                          className="px-2 py-1 rounded text-xs bg-zinc-800 text-zinc-300
+                                     inline-flex items-center gap-1.5">
                           {a}
+                          <button
+                            onClick={() => void edit({ removeAddress: a })}
+                            disabled={saving}
+                            title="Прибрати адресу"
+                            className="text-zinc-600 hover:text-red-400 transition-colors"
+                          >
+                            ✕
+                          </button>
                         </span>
                       ))}
+                      {addresses.length === 0 && (
+                        <span className="text-zinc-600 text-xs">адрес немає</span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 mt-2">
+                      <input
+                        value={draft}
+                        onChange={e => setDraft(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key !== 'Enter' || !draft.trim()) return
+                          void edit({ addAddress: draft }).then(() => setDraft(''))
+                        }}
+                        placeholder="Додати адресу — і Enter"
+                        className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5
+                                   text-white text-xs placeholder-zinc-600 min-w-[260px]
+                                   focus:outline-none focus:border-red-500"
+                      />
+                      <button
+                        onClick={() => void edit({ addAddress: draft }).then(() => setDraft(''))}
+                        disabled={saving || !draft.trim()}
+                        className="px-2.5 py-1.5 rounded-lg text-xs bg-zinc-800 text-zinc-300
+                                   hover:text-white disabled:opacity-40 transition-colors"
+                      >
+                        Додати
+                      </button>
+                      {saving && <span className="text-zinc-500 text-xs">зберігаю…</span>}
+                    </div>
+
+                    {note && (
+                      <div className="text-amber-500 text-xs mt-1.5">{note}</div>
+                    )}
+
+                    <div className="text-zinc-400 text-xs mt-3 mb-1.5">Телефони</div>
+                    <div className="flex flex-wrap gap-1.5">
                       {c.phones.map(p => (
                         <span key={p} className="px-2 py-1 rounded text-xs bg-zinc-800 text-zinc-400">
                           {p}
