@@ -107,8 +107,8 @@ function ThemeSwitch() {
           type="button"
           onClick={() => setTheme(o.key)}
           aria-pressed={theme === o.key}
-          className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md
-                      text-xs transition-colors ${
+          className={`flex-1 flex items-center justify-center gap-1.5 px-2 h-11 lg:h-auto
+                      lg:py-1.5 rounded-md text-xs transition-colors ${
             theme === o.key
               ? 'bg-zinc-700 text-white'
               : 'text-zinc-400 hover:text-white'
@@ -265,7 +265,7 @@ export default function Sidebar() {
           onClick={() => setOpen(true)}
           aria-label="Відкрити меню"
           aria-expanded={open}
-          className="w-9 h-9 -ml-1 flex flex-col items-center justify-center gap-[3px] rounded-lg text-zinc-300 hover:bg-zinc-800 transition-colors"
+          className="w-11 h-11 -ml-1 flex flex-col items-center justify-center gap-[3px] rounded-lg text-zinc-300 hover:bg-zinc-800 transition-colors"
         >
           <span className="block w-4 h-px bg-current" />
           <span className="block w-4 h-px bg-current" />
@@ -304,7 +304,7 @@ export default function Sidebar() {
         <button
           onClick={() => setOpen(false)}
           aria-label="Закрити меню"
-          className="lg:hidden w-8 h-8 shrink-0 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+          className="lg:hidden w-11 h-11 shrink-0 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
         >
           ✕
         </button>
@@ -441,7 +441,7 @@ export default function Sidebar() {
 
         <button
           onClick={handleSignOut}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+          className="w-full flex items-center gap-3 px-3 h-11 lg:h-auto lg:py-2 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
         >
           <span>⎋</span>
           Вийти
