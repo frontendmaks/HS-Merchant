@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { currentActor } from '@/lib/order-events'
 import { measureUnit } from '@/lib/bitrix-catalog'
 
@@ -45,12 +46,28 @@ async function catalogue(): Promise<CatalogueItem[]> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.items
 
   const service = createServiceClient()
-  const { data } = await service
+
+  /*
+   * Сторінками, а не одним запитом.
+   *
+   * PostgREST віддає щонайбільше тисячу рядків і мовчить про це. Товарів
+   * у нас дві з половиною тисячі, у Бітріксі — чотири: каталог приїжджав
+   * обрізаним на букві «П», і все, що далі за абеткою, в пошуку просто
+   * не існувало. «Шия свиняча» є в Бітріксі з ціною 323 ₴ — а оператор
+   * бачив порожньо й вписував рядок руками, без ціни, після чого
+   * замовлення не давало себе оформити.
+   */
+  const data = await fetchAllRows<{
+    id: string; name: string; sku: string | null; code_1c: string | null
+    uid_1c: string | null; price: number | null; stock: number | null
+    unit: string | null; status: string; category_name: string | null
+    attributes: Record<string, string> | null
+  }>(() => service
     .from('products')
     .select('id, name, sku, code_1c, uid_1c, price, stock, unit, status, category_name, attributes')
     // Активні першими: по телефону здебільшого замовляють те, що є
     .order('status')
-    .order('name')
+    .order('name'))
 
   /*
    * Те, чого на сайті немає.
@@ -63,11 +80,14 @@ async function catalogue(): Promise<CatalogueItem[]> {
    * Ціни там немає — її називає оператор, бо такий товар і продається за
    * домовленістю.
    */
-  const [{ data: fromBitrix }, { data: lastPrices }] = await Promise.all([
-    service.from('bitrix_products')
+  const [fromBitrix, lastPrices] = await Promise.all([
+    fetchAllRows<{
+      product_id: number; uid_1c: string; name: string
+      measure: string | null; price: number | null
+    }>(() => service.from('bitrix_products')
       .select('product_id, uid_1c, name, measure, price')
       .eq('active', true)
-      .order('name'),
+      .order('name')),
     /*
      * Остання ціна продажу — на випадок, коли в каталозі її немає.
      *
@@ -75,18 +95,19 @@ async function catalogue(): Promise<CatalogueItem[]> {
      * продають, її й не має. Тоді беремо ту, за якою товар справді
      * продали востаннє, і кажемо, коли це було.
      */
-    service.from('bitrix_last_price').select('product_id, price, sold_on'),
+    fetchAllRows<{ product_id: number; price: number | null; sold_on: string | null }>(
+      () => service.from('bitrix_last_price').select('product_id, price, sold_on')),
   ])
 
   const priced = new Map(
-    (lastPrices ?? []).map(r => [
+    lastPrices.map(r => [
       Number(r.product_id),
       { price: Number(r.price ?? 0), on: r.sold_on as string | null },
     ]),
   )
 
-  const items = (data ?? []).map(p => {
-    const attrs = (p.attributes as Record<string, string> | null) ?? {}
+  const items = data.map(p => {
+    const attrs = p.attributes ?? {}
     const pack = Number(attrs['Мін'] ?? attrs['Крок'] ?? 0)
     return {
       id: p.id as string,
@@ -125,11 +146,11 @@ async function catalogue(): Promise<CatalogueItem[]> {
     (uid ?? '').replace(/^\[:[a-z]{2}\]/i, '').replace(/\[:\]$/, '').trim()
 
   const known = new Set(
-    (data ?? []).map(p => bare(p.uid_1c as string | null)).filter(Boolean),
+    data.map(p => bare(p.uid_1c)).filter(Boolean),
   )
 
-  const extra: CatalogueItem[] = (fromBitrix ?? [])
-    .filter(b => !known.has(bare(b.uid_1c as string)))
+  const extra: CatalogueItem[] = fromBitrix
+    .filter(b => !known.has(bare(b.uid_1c)))
     .map(b => ({
       id: `bx-${b.product_id}`,
       name: b.name as string,

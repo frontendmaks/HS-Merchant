@@ -333,8 +333,26 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
   if (!date) missing.push('дату')
   if (!slots.some(x => x.label === slot && x.available)) missing.push('період доставки')
   if (!lines.length) missing.push('товари')
-  else if (lines.some(l => l.qty <= 0 || l.price_per_unit <= 0)) {
-    missing.push('кількість і ціну в кожному рядку')
+  else {
+    /*
+     * Кажемо, у якому саме рядку порожньо.
+     *
+     * «Бракує: кількість і ціну в кожному рядку» під списком на десять
+     * позицій не каже нічого: оператор перечитує всі десять, шукаючи
+     * очима нуль. Найчастіше це один вписаний руками рядок, якому не
+     * назвали ціну.
+     */
+    const gaps = lines
+      .map((l, n) => {
+        const what = [
+          l.qty <= 0 ? 'кількість' : null,
+          l.price_per_unit <= 0 ? 'ціну' : null,
+        ].filter(Boolean)
+        return what.length ? `${what.join(' і ')} в рядку ${n + 1}` : null
+      })
+      .filter((x): x is string => !!x)
+
+    missing.push(...gaps)
   }
 
 
