@@ -42,7 +42,14 @@ export function insidePolygon(p: Point, poly: Point[]): boolean {
   return inside
 }
 
-/** Тягне карту з сайту й оновлює нашу копію. */
+/**
+ * Тягне буденну карту з сайту й оновлює нашу копію.
+ *
+ * Карта за цією адресою буденна щодня, і в неділю теж: недільні межі
+ * живуть окремо, у Google My Maps, і їх веде `refreshSundayZones`. Це
+ * перевірено, а не припущено — недільного ранку файл на сайті віддав ті
+ * самі вісім зон із тими самими межами, що й у будні.
+ */
 export async function refreshZones(service: Service): Promise<{ updated: number; error?: string }> {
   try {
     const res = await fetch(ZONES_URL, { signal: AbortSignal.timeout(20_000) })
@@ -127,6 +134,64 @@ export async function zoneForPoint(
   dayKind: DayKind = 'weekday',
 ): Promise<ZoneHit | null> {
   return zoneAt(point, await loadZones(service, dayKind))
+}
+
+/**
+ * Відстань від точки до відрізка, у метрах.
+ *
+ * Поблизу Львова градус довготи коротший за градус широти десь на
+ * третину, тож рахувати в градусах не можна: межа «за сотню метрів» на
+ * заході міста вийшла б утричі далі, ніж на півночі.
+ */
+function metersToSegment(p: Point, a: Point, b: Point): number {
+  const k = 111_320
+  const kx = k * Math.cos((p.lat * Math.PI) / 180)
+  const ax = a.lng * kx, ay = a.lat * k
+  const bx = b.lng * kx, by = b.lat * k
+  const px = p.lng * kx, py = p.lat * k
+
+  const len2 = (bx - ax) ** 2 + (by - ay) ** 2
+  const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / len2)) : 0
+  return Math.hypot(px - (ax + t * (bx - ax)), py - (ay + t * (by - ay)))
+}
+
+/** Скільки метрів від точки до межі зони */
+export function metersToZone(p: Point, polygon: Point[]): number {
+  let best = Infinity
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    best = Math.min(best, metersToSegment(p, polygon[i], polygon[j]))
+  }
+  return best
+}
+
+/**
+ * Наскільки близько межа, коли точка все-таки за нею.
+ *
+ * Межі малюють мишею поверх супутникового знімка, і вони не збігаються з
+ * краєм забудови до метра. Мшана лежить за 196 метрів від недільної
+ * фігури М10 — село, куди возять щонеділі, лишалось без складу через
+ * двісті метрів неточності олівця, і оператор дописував склад руками.
+ *
+ * Тож коли точка впритул до однієї зони й далеко від усіх інших,
+ * беремо цю зону — і кажемо вголос, що взяли її з запасом. Двозначність
+ * не вгадуємо: якщо поруч дві межі, хай вибирає людина.
+ */
+const NEAR_METERS = 400
+
+export function zoneNear(
+  point: Point, zones: ZoneRow[], maxMeters = NEAR_METERS,
+): (ZoneHit & { meters: number }) | null {
+  const ranked = zones
+    .filter(z => z.polygon.length >= 3)
+    .map(z => ({ z, meters: metersToZone(point, z.polygon) }))
+    .sort((a, b) => a.meters - b.meters)
+
+  const [first, second] = ranked
+  if (!first || first.meters > maxMeters) return null
+  // Поруч дві межі — це вже не неточність олівця, а справжня розвилка
+  if (second && second.meters < first.meters * 2) return null
+
+  return { zone: first.z.code, warehouse: first.z.warehouse, meters: Math.round(first.meters) }
 }
 
 const GEOCODER_UA =
@@ -749,6 +814,13 @@ export interface AddressResolution {
   warehouse: string | null
   /** Чому складу немає — щоб оператор бачив причину, а не порожнє поле */
   note: string | null
+  /**
+   * Зону взято з запасом: стільки метрів від точки до її межі.
+   *
+   * Такий склад правильний рівно настільки, наскільки точно намальована
+   * межа, тож його показують як знахідку з приміткою, а не як факт.
+   */
+  nearMeters?: number
 }
 
 export async function resolveAddress(
@@ -780,11 +852,28 @@ export async function resolveAddress(
      * інші свідомо, і підставити склад, якого в цій частині міста того
      * дня немає, гірше за порожнє поле.
      */
+    const zones = await loadZones(service, kind)
+
+    /*
+     * Спершу — чи не впритул вона до однієї з меж.
+     *
+     * Двісті метрів мимо фігури це похибка олівця, а не відмова возити:
+     * саме так Мшана щонеділі лишалась без складу.
+     */
+    const near = zoneNear(point, zones)
+    if (near) {
+      return {
+        point, zone: near.zone, warehouse: near.warehouse, nearMeters: near.meters,
+        note: `Адреса за ${near.meters} м від межі зони — узято ${near.warehouse}, `
+          + 'перевірте склад',
+      }
+    }
+
     const weekdayHint = kind === 'sunday'
       ? await zoneForPoint(service, point, 'weekday')
       : null
     const sundayWarehouses = weekdayHint
-      ? new Set((await loadZones(service, 'sunday')).map(z => z.warehouse))
+      ? new Set(zones.map(z => z.warehouse))
       : null
 
     const hint = weekdayHint && sundayWarehouses?.has(weekdayHint.warehouse)

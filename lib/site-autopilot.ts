@@ -188,6 +188,20 @@ export async function autoProcessSiteOrders(
               }
             } else if (zone.point?.approximate) {
               problems.push(zone.note ?? 'зона приблизна — перевірте склад')
+            } else if (zone.nearMeters && zone.warehouse) {
+              /*
+               * Зону взято з запасом — склад ставимо, але вголос.
+               *
+               * Інакше замовлення лишалось би без складу через двісті
+               * метрів неточності межі, а так воно їде, і поруч написано,
+               * звідки взявся склад.
+               */
+              if (zone.warehouse !== order.warehouse) {
+                patch.warehouse = zone.warehouse
+                crm[FIELD.warehouse] = WAREHOUSE_ID[zone.warehouse] ?? ''
+                result.rezoned++
+              }
+              problems.push(zone.note ?? 'зону взято за найближчою межею')
             } else if (zone.warehouse && zone.warehouse !== order.warehouse) {
               patch.warehouse = zone.warehouse
               crm[FIELD.warehouse] = WAREHOUSE_ID[zone.warehouse] ?? ''
