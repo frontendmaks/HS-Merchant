@@ -768,10 +768,35 @@ export async function resolveAddress(
   const kind = dayKindFor(deliveryDate)
   const hit = await zoneForPoint(service, point, kind)
   if (!hit) {
+    /*
+     * Поза недільними зонами — ще не глухий кут.
+     *
+     * Недільна карта вужча за буденну: околиці, куди возять у будні,
+     * у неділю не накриті жодною фігурою. Оператор бачив лише «оберіть
+     * склад вручну» й вибирав навздогад зі списку з семи назв.
+     *
+     * Сказати, що каже буденна карта, коштує одного читання з бази й
+     * знімає цей здогад. Призначати за нього не беремось: межі в неділю
+     * інші свідомо, і підставити склад, якого в цій частині міста того
+     * дня немає, гірше за порожнє поле.
+     */
+    const weekdayHint = kind === 'sunday'
+      ? await zoneForPoint(service, point, 'weekday')
+      : null
+    const sundayWarehouses = weekdayHint
+      ? new Set((await loadZones(service, 'sunday')).map(z => z.warehouse))
+      : null
+
+    const hint = weekdayHint && sundayWarehouses?.has(weekdayHint.warehouse)
+      ? ` — у будні це ${weekdayHint.warehouse}, і в неділю він возить`
+      : weekdayHint
+        ? ` — у будні це ${weekdayHint.warehouse}, але в неділю він не возить`
+        : ''
+
     return {
       point, zone: null, warehouse: null,
       note: kind === 'sunday'
-        ? 'Адреса поза недільними зонами доставки — оберіть склад вручну'
+        ? `Адреса поза недільними зонами доставки${hint}; оберіть склад вручну`
         : 'Адреса поза зонами доставки — оберіть склад вручну',
     }
   }

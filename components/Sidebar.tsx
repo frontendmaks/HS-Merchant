@@ -32,6 +32,7 @@ const nav = [
     children: [
       { href: '/orders/marketplaces', label: 'Маркетплейси', roles: PAGE_ROLES.orders },
       { href: '/orders/site', label: 'Сайт', roles: PAGE_ROLES.orders },
+      { href: '/orders/zones', label: 'Зони доставки', roles: PAGE_ROLES.orders },
     ],
   },
   { href: '/customers', label: 'Клієнти',       icon: '☻', roles: PAGE_ROLES.customers },
