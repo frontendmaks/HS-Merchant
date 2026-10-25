@@ -24,7 +24,7 @@ type Service = ReturnType<typeof createServiceClient>
 const MARK = '— — — Мерчант — — —'
 
 /** Усе, що потрібно, аби зіставити картку із замовленням і дописати її */
-const COLUMNS = 'id, platform, manual_number, delivery_date, delivery_slot, address, customer_name, customer_phone, warehouse, share_token, status, trello_card_id'
+const COLUMNS = 'id, platform, manual_number, delivery_date, delivery_slot, address, customer_name, customer_phone, warehouse, share_token, status, trello_card_id, duplicate_of'
 
 export interface CardResult {
   looked: number
@@ -100,6 +100,8 @@ interface OrderRow {
   warehouse: string | null
   share_token: string | null
   status: string | null
+  /** Якщо заповнено — це другий примірник, і дошці він не потрібен */
+  duplicate_of: string | null
 }
 
 /**
@@ -269,6 +271,15 @@ export async function enrichNewCards(
        * живого замовлення лишалась без номера й без бланка.
        */
       if (o.status === 'Скасовано') continue
+      /*
+       * Близнюк за картку теж не змагається.
+       *
+       * Доки він рахувався нарівні, день виглядав двозначним — той
+       * самий телефон, той самий день, два замовлення, — і картка
+       * справжнього лишалась без номера. Другий примірник уже
+       * позначений, і його черга — до оператора, а не до дошки.
+       */
+      if (o.duplicate_of) continue
       const key = phoneKey(o.customer_phone)
       if (key && o.delivery_date) {
         const k = `${key}|${o.delivery_date}`
@@ -295,7 +306,7 @@ export async function enrichNewCards(
     for (const o of orders) {
       // Скасоване за картку не змагається: воно вже нікуди не їде, а
       // через нього картка живого замовлення лишалась без зчеплення
-      if (o.delivery_date || o.status === 'Скасовано') continue
+      if (o.delivery_date || o.status === 'Скасовано' || o.duplicate_of) continue
       const key = phoneKey(o.customer_phone)
       if (key) undatedByPhone.set(key, [...(undatedByPhone.get(key) ?? []), o])
     }
@@ -313,7 +324,7 @@ export async function enrichNewCards(
      */
     const byAddress = new Map<string, OrderRow[]>()
     for (const o of orders) {
-      if (o.status === 'Скасовано') continue
+      if (o.status === 'Скасовано' || o.duplicate_of) continue
       const key = addressKey(o.address)
       // Короткі ключі не беремо: «львів» трапляється підрядком у десятку
       // чужих карток, і картка діставала б чужий номер
