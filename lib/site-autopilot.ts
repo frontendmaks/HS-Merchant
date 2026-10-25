@@ -46,6 +46,10 @@ interface Row {
   manual_number: number | null
   number_source: string | null
   status: string | null
+  total: number | null
+  created_at: string | null
+  /** День самого замовлення; `created_at` — це лише час нашого імпорту */
+  order_date: string | null
 }
 
 export interface AutopilotResult {
@@ -53,6 +57,8 @@ export interface AutopilotResult {
   numbered: number
   rezoned: number
   problems: number
+  /** Скільки других примірників зупинено, не давши їм номера */
+  twins: number
   /** Замовлення, відкладені через мовчання геокодера */
   postponed: number
   /** Скільки карток одразу поїхало на дошку */
@@ -77,12 +83,73 @@ function missingFields(order: Row, items: number): string[] {
   return missing
 }
 
+/** Самі цифри номера: «+38 (067) 335-71-55» і «380673357155» — одне й те саме */
+const digits = (phone: string | null | undefined) => (phone ?? '').replace(/\D/g, '').slice(-9)
+
+/** Скільки часу між двома однаковими замовленнями ще означає подвійне натискання */
+const TWIN_MINUTES = 30
+
+/**
+ * Чи це другий примірник уже наявного замовлення.
+ *
+ * Сайт уміє покласти ту саму форму двічі: угоди #200886 і #200887
+ * народились з різницею в двісті мілісекунд — той самий телефон, та сама
+ * адреса, та сама сума, той самий період. Для складу це два ящики
+ * замість одного, і хтось із двох клієнтів свого замовлення не отримає.
+ *
+ * Збігом вважаємо телефон, день і період доставки, день самого
+ * замовлення й суму до копійки протягом півгодини. Телефон порівнюємо
+ * самими цифрами, бо сайт і Бітрікс пишуть його по-різному. Повторне
+ * замовлення того самого дня — річ звичайна, але не на ту саму копійку,
+ * не в той самий період і не за півгодини.
+ *
+ * Нульова сума збігом не вважається: порожнє замовлення — це те, чиї
+ * позиції ще не приїхали, і таких за один завіз буває кілька підряд.
+ * День самого замовлення теж звіряємо, бо наш `created_at` — це час
+ * імпорту: під час разового перезавантаження історії сотні чужих одна
+ * одній угод лягли в базу з різницею в секунди.
+ *
+ * За два місяці правило знайшло п'ять таких пар — приблизно одну на
+ * півтора тижня.
+ *
+ * Старший примірник лишається робочим, молодший зупиняємо: номера не
+ * беремо, на дошку не відправляємо, у чат складу нічого не йде, бо
+ * статус не міняється. Скасовувати угоду самі не беремось — замовлення
+ * чуже, і останнє слово за оператором.
+ */
+async function twinOf(service: Service, order: Row): Promise<Row | null> {
+  const phone = digits(order.customer_phone)
+  if (!phone || !order.delivery_date || !order.created_at) return null
+  if (!order.total || Number(order.total) <= 0) return null
+
+  const { data } = await service
+    .from('orders')
+    .select('id, external_id, manual_number, customer_phone, total, created_at, delivery_slot')
+    .in('platform', ['site', 'manual'])
+    .eq('delivery_date', order.delivery_date)
+    .eq('order_date', order.order_date)
+    .neq('id', order.id)
+    .neq('status', 'Скасовано')
+    .lt('created_at', order.created_at)
+
+  const window = TWIN_MINUTES * 60_000
+  const mine = new Date(order.created_at).getTime()
+
+  const twin = (data ?? []).find(o =>
+    digits(o.customer_phone as string | null) === phone
+    && (o.delivery_slot ?? '') === (order.delivery_slot ?? '')
+    && Math.abs(Number(o.total ?? -1) - Number(order.total)) < 0.01
+    && mine - new Date(o.created_at as string).getTime() < window)
+
+  return (twin as Row | undefined) ?? null
+}
+
 export async function autoProcessSiteOrders(
   service: Service,
   { limit = 50, orderIds }: { limit?: number; orderIds?: string[] } = {},
 ): Promise<AutopilotResult> {
   const result: AutopilotResult = {
-    looked: 0, numbered: 0, rezoned: 0, problems: 0, postponed: 0,
+    looked: 0, numbered: 0, rezoned: 0, problems: 0, postponed: 0, twins: 0,
   }
   // Одне сповіщення наприкінці — див. те саме міркування в синхронізації
   let touched: string | null = null
@@ -109,7 +176,7 @@ export async function autoProcessSiteOrders(
 
     let query = service
       .from('orders')
-      .select('id, external_id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, warehouse_pinned, delivery_zone, delivery_date, delivery_slot, manual_number, number_source, status')
+      .select('id, external_id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, warehouse_pinned, delivery_zone, delivery_date, delivery_slot, manual_number, number_source, status, total, created_at, order_date')
       .in('platform', ['site', 'manual'])
       .is('auto_done_at', null)
       .gte('delivery_date', horizon)
@@ -148,6 +215,31 @@ export async function autoProcessSiteOrders(
       const problems = missingFields(order, count ?? 0)
       const patch: Record<string, unknown> = {}
       const crm: Record<string, unknown> = {}
+
+      /*
+       * Близнюка далі не ведемо.
+       *
+       * Усе, що нижче, готує замовлення до складу: бере номер із
+       * журналу, ставить склад, виштовхує картку на дошку. Для другого
+       * примірника кожна з цих дій — зайвий ящик, зайвий номер і зайвий
+       * рядок у чергу комплектації. Тож зупиняємось тут і лишаємо
+       * помітку з номером старшого примірника, щоб оператору не треба
+       * було шукати, котре з двох справжнє.
+       */
+      const twin = await twinOf(service, order)
+      if (twin) {
+        const which = twin.manual_number != null
+          ? `№${twin.manual_number}`
+          : twin.external_id ?? 'попереднього'
+        patch.auto_problem = `схоже на дублікат ${which} — та сама сума й телефон; `
+          + 'перевірте й скасуйте зайве'
+        patch.auto_done_at = new Date().toISOString()
+        await service.from('orders').update(patch).eq('id', order.id)
+        touched = order.id
+        result.problems++
+        result.twins++
+        continue
+      }
 
       /**
        * Зона й склад — з адреси. Те, що вибрав покупець, буває не тим
@@ -234,8 +326,15 @@ export async function autoProcessSiteOrders(
        * записаною й видимою, але номер замовлення отримує.
        */
       if (order.manual_number == null && order.delivery_date) {
+        /*
+         * Імʼя замовлення в журналі — одразу.
+         *
+         * Доти рядок кілька секунд стояв нічийним, і паралельний прохід
+         * устигав забрати той самий номер собі.
+         */
         const reserved = await reserveNumber(
           service, order.delivery_date, order.customer_name ?? 'замовлення з сайту',
+          order.id,
         )
         if (reserved.source === 'sheet') {
           /**

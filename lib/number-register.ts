@@ -55,11 +55,31 @@ export async function takeNumber(
    * тримає, вирішує журнал, а не черговість запису.
    */
   const { data: held } = await service.from('order_numbers')
-    .select('order_id')
+    .select('order_id, taken_at')
     .eq('delivery_date', date).eq('number', number).is('released_at', null)
     .maybeSingle()
 
   if (held && held.order_id && held.order_id !== orderId) return false
+
+  /*
+   * Щойно взятий нічийний рядок — теж чужий.
+   *
+   * Номер беруть раніше, ніж з'являється замовлення: телефонне ще
+   * заповнюють, перенесене ще не створило угоду. У ці секунди рядок
+   * стоїть без `order_id`, і перевірка вище його пропускала — другий
+   * прохід спокійно ставав на місце першого. Саме так два замовлення
+   * Безпалюк Ольги опинились під сімнадцятим.
+   *
+   * Тож свіжий нічийний рядок вважаємо зайнятим. Той, хто на нього
+   * натрапив, візьме наступний вільний — це дешевше за ящик-двійник.
+   * Давній нічийний — то слід обірваної спроби, його прибирає
+   * `sweepStaleHolds`, і він лишається доступним.
+   */
+  const FRESH_MS = 2 * 60_000
+  if (held && !held.order_id
+    && Date.now() - new Date(held.taken_at as string).getTime() < FRESH_MS) {
+    return false
+  }
 
   const { error } = await service.from('order_numbers').upsert({
     delivery_date: date,
