@@ -105,7 +105,17 @@ export default function DeliveryMap({ zones }: { zones: ZoneLoad[] }) {
       {/* Обведення після кліку — браузерне й тут зайве */}
       <style>{'.zone-shape:focus { outline: none }'}</style>
 
-      <div className="relative">
+      {/*
+        * Карта живе у власному шарі.
+        *
+        * Leaflet роздає своїм панелям і кнопкам масштабу z-index до
+        * тисячі — більше, ніж у бічного меню й будь-якого вікна. На
+        * телефоні це видно одразу: відкрита шухляда лишалась під
+        * картою, і пункти меню доводилось шукати в прогалинах між
+        * зонами. `isolate` замикає ці тисячі всередині, а сам шар
+        * лишається внизу.
+        */}
+      <div className="relative z-0 isolate">
         <div ref={box} className="h-[32rem] rounded-lg overflow-hidden bg-zinc-800" />
         {!ready && (
           <div className="absolute inset-0 grid place-items-center text-zinc-500 text-sm">
