@@ -86,4 +86,38 @@ export function useOrderUpdatesThrottled(
     if (timer.current) clearTimeout(timer.current)
     timer.current = setTimeout(() => handler.current(), quietMs)
   })
+
+  /*
+   * Страховка на випадок, коли сповіщення не прийшло.
+   *
+   * Список перечитував себе лише на повідомлення з каналу. Канал живе
+   * сокетом, а сокет рветься мовчки: телефон заснув, вкладка пішла у
+   * фон, мережа моргнула — і сторінка лишається такою, якою була
+   * годину тому. З боку оператора це виглядає як відсутня
+   * синхронізація: замовлення в Бітріксі є, а «в Мерчанті його немає»,
+   * хоч у базі воно вже дві секунди як лежить.
+   *
+   * Тому перечитуємо ще й самі: коли вкладка повертається на очі й раз
+   * на хвилину просто так. Сторінка читається з бази одним запитом,
+   * тож хвилинний такт нічого не коштує, зате старіших за хвилину
+   * даних на екрані більше не буває.
+   */
+  useEffect(() => {
+    const refresh = () => handler.current()
+
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('online', refresh)
+
+    const beat = setInterval(() => {
+      // У фоні перечитувати нема для кого — зробимо це, щойно повернуться
+      if (document.visibilityState === 'visible') refresh()
+    }, 60_000)
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('online', refresh)
+      clearInterval(beat)
+    }
+  }, [])
 }
