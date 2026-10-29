@@ -290,14 +290,7 @@ export async function pushMarketplaceOrder(
       }
     })
 
-    /*
-     * Сума угоди — своя, бо рядки без артикула Бітрікс не підсумовує.
-     *
-     * `IS_MANUAL_OPPORTUNITY` і є тим вимикачем, який каже йому не
-     * рахувати самому, а взяти наше число.
-     */
-    const total = Math.round(
-      rows.reduce((sum, r) => sum + Number(r.PRICE) * Number(r.QUANTITY), 0) * 100) / 100
+
 
     const warehouse = await getSetting(service, 'marketplace_warehouse')
     const label = platformLabel(order.platform as string)
@@ -349,19 +342,18 @@ export async function pushMarketplaceOrder(
     await bitrix('crm.deal.productrows.set', { id: dealId, rows })
 
     /*
-     * Сума — після рядків, і тільки після них.
+     * Суму угоди Бітрікс рахує сам — і нуль тут не помилка.
      *
-     * Рядок без артикула Бітрікс у суму не зараховує, а записавши
-     * рядки, він суму перераховує — тож число, передане разом із
-     * рештою полів, він тут-таки затирає нулем. Перевірено на угоді
-     * M9: позицій на 1352,70, в угоді «0,00».
+     * Рядок без артикула він у суму не зараховує, а закріпити своє
+     * число не дає, поки рядки взагалі є: перевірено на живій угоді M9
+     * трьома способами — обидва поля разом, прапорець окремо перед
+     * сумою, сума рядком, — щоразу «0,00» при позиціях на 1352,70.
      *
-     * Тому кажемо окремим ходом: ось сума, рахувати не треба.
+     * Це свідомий обмін: порожній рядок у накладній 1С коштує
+     * повернення й другого виїзду кур'єра, а нуль в угоді — лише
+     * цифри у звіті CRM. Справжня сума лишається в самому замовленні,
+     * у бланку й на майданчику.
      */
-    await bitrix('crm.deal.update', {
-      id: dealId,
-      fields: { OPPORTUNITY: total, IS_MANUAL_OPPORTUNITY: 'Y' },
-    })
 
     await service.from('orders')
       .update({ bitrix_deal_id: dealId, bitrix_error: null }).eq('id', orderId)
