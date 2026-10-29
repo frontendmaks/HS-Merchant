@@ -35,7 +35,18 @@ export const PHONE_PREFIX = '+38'
 export function withPhonePrefix(raw: string): string {
   const digits = (raw ?? '').replace(/\D/g, '')
   const rest = digits.startsWith('38') ? digits.slice(2) : digits
-  return PHONE_PREFIX + rest
+
+  /*
+   * Нуль перед оператором дописуємо самі.
+   *
+   * Бачачи в полі «+38», частина людей набирає далі «67…», а не
+   * «067…» — і номер виходить на цифру коротший, хоч на око цілий.
+   * Дев'ять цифр, які не починаються з нуля, це саме такий випадок:
+   * в українських номерах після 380 нуля не буває.
+   */
+  const whole = rest.length === 9 && !rest.startsWith('0') ? `0${rest}` : rest
+
+  return PHONE_PREFIX + whole
 }
 
 /**
