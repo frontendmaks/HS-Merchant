@@ -177,7 +177,7 @@ export async function mergeOrders(
     : goods
 
   const contactId = base.customer_name && base.customer_phone
-    ? await contactFor(base.customer_name, base.customer_phone)
+    ? (await contactFor(base.customer_name, base.customer_phone)).id
     : null
 
   const total = Math.round(

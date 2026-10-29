@@ -125,16 +125,25 @@ export async function productIds(
  * Без нього угода стоїть із порожнім клієнтом, і в CRM її не знайти ні за
  * іменем, ні за телефоном — а саме так її й шукають.
  */
-export async function contactFor(name: string, phone: string): Promise<number | null> {
+export async function contactFor(
+  name: string, phone: string,
+): Promise<{ id: number | null; error?: string }> {
   try {
     const dup = await bitrix<{ CONTACT?: number[] }>('crm.duplicate.findbycomm', {
       entity_type: 'CONTACT', type: 'PHONE', values: [phone],
     })
     const existing = dup?.CONTACT?.[0]
-    if (existing) return Number(existing)
+    if (existing) return { id: Number(existing) }
 
+    /*
+     * Немає за номером — отже, клієнт новий, і ми його заводимо.
+     *
+     * Шукаємо саме за телефоном, а не за іменем: однакових імен повно, а
+     * номер один. Контакт народжується перед угодою, щоб замовлення
+     * одразу стало при людині, а не висіло саме по собі.
+     */
     const parts = name.trim().split(/\s+/)
-    return Number(await bitrix<number>('crm.contact.add', {
+    const created = Number(await bitrix<number>('crm.contact.add', {
       fields: {
         LAST_NAME: parts[0] ?? name,
         NAME: parts.slice(1).join(' ') || '',
@@ -143,9 +152,16 @@ export async function contactFor(name: string, phone: string): Promise<number | 
         ASSIGNED_BY_ID: ASSIGNED_BY,
       },
     }))
-  } catch {
-    // Без контакту угода все одно створиться — ім'я й телефон у ній є
-    return null
+    return { id: Number.isFinite(created) && created > 0 ? created : null }
+  } catch (e) {
+    /*
+     * Без контакту угода все одно створиться — ім'я й телефон у ній є.
+     *
+     * Але мовчати про це не можна: доти невдача зникала разом із
+     * винятком, і замовлення просто лишалось без клієнта в CRM, а
+     * дізнавались про це згодом і не одразу зрозумілим шляхом.
+     */
+    return { id: null, error: e instanceof Error ? e.message : String(e) }
   }
 }
 
@@ -208,9 +224,22 @@ export async function pushOrderToBitrix(
     const delivery = lines.filter(isDeliveryLine)
       .reduce((s, l) => s + Number(l.price_per_unit) * Number(l.ordered_qty), 0)
 
-    const contactId = order.customer_phone && order.customer_name
+    /*
+     * Спершу клієнт, тоді вже його замовлення.
+     *
+     * Новий номер означає нового клієнта: контакт заводиться тут, і
+     * угода народжується вже при ньому.
+     */
+    const contact = order.customer_phone && order.customer_name
       ? await contactFor(order.customer_name, order.customer_phone)
-      : null
+      : { id: null as number | null }
+    const contactId = contact.id
+
+    if (contact.error) {
+      await service.from('orders')
+        .update({ bitrix_error: `клієнта не заведено в CRM: ${contact.error}` })
+        .eq('id', orderId)
+    }
 
     /*
      * Чим угода народжується — і чим її більше не чіпають.

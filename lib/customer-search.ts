@@ -10,9 +10,24 @@ export interface CustomerQuery {
   needle: string
 }
 
-export function customerQuery(raw: string): CustomerQuery | null {
+export function customerQuery(
+  raw: string,
+  /**
+   * Тільки за номером — для форми приймання замовлення.
+   *
+   * Там клієнт упізнається виключно телефоном: ім'я одне на сотню людей,
+   * а набране зі слуху «Коваленко» підставляло картку чужого Коваленка
+   * разом із його адресою. Номер такого не припускає.
+   */
+  phoneOnly = false,
+): CustomerQuery | null {
   const q = raw.trim()
   if (q.length < 2) return null
+
+  if (phoneOnly) {
+    const digits = q.replace(/\D/g, '').replace(/^0+/, '')
+    return digits.length >= 3 ? { column: 'phone_search', needle: digits } : null
+  }
 
   // Номери лежать як «380677361256», а набирають їх і з нуля, і з плюсом —
   // тож ведучі нулі відкидаємо, щоб «067…» знайшло «38067…»

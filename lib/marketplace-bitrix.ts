@@ -289,7 +289,7 @@ export async function pushMarketplaceOrder(
 
     // Клієнт в угоді: знайдемо за телефоном або заведемо нового
     const contactId = order.customer_phone && order.customer_name
-      ? await contactFor(order.customer_name as string, order.customer_phone as string)
+      ? (await contactFor(order.customer_name as string, order.customer_phone as string)).id
       : null
 
     const fields: Record<string, unknown> = {

@@ -162,21 +162,20 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
     crm_error?: string | null
   } | null>(null)
 
-  // Клієнти з минулих замовлень.
-  //
-  // Шукати можна і з поля телефону, і з поля ПІБ: номер оператор чує першим,
-  // але постійний клієнт іноді називається раніше, ніж диктує номер.
+  /*
+   * Клієнта впізнає тільки номер.
+   *
+   * Шукало й по імені, і по адресі — і це коштувало дорого: набране зі
+   * слуху «Коваленко» підставляло картку чужого Коваленка разом із його
+   * адресою, а оператор цього не бачив, бо поля заповнились самі.
+   *
+   * Номер телефону такого не припускає: він або той самий, або інший.
+   * Не знайшли за номером — отже, клієнт новий, і його заводять із нуля.
+   */
   const [byPhone, setByPhone] = useState<Customer[]>([])
-  const [byName, setByName] = useState<Customer[]>([])
-  const [byAddress, setByAddress] = useState<Customer[]>([])
   const [picked, setPicked] = useState<Customer | null>(null)
 
-  /**
-   * Підказка з'являється з другого символа — і в полі телефону, і в полі ПІБ.
-   *
-   * Пошук один на обидва поля: він шукає по імені, телефону й адресі разом,
-   * бо оператор набирає те, що почув, а не те, що підходить під назву поля.
-   */
+  /** Підказка з'являється з четвертої цифри номера — раніше шукати нічого */
   const phoneTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (phoneTimer.current) clearTimeout(phoneTimer.current)
@@ -185,34 +184,20 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
       setByPhone([]); return
     }
     phoneTimer.current = setTimeout(async () => {
-      const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(phone)}`)
+      const r = await fetch(
+        `/api/orders/manual/customers?by=phone&q=${encodeURIComponent(phone)}`)
       const d = await r.json().catch(() => ({}))
       setByPhone(d.customers ?? [])
     }, 120)
   }, [phone, picked])
 
-  const nameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => {
-    if (nameTimer.current) clearTimeout(nameTimer.current)
-    if (name.trim().length < 2 || picked?.names?.[0] === name) { setByName([]); return }
-    nameTimer.current = setTimeout(async () => {
-      const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(name)}`)
-      const d = await r.json().catch(() => ({}))
-      setByName(d.customers ?? [])
-    }, 120)
-  }, [name, picked])
-
-  // Адреса теж шукає: постійному клієнту її диктують рідко — її впізнають
-  const addrSearch = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => {
-    if (addrSearch.current) clearTimeout(addrSearch.current)
-    if (address.trim().length < 4 || picked) { setByAddress([]); return }
-    addrSearch.current = setTimeout(async () => {
-      const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(address)}`)
-      const d = await r.json().catch(() => ({}))
-      setByAddress(d.customers ?? [])
-    }, 200)
-  }, [address, picked])
+  /**
+   * Номер повний, а клієнта за ним немає — значить, новий.
+   *
+   * Чекаємо саме повного номера: на половині набраного «не знайшли» нічого
+   * не означає.
+   */
+  const isNewCustomer = isPhoneComplete(phone) && !picked && byPhone.length === 0
 
   /** Що саме підставила база — щоб відрізнити це від набраного руками. */
   const [filled, setFilled] = useState<{ name: string; address: string } | null>(null)
@@ -231,7 +216,7 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
     if (pickedName) setName(pickedName)
     if (pickedAddress) setAddress(pickedAddress)
     setFilled({ name: pickedName, address: pickedAddress })
-    setByPhone([]); setByName([]); setByAddress([])
+    setByPhone([])
 
     if (pickedAddress) return
     void (async () => {
@@ -468,6 +453,19 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
                 ))}
               </div>
             )}
+            {/*
+              * Не знайшли за номером — отже, клієнт новий.
+              *
+              * Сказати це вголос варто: оператор інакше не певен, чи то
+              * база мовчить, чи то він помилився цифрою. А ще це обіцянка
+              * — контакт заведеться в Бітріксі сам, і вписувати його туди
+              * руками не треба.
+              */}
+            {isNewCustomer && (
+              <div className="text-amber-500 text-xs mt-1.5">
+                Новий клієнт — заведемо його в Бітріксі під час оформлення
+              </div>
+            )}
           </div>
 
           <div className="relative">
@@ -480,20 +478,6 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
               placeholder="Прізвище та ім'я"
               className={field}
             />
-            {byName.length > 0 && (
-              <div className="absolute z-20 left-0 right-0 mt-1 bg-zinc-800 border border-zinc-700
-                              rounded-lg overflow-hidden max-h-60 overflow-y-auto">
-                {byName.map(c => (
-                  <button key={c.key} onClick={() => pick(c)}
-                    className="w-full text-left px-3 py-2 hover:bg-zinc-700 transition-colors">
-                    <div className="text-white text-sm">{c.names[0] ?? c.phone}</div>
-                    <div className="text-zinc-500 text-xs">
-                      {c.phone} · замовлень: {c.orders}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
             {picked && picked.names.length > 1 && (
               <div className="flex gap-1.5 mt-1.5 flex-wrap">
                 {picked.names.slice(0, 4).map(n => (
@@ -514,20 +498,6 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
             </label>
             <input value={address} onChange={e => setAddress(e.target.value)}
               placeholder="Львів, вул. Городоцька, 120, кв. 5" className={field} />
-            {byAddress.length > 0 && (
-              <div className="absolute z-20 left-0 right-0 mt-1 bg-zinc-800 border border-zinc-700
-                              rounded-lg overflow-hidden max-h-60 overflow-y-auto">
-                {byAddress.map(c => (
-                  <button key={c.key} onClick={() => pick(c)}
-                    className="w-full text-left px-3 py-2 hover:bg-zinc-700 transition-colors">
-                    <div className="text-white text-sm truncate">{c.addresses[0] ?? c.phone}</div>
-                    <div className="text-zinc-500 text-xs truncate">
-                      {c.names[0] ?? 'без імені'} · {c.phone}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
             {picked && picked.addresses.length > 1 && (
               <div className="flex gap-1.5 mt-1.5 flex-wrap">
                 {picked.addresses.slice(0, 4).map(a => (
