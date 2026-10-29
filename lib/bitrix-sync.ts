@@ -143,6 +143,8 @@ export interface SyncResult {
   notes?: string[]
   /** Угоди маркетплейсних замовлень — їх веде майданчик, ми їх не чіпаємо */
   skipped?: number
+  /** Скільки разів стадія з угоди виявилась старішою за наш статус */
+  keptStatus?: number
   error?: string
 }
 
@@ -196,6 +198,15 @@ export async function syncSiteOrders(
 
       if (!deals?.length) break
       result.seen += deals.length
+
+      /*
+       * Мить, якою датований цей знімок.
+       *
+       * Далі по сторінці йдемо рядок за рядком, і на сотню угод це
+       * секунди. Усе, що оператор змінить у Мерчанті після цієї миті,
+       * новіше за будь-що в знімку.
+       */
+      const snapshotAt = Date.now()
 
       const people = await contacts(
         [...new Set(deals.map(d => d.CONTACT_ID).filter(Boolean) as string[])],
@@ -277,7 +288,7 @@ export async function syncSiteOrders(
 
         const { data: existing } = await service
           .from('orders')
-          .select('id, platform, status, address, delivery_date, manual_number, number_source, customer_phone, auto_problem')
+          .select('id, platform, status, address, delivery_date, manual_number, number_source, customer_phone, auto_problem, updated_at')
           .eq('bitrix_deal_id', Number(deal.ID)).maybeSingle()
 
         if (existing) {
@@ -312,16 +323,46 @@ export async function syncSiteOrders(
            * записати «бракує телефону» й закрити замовлення, і без
            * повторного огляду воно так і лишилось би без номера.
            */
+          /*
+           * Статус зі знімка не кладемо поверх свіжішого свого.
+           *
+           * Прохід читає сторінку угод, а тоді йде по ній рядок за рядком
+           * — на сотню угод це секунди. Якщо оператор перевів замовлення
+           * саме в цю щілину, прохід дописував поверх нього стадію зі
+           * знімка, зробленого до того. Замовлення верталось у «В
+           * обробці» без жодного запису в журналі, оператор переводив
+           * удруге — за один сьогоднішній ранок таких пар три: №24, №33
+           * і №27, усі «В обробці → Комплектується» двічі поспіль.
+           *
+           * Звіряємося з миттю знімка, а не з годинником Бітрікса: обидва
+           * часи тоді наші, і розбіжність годинників ні на що не впливає.
+           * Зміна, зроблена до знімка, у ньому вже врахована — ми ж
+           * пишемо стадію в угоду перед тим, як відповісти оператору.
+           */
+          const oursSeenAt = new Date(existing.updated_at as string).getTime()
+          const staleStage = Number.isFinite(oursSeenAt)
+            && oursSeenAt > snapshotAt
+            && existing.status !== status
+
           const gainedPhone = !existing.customer_phone && !!fields.customer_phone
           const readdressed = !ours
             && (existing.address !== fields.address
               || (!!existing.auto_problem && gainedPhone))
 
-          await service.from('orders')
-            .update(ours
-              ? { status, updated_at: fields.updated_at }
-              : readdressed ? { ...fields, auto_done_at: null } : fields)
-            .eq('id', existing.id)
+          /* Статус лишаємо свій, решту полів беремо з угоди як завжди */
+          const patch = ours
+            ? (staleStage ? null : { status, updated_at: fields.updated_at })
+            : (() => {
+                const base = readdressed ? { ...fields, auto_done_at: null } : { ...fields }
+                if (staleStage) delete (base as { status?: string }).status
+                return base
+              })()
+
+          if (patch) {
+            await service.from('orders').update(patch).eq('id', existing.id)
+          }
+
+          if (staleStage) result.keptStatus = (result.keptStatus ?? 0) + 1
 
           if (!ours && knownRows) await saveRows(service, existing.id as string, rows)
 
