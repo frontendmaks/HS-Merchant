@@ -13,6 +13,9 @@
 import { bitrix } from '@/lib/bitrix'
 import { createServiceClient } from '@/lib/supabase/service'
 
+/** Номер ящика в угоді — те саме поле, що заповнює й 1С */
+const BOX_NUMBER_FIELD = 'UF_CRM_1607510002583'
+
 type Service = ReturnType<typeof createServiceClient>
 
 export interface Dialog { id: string; title: string }
@@ -90,7 +93,7 @@ export async function sendOrderSheet(
   try {
     const { data: order } = await service
       .from('orders')
-      .select('warehouse, share_token, chat_sent_at, manual_number, external_id')
+      .select('warehouse, share_token, chat_sent_at, manual_number, external_id, bitrix_deal_id')
       .eq('id', orderId).single()
 
     if (!order?.share_token) return { error: 'У замовлення немає бланка' }
@@ -109,13 +112,37 @@ export async function sendOrderSheet(
     const base = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hs-merchant.vercel.app'
 
     /*
-     * Номер ящика, а як його ще немає — видимий номер замовлення.
+     * Номер ящика, а як його ще немає — питаємо в Бітрікса.
      *
-     * Перше те, чим замовлення називають на складі; друге лишається на
-     * випадок, коли бланк пішов раніше, ніж журнал видав число.
+     * Бланк іде в чат тієї ж миті, коли замовлення стає на
+     * комплектацію, а номер подекуди встигає з'явитись раніше в угоді,
+     * ніж у нас: його ставлять у 1С. Тоді в чат летіло технічне
+     * «BX-201119», склад шукав ящик за числом і не знаходив — хоч
+     * варто було відкрити посилання, і номер був там.
+     *
+     * Тож перед надсиланням перепитуємо угоду. Технічне ім'я лишається
+     * на той випадок, коли числа немає ніде: бланк у чаті потрібніший
+     * за красиву назву.
      */
-    const number = order.manual_number != null
-      ? `№${order.manual_number}`
+    let box = order.manual_number as number | null
+
+    if (box == null && order.bitrix_deal_id) {
+      try {
+        const deal = await bitrix<Record<string, unknown>>(
+          'crm.deal.get', { ID: order.bitrix_deal_id })
+        const fromDeal = Number(deal?.[BOX_NUMBER_FIELD])
+        if (Number.isFinite(fromDeal) && fromDeal > 0) {
+          box = fromDeal
+          // Якщо вже дізнались — хай і в нас буде, а не лише в угоді
+          await service.from('orders').update({ manual_number: box }).eq('id', orderId)
+        }
+      } catch {
+        // Мовчання Бітрікса не привід лишати склад без бланка
+      }
+    }
+
+    const number = box != null
+      ? `№${box}`
       : (order.external_id as string | null) ?? ''
 
     await sendToChat(

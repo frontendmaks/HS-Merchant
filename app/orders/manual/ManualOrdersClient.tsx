@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { isPhoneComplete, phoneKey } from '@/lib/phone'
+import { isPhoneComplete, phoneKey, withPhonePrefix, PHONE_PREFIX } from '@/lib/phone'
 import { deliveryFeeFor, isDeliveryLine } from '@/lib/delivery-fee'
 import ZonePicker, { type ZoneShape } from '@/components/ZonePicker'
 import Overlay, { ProductPicker, field, money, type Line } from '@/components/OrderLinesPicker'
@@ -137,7 +137,7 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
   onCreated: () => void
 }) {
   const [name, setName] = useState('')
-  const [phone, setPhone] = useState('')
+  const [phone, setPhone] = useState(PHONE_PREFIX)
   const [address, setAddress] = useState('')
   const [comment, setComment] = useState('')
 
@@ -180,7 +180,10 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
   const phoneTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (phoneTimer.current) clearTimeout(phoneTimer.current)
-    if (phone.trim().length < 2 || picked?.phone === phone) { setByPhone([]); return }
+    // «+38» саме по собі — ще не пошук: інакше підказки падають на порожнє поле
+    if (phone.replace(/\D/g, '').length < 4 || picked?.phone === phone) {
+      setByPhone([]); return
+    }
     phoneTimer.current = setTimeout(async () => {
       const r = await fetch(`/api/orders/manual/customers?q=${encodeURIComponent(phone)}`)
       const d = await r.json().catch(() => ({}))
@@ -224,7 +227,7 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
     const pickedName = c.names[0] ?? ''
     const pickedAddress = c.addresses[0] ?? ''
     setPicked(c)
-    setPhone(c.phone)
+    setPhone(withPhonePrefix(c.phone))
     if (pickedName) setName(pickedName)
     if (pickedAddress) setAddress(pickedAddress)
     setFilled({ name: pickedName, address: pickedAddress })
@@ -251,7 +254,9 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
    * набране руками лишаємо — оператор міг записати ім'я зі слуху й аж потім
    * уточнити номер.
    */
-  function changePhone(next: string) {
+  function changePhone(raw: string) {
+    // Код країни лишається на місці, хоч би що стерли чи вставили
+    const next = withPhonePrefix(raw)
     setPhone(next)
     if (!picked || phoneKey(next) === picked.key) return
 
@@ -446,7 +451,7 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
               autoFocus
               value={phone}
               onChange={e => changePhone(e.target.value)}
-              placeholder="+380…"
+              placeholder="+380671234567"
               className={field}
             />
             {byPhone.length > 0 && (
