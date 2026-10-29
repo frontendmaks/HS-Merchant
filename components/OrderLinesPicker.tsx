@@ -19,6 +19,8 @@ export interface Product {
   bitrix_product_id?: number
   /** Коли цей товар востаннє продали за цією ціною */
   price_from?: string | null
+  /** Знімок із сайту — у товарів Бітрікса його немає */
+  image?: string | null
 }
 
 export interface Line {
@@ -46,7 +48,7 @@ export const money = (n: number) => `${Math.round(n * 100) / 100} ₴`
  */
 export const field = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 min-h-11 lg:min-h-0 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-red-500'
 
-export default function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+export default function Overlay({ children }: { children: React.ReactNode }) {
   return (
     /*
      * Промах повз вікно його не закриває.
@@ -340,6 +342,26 @@ export function ProductPicker({ lines, onChange, total }: {
                            border-b border-zinc-700/50 last:border-0"
               >
                 <div className="flex items-start gap-2">
+                  {/*
+                    * Знімок товару — ліворуч від назви.
+                    *
+                    * Назви в каталозі схожі до нерозрізнення: «Філе куряче»
+                    * за 214 і «Філе куряче» за 378 — це грудка й мариноване.
+                    * Оператор набирає зі слуху, і картинка розрізняє їх
+                    * швидше, ніж артикул, який ще треба знати напам'ять.
+                    *
+                    * Місце під знімок тримається завжди, навіть коли його
+                    * немає: інакше рядки з фото й без нього стоять уступом,
+                    * і око спотикається на кожному.
+                    */}
+                  <span className="w-9 h-9 shrink-0 rounded bg-zinc-900 border border-zinc-700
+                                   overflow-hidden flex items-center justify-center">
+                    {p.image
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={p.image} alt="" loading="lazy"
+                          className="w-full h-full object-cover" />
+                      : <span className="text-zinc-700 text-sm">◰</span>}
+                  </span>
                   <span className="text-white text-sm min-w-0 flex-1">{p.name}</span>
                   <span className="text-zinc-300 text-xs whitespace-nowrap">
                     {p.source === 'bitrix' && !p.price
@@ -347,7 +369,7 @@ export function ProductPicker({ lines, onChange, total }: {
                       : `${p.price} ₴/${p.unit}`}
                   </span>
                 </div>
-                <div className="text-zinc-500 text-xs mt-0.5">
+                <div className="text-zinc-500 text-xs mt-0.5 pl-11">
                   {p.source === 'bitrix'
                     ? (
                       <span className="text-zinc-400">
@@ -359,7 +381,11 @@ export function ProductPicker({ lines, onChange, total }: {
                             : ' · ціни немає — вкажіть'}
                       </span>
                     )
-                    : (p.sku ?? '—')}
+                    : (
+                      /* Звідки товар, видно одразу: каталог сайту має ціну
+                         й залишок, CRM — саму назву */
+                      <>з сайту{p.sku ? ` · ${p.sku}` : ''}</>
+                    )}
                   {p.pack ? ` · фасування ${p.pack} ${p.unit}` : ''}
                   {p.status !== 'active' && (
                     <span className="text-amber-500"> · знято з продажу</span>

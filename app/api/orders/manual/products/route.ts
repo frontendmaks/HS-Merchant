@@ -36,6 +36,15 @@ export interface CatalogueItem {
   price_from?: string | null
   /** Номер товару в Бітріксі — щоб угода отримала саме його, а не назву */
   bitrix_product_id?: number
+  /**
+   * Знімок товару з сайту.
+   *
+   * Оператор набирає зі слуху, а назви в каталозі схожі до нерозрізнення:
+   * «Філе куряче» за 214 і «Філе куряче» за 378 — це грудка й мариноване,
+   * і відрізняє їх тільки картинка. У Бітрікса знімків немає, тож там
+   * лишається порожньо.
+   */
+  image?: string | null
 }
 
 /** Каталог змінюється раз на синхронізацію, не раз на натискання клавіші. */
@@ -62,9 +71,10 @@ async function catalogue(): Promise<CatalogueItem[]> {
     uid_1c: string | null; price: number | null; stock: number | null
     unit: string | null; status: string; category_name: string | null
     attributes: Record<string, string> | null
+    images: string[] | null
   }>(() => service
     .from('products')
-    .select('id, name, sku, code_1c, uid_1c, price, stock, unit, status, category_name, attributes')
+    .select('id, name, sku, code_1c, uid_1c, price, stock, unit, status, category_name, attributes, images')
     // Активні першими: по телефону здебільшого замовляють те, що є
     .order('status')
     .order('name'))
@@ -146,6 +156,7 @@ async function catalogue(): Promise<CatalogueItem[]> {
       stock: p.stock == null ? null : Number(p.stock),
       status: p.status as string,
       category: p.category_name as string | null,
+      image: Array.isArray(p.images) ? p.images[0] ?? null : null,
     }
   })
 

@@ -133,7 +133,7 @@ export default function EditOrder({ id, warehouses, onClose }: {
   }
 
   return (
-    <Overlay onClose={onClose}>
+    <Overlay>
       <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-white font-semibold truncate">Правка замовлення</h2>

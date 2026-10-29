@@ -377,7 +377,7 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
 
   if (done) {
     return (
-      <Overlay onClose={onCreated}>
+      <Overlay>
         <div className="p-6 text-center">
           <div className="text-emerald-400 text-sm">✓ Замовлення прийнято</div>
           <div className="text-white text-3xl font-bold mt-2">№ {done.number}</div>
@@ -419,7 +419,7 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
   }
 
   return (
-    <Overlay onClose={onClose}>
+    <Overlay>
       <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
         <h2 className="text-white font-semibold">Нове замовлення</h2>
         <button onClick={onClose} className="text-zinc-500 hover:text-white text-xl px-1">×</button>
