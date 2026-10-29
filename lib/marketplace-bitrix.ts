@@ -326,8 +326,6 @@ export async function pushMarketplaceOrder(
       STAGE_ID: NEW_STAGE,
       ASSIGNED_BY_ID: ASSIGNED_BY,
       CURRENCY_ID: 'UAH',
-      OPPORTUNITY: total,
-      IS_MANUAL_OPPORTUNITY: 'Y',
       OPENED: 'Y',
       COMMENTS: [order.customer_name, order.customer_phone, order.operator_comment]
         .filter(Boolean).join(' · '),
@@ -349,6 +347,22 @@ export async function pushMarketplaceOrder(
         }))
 
     await bitrix('crm.deal.productrows.set', { id: dealId, rows })
+
+    /*
+     * Сума — після рядків, і тільки після них.
+     *
+     * Рядок без артикула Бітрікс у суму не зараховує, а записавши
+     * рядки, він суму перераховує — тож число, передане разом із
+     * рештою полів, він тут-таки затирає нулем. Перевірено на угоді
+     * M9: позицій на 1352,70, в угоді «0,00».
+     *
+     * Тому кажемо окремим ходом: ось сума, рахувати не треба.
+     */
+    await bitrix('crm.deal.update', {
+      id: dealId,
+      fields: { OPPORTUNITY: total, IS_MANUAL_OPPORTUNITY: 'Y' },
+    })
+
     await service.from('orders')
       .update({ bitrix_deal_id: dealId, bitrix_error: null }).eq('id', orderId)
 
