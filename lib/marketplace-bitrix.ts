@@ -269,15 +269,35 @@ export async function pushMarketplaceOrder(
       const id = uid ? bitrixByUid.get(uid) : undefined
       if (id) matched++
 
+      /*
+       * Маркетплейсна позиція йде в угоду самою назвою.
+       *
+       * Артикул ми сюди ставили заради суми: без нього Бітрікс не
+       * зараховує рядок, і три позиції на 813 ₴ показували «0 грн».
+       * Але далі угоду читає 1С — і те, чого вона не впізнає за
+       * артикулом, лягає в накладну порожнім полем. На маркетплейсі
+       * таких позицій повно: товар майданчика не зобов'язаний існувати
+       * в нашій номенклатурі.
+       *
+       * Тож назва важливіша за артикул: порожній рядок у накладній
+       * коштує повернення й повторного виїзду кур'єра, а сума угоди
+       * ставиться окремо — нижче, вручну.
+       */
       return {
-        // Товар без пари в каталозі йде рядком із назвою — комірник бачить
-        // те саме, тільки сума угоди такий рядок не враховує
-        ...(id ? { PRODUCT_ID: id } : {}),
         PRODUCT_NAME: l.title,
         PRICE: price,
         QUANTITY: Number(l.ordered_qty ?? 1),
       }
     })
+
+    /*
+     * Сума угоди — своя, бо рядки без артикула Бітрікс не підсумовує.
+     *
+     * `IS_MANUAL_OPPORTUNITY` і є тим вимикачем, який каже йому не
+     * рахувати самому, а взяти наше число.
+     */
+    const total = Math.round(
+      rows.reduce((sum, r) => sum + Number(r.PRICE) * Number(r.QUANTITY), 0) * 100) / 100
 
     const warehouse = await getSetting(service, 'marketplace_warehouse')
     const label = platformLabel(order.platform as string)
@@ -306,6 +326,8 @@ export async function pushMarketplaceOrder(
       STAGE_ID: NEW_STAGE,
       ASSIGNED_BY_ID: ASSIGNED_BY,
       CURRENCY_ID: 'UAH',
+      OPPORTUNITY: total,
+      IS_MANUAL_OPPORTUNITY: 'Y',
       OPENED: 'Y',
       COMMENTS: [order.customer_name, order.customer_phone, order.operator_comment]
         .filter(Boolean).join(' · '),
