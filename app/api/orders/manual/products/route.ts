@@ -149,8 +149,25 @@ async function catalogue(): Promise<CatalogueItem[]> {
     data.map(p => bare(p.uid_1c)).filter(Boolean),
   )
 
+  /*
+   * Мертву номенклатуру не пропонуємо.
+   *
+   * У CRM лежить усе, що колись заводили, — чотири тисячі позицій, і
+   * ознаки «видалено» там немає: активними стоять геть усі. А в
+   * магазинах половини цього вже немає роками, і коли така позиція
+   * потрапляє в замовлення, 1С не впізнає її й лишає порожній рядок:
+   * комірник бачить ціну без назви, доважує щось навмання, і
+   * замовлення їде назад із кур'єром.
+   *
+   * Ознакою життя беремо онлайнову ціну: її ставлять тому, що товар
+   * продають. Плюс те, що справді продавали через нас, — такий товар
+   * живий незалежно від того, чи дійшли до нього руки прайсу.
+   */
+  const inUse = (b: { product_id: number; price: number | null }) =>
+    Number(b.price ?? 0) > 0 || (priced.get(Number(b.product_id))?.price ?? 0) > 0
+
   const extra: CatalogueItem[] = fromBitrix
-    .filter(b => !known.has(bare(b.uid_1c)))
+    .filter(b => !known.has(bare(b.uid_1c)) && inUse(b))
     .map(b => ({
       id: `bx-${b.product_id}`,
       name: b.name as string,
