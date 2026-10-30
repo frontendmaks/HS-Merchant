@@ -19,8 +19,16 @@ const CS = process.env.WC_CONSUMER_SECRET
 export const wcConfigured = () => !!(WC_URL && CK && CS)
 
 export interface WcLine {
-  /** Номер товару на сайті — він же `external_id` у нашому каталозі */
+  /**
+   * Номер товару на сайті — він же `external_id` у нашому каталозі.
+   *
+   * Товар зі складом у назві («… - Санта онлайн») — це варіація, і в
+   * неї свій номер, якого в каталозі немає: там лежить номер базового
+   * товару. Тому тримаємо обидва й шукаємо спершу за варіацією, тоді
+   * за базовим.
+   */
   productId: number | null
+  variationId: number | null
   sku: string | null
   name: string
   quantity: number
@@ -73,7 +81,8 @@ export function wcLines(order: WcOrder): WcLine[] {
      */
     const total = Number(l.total ?? 0)
     return {
-      productId: Number(l.variation_id || l.product_id || 0) || null,
+      productId: Number(l.product_id || 0) || null,
+      variationId: Number(l.variation_id || 0) || null,
       sku: (l.sku ?? '').trim() || null,
       name: l.name ?? 'Без назви',
       quantity: qty,

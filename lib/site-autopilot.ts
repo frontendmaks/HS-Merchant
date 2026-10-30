@@ -211,7 +211,8 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
 
     /* Товар шукаємо за номером на сайті — це наш `external_id`; артикул
        лишається запасним ключем для тих, у кого номер не збігся */
-    const ids = lines.map(l => String(l.productId ?? '')).filter(Boolean)
+    const ids = lines.flatMap(l => [l.variationId, l.productId])
+      .filter(Boolean).map(String)
     const skus = lines.map(l => l.sku ?? '').filter(Boolean)
     const { data: products } = await service
       .from('products').select('id, external_id, sku, uid_1c')
@@ -234,11 +235,16 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
     const bitrixIdOf = (p?: { uid_1c?: string | null }) =>
       p?.uid_1c ? bitrixByUid.get(p.uid_1c) ?? null : null
 
+    /* Спершу варіація, тоді базовий товар, наостанок артикул */
+    const pick = (l: { variationId: number | null; productId: number | null; sku: string | null }) =>
+      byExt.get(String(l.variationId)) ?? byExt.get(String(l.productId))
+        ?? (l.sku ? bySku.get(l.sku) : undefined)
+
     await service.rpc('replace_order_items', {
       p_order_id: order.id,
       p_source: 'site',
       p_rows: lines.map((l, i) => {
-        const p = byExt.get(String(l.productId)) ?? (l.sku ? bySku.get(l.sku) : undefined)
+        const p = pick(l)
         return {
           position: i,
           title: l.name,
@@ -261,8 +267,7 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
     await bitrix('crm.deal.productrows.set', {
       id: order.bitrix_deal_id,
       rows: lines.map(l => {
-        const p = byExt.get(String(l.productId)) ?? (l.sku ? bySku.get(l.sku) : undefined)
-        const id = bitrixIdOf(p)
+        const id = bitrixIdOf(pick(l))
         return {
           ...(id ? { PRODUCT_ID: id } : {}),
           PRODUCT_NAME: l.name, PRICE: l.price, QUANTITY: l.quantity,
