@@ -36,16 +36,25 @@ export async function GET(request: NextRequest) {
    *
    * Потрібне, коли змінилось те, як ми їх складаємо: угода вже існує, і
    * звичайний прохід її не чіпає. Викликається руками, не за розкладом.
+   *
+   * Обережно: перезапис кладе наші рядки поверх тих, що в угоді зараз.
+   * Якщо оператор уже поправив її руками — дописав позицію, замінив
+   * товар, — ця правка зникне. Тому є `order=MD-…`: перезаписати рівно
+   * одну, названу угоду, замість «останніх N навмання».
    */
+  const only = request.nextUrl.searchParams.get('order')
   const repush = Number(request.nextUrl.searchParams.get('repush') ?? 0)
-  if (repush > 0) {
-    const { data } = await service
+  if (repush > 0 || only) {
+    const q = service
       .from('orders')
       .select('id, external_id')
       .in('platform', ['maudau', 'rozetka'])
       .not('bitrix_deal_id', 'is', null)
-      .order('order_date', { ascending: false })
-      .limit(Math.min(repush, 100))
+
+    const { data } = only
+      ? await q.eq('external_id', only)
+      : await q.order('order_date', { ascending: false })
+          .limit(Math.min(repush, 100))
 
     const again = []
     for (const o of data ?? []) {
