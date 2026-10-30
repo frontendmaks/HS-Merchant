@@ -289,9 +289,26 @@ export async function pushOrderToBitrix(
       [FIELD.orderKey]: order.external_id ?? '',
     }
 
-    const dealId = order.bitrix_deal_id
-      ? (await bitrix<boolean>('crm.deal.update', { id: order.bitrix_deal_id, fields }),
-         order.bitrix_deal_id)
+    /*
+     * Перш ніж заводити угоду — питаємо, чи її вже не завели.
+     *
+     * Бітрікс уміє створити угоду й одразу відповісти помилкою: на
+     * замовленні МР-02.11-1 він тричі відповів «SQL query error!», і
+     * тричі угода з'явилась — 201274, 201276, 201279. Ми ж, побачивши
+     * помилку, номера не записували й за три хвилини пробували знову.
+     *
+     * Ключ замовлення в угоді наш і унікальний, тож знайти свою роботу
+     * можна до того, як робити її вдруге. Знайшли — беремо ту, що є.
+     */
+    const existingId = order.bitrix_deal_id ?? (order.external_id
+      ? Number((await bitrix<{ ID: string }[]>('crm.deal.list', {
+          filter: { [FIELD.orderKey]: order.external_id }, select: ['ID'],
+          order: { ID: 'ASC' },
+        }))?.[0]?.ID ?? 0) || null
+      : null)
+
+    const dealId = existingId
+      ? (await bitrix<boolean>('crm.deal.update', { id: existingId, fields }), existingId)
       : Number(await bitrix<number>('crm.deal.add', { fields, params: { REGISTER_SONET_EVENT: 'N' } }))
 
     await bitrix('crm.deal.productrows.set', { id: dealId, rows })
