@@ -15,7 +15,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { randomBytes } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import {
-  FIELD, WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY,
+  FIELD, WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, addDealOnce,
 } from '@/lib/bitrix-deal'
 import { slotId } from '@/lib/bitrix-slots'
 import { stageId, stageName } from '@/lib/bitrix-stages'
@@ -59,6 +59,15 @@ export async function relocateOrder(
    * Якщо номерів на новий день не лишилось, переносити нікуди: краще
    * відмовити одразу, ніж створити угоду, яку склад не знайде за номером.
    */
+  /*
+   * Ключ цього переїзду.
+   *
+   * Замовлення те саме, а угода нова, тож до ключа замовлення додаємо
+   * день, на який переносимо: двічі перенести на той самий день не
+   * можна, і повтор після помилки знайде ту саму угоду.
+   */
+  const relocateKey = `${order.external_id ?? order.id}@${toDate}`
+
   const reserved = await reserveNumber(service, toDate, customer)
   if (reserved.source !== 'sheet') {
     return { error: reserved.note ?? 'Не вдалося взяти номер у журналі' }
@@ -102,6 +111,9 @@ export async function relocateOrder(
     [FIELD.deliveryDate]: `${toDate}T03:00:00+03:00`,
     [FIELD.deliverySlot]: await slotId(order.delivery_slot as string | null),
     [FIELD.address]: order.address ?? '',
+    /* Ключ переїзду — щоб після помилки знайти вже створену угоду,
+       а не завести другу на той самий день */
+    [FIELD.orderKey]: relocateKey,
   }
 
   /*
@@ -113,10 +125,7 @@ export async function relocateOrder(
    */
   let dealId: number
   try {
-    dealId = Number(await bitrix<number>('crm.deal.add', {
-      fields, params: { REGISTER_SONET_EVENT: 'N' },
-    }))
-    if (!dealId) throw new Error('Бітрікс не повернув номер угоди')
+    dealId = await addDealOnce(relocateKey, fields)
 
     if (rows.length) {
       await bitrix('crm.deal.productrows.set', {

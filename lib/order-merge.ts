@@ -14,7 +14,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { randomBytes } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import {
-  FIELD, WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, contactFor,
+  FIELD, WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, contactFor, addDealOnce,
 } from '@/lib/bitrix-deal'
 import { slotId } from '@/lib/bitrix-slots'
 import { stageId, stageName } from '@/lib/bitrix-stages'
@@ -184,6 +184,14 @@ export async function mergeOrders(
     lines.reduce((s, l) => s + Number(l.ordered_total ?? 0), 0) * 100,
   ) / 100
 
+  /*
+   * Ключ цього об'єднання: день і склад тих, кого зводимо.
+   *
+   * Двічі звести те саме в той самий день не можна, тож повтор після
+   * помилки знайде ту саму угоду, а не заведе другу.
+   */
+  const mergeKey = `merge-${deliveryDate}-${rows.map(r => r.id).sort().join('_').slice(0, 60)}`
+
   const fields: Record<string, unknown> = {
     TITLE: `Замовлення (об’єднано ${rows.length})`,
     CATEGORY_ID,
@@ -201,14 +209,13 @@ export async function mergeOrders(
     [FIELD.deliveryDate]: `${deliveryDate}T03:00:00+03:00`,
     [FIELD.deliverySlot]: await slotId(deliverySlot),
     [FIELD.address]: base.address ?? '',
+    /* Ключ об'єднання — щоб після помилки знайти вже створену угоду */
+    [FIELD.orderKey]: mergeKey,
   }
 
   let dealId: number
   try {
-    dealId = Number(await bitrix<number>('crm.deal.add', {
-      fields, params: { REGISTER_SONET_EVENT: 'N' },
-    }))
-    if (!dealId) throw new Error('Бітрікс не повернув номер угоди')
+    dealId = await addDealOnce(mergeKey, fields)
 
     await bitrix('crm.deal.productrows.set', {
       id: dealId,

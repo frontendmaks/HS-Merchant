@@ -125,6 +125,51 @@ export async function productIds(
  * Без нього угода стоїть із порожнім клієнтом, і в CRM її не знайти ні за
  * іменем, ні за телефоном — а саме так її й шукають.
  */
+/**
+ * Завести угоду рівно один раз.
+ *
+ * Бітрікс уміє створити угоду й тієї ж миті відповісти помилкою —
+ * «crm.deal.add: SQL query error!». Той, хто бачить помилку, вважає, що
+ * угоди немає, і пробує знову: 30 жовтня так народилось три однакові
+ * угоди на замовлення МР-02.11-1 і двоє осиротілих на перенесеннях.
+ *
+ * Тому перед створенням питаємо, чи угоди з нашим ключем уже немає, а
+ * після помилки питаємо вдруге: якщо вона все-таки з'явилась — це наша
+ * угода, і треба взяти її, а не робити ще одну. Ключ у полі
+ * `UF_ORDER_KEY` наш і унікальний на замовлення.
+ */
+export async function dealByOrderKey(key: string): Promise<number | null> {
+  if (!key) return null
+  const found = await bitrix<{ ID: string }[]>('crm.deal.list', {
+    filter: { [FIELD.orderKey]: key }, select: ['ID'], order: { ID: 'ASC' },
+  })
+  const id = Number(found?.[0]?.ID ?? 0)
+  return id > 0 ? id : null
+}
+
+export async function addDealOnce(
+  key: string,
+  fields: Record<string, unknown>,
+): Promise<number> {
+  const before = await dealByOrderKey(key)
+  if (before) {
+    await bitrix('crm.deal.update', { id: before, fields })
+    return before
+  }
+
+  try {
+    const id = Number(await bitrix<number>('crm.deal.add', {
+      fields, params: { REGISTER_SONET_EVENT: 'N' },
+    }))
+    if (id > 0) return id
+    throw new Error('Бітрікс не повернув номер угоди')
+  } catch (e) {
+    const after = await dealByOrderKey(key)
+    if (after) return after
+    throw e
+  }
+}
+
 export async function contactFor(
   name: string, phone: string,
 ): Promise<{ id: number | null; error?: string }> {
@@ -289,27 +334,10 @@ export async function pushOrderToBitrix(
       [FIELD.orderKey]: order.external_id ?? '',
     }
 
-    /*
-     * Перш ніж заводити угоду — питаємо, чи її вже не завели.
-     *
-     * Бітрікс уміє створити угоду й одразу відповісти помилкою: на
-     * замовленні МР-02.11-1 він тричі відповів «SQL query error!», і
-     * тричі угода з'явилась — 201274, 201276, 201279. Ми ж, побачивши
-     * помилку, номера не записували й за три хвилини пробували знову.
-     *
-     * Ключ замовлення в угоді наш і унікальний, тож знайти свою роботу
-     * можна до того, як робити її вдруге. Знайшли — беремо ту, що є.
-     */
-    const existingId = order.bitrix_deal_id ?? (order.external_id
-      ? Number((await bitrix<{ ID: string }[]>('crm.deal.list', {
-          filter: { [FIELD.orderKey]: order.external_id }, select: ['ID'],
-          order: { ID: 'ASC' },
-        }))?.[0]?.ID ?? 0) || null
-      : null)
-
-    const dealId = existingId
-      ? (await bitrix<boolean>('crm.deal.update', { id: existingId, fields }), existingId)
-      : Number(await bitrix<number>('crm.deal.add', { fields, params: { REGISTER_SONET_EVENT: 'N' } }))
+    const dealId = order.bitrix_deal_id
+      ? (await bitrix<boolean>('crm.deal.update', { id: order.bitrix_deal_id, fields }),
+         order.bitrix_deal_id)
+      : await addDealOnce(order.external_id ?? '', fields)
 
     await bitrix('crm.deal.productrows.set', { id: dealId, rows })
 
