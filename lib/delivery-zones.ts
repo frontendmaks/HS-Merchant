@@ -573,6 +573,32 @@ function queryVariants(address: string): Variant[] {
    */
   const bySurname = withoutGivenName(a)
 
+  /**
+   * Адреса до номера будинку — решта хвоста відкидається.
+   *
+   * «Галицька 13 Churrasco Grill & Beer / М'ясний ресторан» геокодер не
+   * читає зовсім, хоча «Галицька 13» знає чудово: назва закладу збиває
+   * його з пантелику.
+   *
+   * Беремось за це лише там, де немає ком: адресу з комами вже ріже
+   * поділ на частини вище, і втручатись туди означало б псувати те, що
+   * працює. Ріжемо після першого самостійного числа — воно й є номером
+   * будинку; «Сокіл-3» числом не вважаємо, бо цифра там приросла до
+   * назви через дефіс.
+   */
+  const tillHouse = (() => {
+    if (a.includes(',')) return null
+
+    const parts = a.trim().split(/\s+/)
+    for (let i = 1; i < parts.length; i++) {
+      if (!/^\d{1,4}[а-яіїєґa-z]?$/iu.test(parts[i])) continue
+      if (!/\p{L}/u.test(parts[i - 1])) continue
+      const cut = parts.slice(0, i + 1).join(' ')
+      return cut.length >= 5 && cut.length < a.trim().length ? cut : null
+    }
+    return null
+  })()
+
 
   const exact = [
     city(a),
@@ -590,13 +616,18 @@ function queryVariants(address: string): Variant[] {
    * Вона точна за змістом: номер будинку на місці. Але назва вже не та,
    * яку написали, тож пробуємо її лише тоді, коли написане не знайшлося.
    */
-  const shortened: Variant[] = bySurname
-    ? [{
-        query: city(bySurname),
-        // Де має опинитись відповідь: там само, де й сама адреса
-        within: mentionsCity ? (settlement || 'Львів') : 'Львів',
-      }]
-    : []
+  const where = mentionsCity ? (settlement || 'Львів') : 'Львів'
+
+  const shortened: Variant[] = [
+    ...(bySurname
+      ? [{
+          query: city(bySurname),
+          // Де має опинитись відповідь: там само, де й сама адреса
+          within: where,
+        }]
+      : []),
+    ...(tillHouse ? [{ query: city(tillHouse), within: where }] : []),
+  ]
 
   const rough: Variant[] = [
     ...(streetOnly && streetOnly !== a
