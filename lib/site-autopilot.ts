@@ -46,6 +46,7 @@ interface Row {
   manual_number: number | null
   number_source: string | null
   status: string | null
+  platform: string | null
   total: number | null
   created_at: string | null
   /** День самого замовлення; `created_at` — це лише час нашого імпорту */
@@ -59,6 +60,8 @@ export interface AutopilotResult {
   problems: number
   /** Скільки других примірників зупинено, не давши їм номера */
   twins: number
+  /** Скільки порожніх замовлень добрано позиціями з сайту */
+  refilled?: number
   /** Замовлення, відкладені через мовчання геокодера */
   postponed: number
   /** Скільки карток одразу поїхало на дошку */
@@ -187,6 +190,74 @@ export async function retryStranded(
   return out
 }
 
+/**
+ * Дістає позиції з WooCommerce і кладе їх у замовлення та в угоду.
+ *
+ * Повертає, скільки рядків удалося покласти, або 0 — тоді все лишається
+ * як було, з видимою позначкою «бракує: товари».
+ */
+async function fillFromSite(service: Service, order: Row): Promise<number> {
+  try {
+    const { wcConfigured, wcOrderByKey, wcLines } = await import('@/lib/wc-order')
+    if (!wcConfigured()) return 0
+
+    const deal = await bitrix<Record<string, unknown>>('crm.deal.get', { ID: order.bitrix_deal_id })
+    const key = String(deal?.['UF_ORDER_KEY'] ?? '')
+    if (!key.startsWith('wc_order_')) return 0
+
+    const wc = await wcOrderByKey(key)
+    const lines = wc ? wcLines(wc) : []
+    if (!lines.length) return 0
+
+    /* Товар шукаємо за номером на сайті — це наш `external_id`; артикул
+       лишається запасним ключем для тих, у кого номер не збігся */
+    const ids = lines.map(l => String(l.productId ?? '')).filter(Boolean)
+    const skus = lines.map(l => l.sku ?? '').filter(Boolean)
+    const { data: products } = await service
+      .from('products').select('id, external_id, sku, uid_1c')
+      .or(`external_id.in.(${ids.join(',') || 'null'}),sku.in.(${skus.join(',') || 'null'})`)
+
+    const byExt = new Map((products ?? []).map(p => [String(p.external_id), p]))
+    const bySku = new Map((products ?? []).map(p => [String(p.sku), p]))
+
+    await service.rpc('replace_order_items', {
+      p_order_id: order.id,
+      p_source: 'site',
+      p_rows: lines.map((l, i) => {
+        const p = byExt.get(String(l.productId)) ?? (l.sku ? bySku.get(l.sku) : undefined)
+        return {
+          position: i,
+          title: l.name,
+          bitrix_product_id: null,
+          product_id: p?.id ?? null,
+          unit: 'шт',
+          unit_weight: 0,
+          price_per_unit: l.price,
+          ordered_qty: l.quantity,
+          ordered_total: Math.round(l.price * l.quantity * 100) / 100,
+        }
+      }),
+    })
+
+    const total = lines.reduce((sum, l) => sum + l.price * l.quantity, 0)
+    await service.from('orders')
+      .update({ total: Math.round(total * 100) / 100 }).eq('id', order.id)
+
+    /* Угода теж має їх отримати — саме з неї читає 1С */
+    await bitrix('crm.deal.productrows.set', {
+      id: order.bitrix_deal_id,
+      rows: lines.map(l => ({
+        PRODUCT_NAME: l.name, PRICE: l.price, QUANTITY: l.quantity,
+      })),
+    })
+
+    return lines.length
+  } catch {
+    // Сайт мовчить — замовлення лишається з видимою позначкою «бракує товари»
+    return 0
+  }
+}
+
 export async function autoProcessSiteOrders(
   service: Service,
   { limit = 50, orderIds }: { limit?: number; orderIds?: string[] } = {},
@@ -219,7 +290,7 @@ export async function autoProcessSiteOrders(
 
     let query = service
       .from('orders')
-      .select('id, external_id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, warehouse_pinned, delivery_zone, delivery_date, delivery_slot, manual_number, number_source, status, total, created_at, order_date')
+      .select('id, external_id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, warehouse_pinned, delivery_zone, delivery_date, delivery_slot, manual_number, number_source, status, total, created_at, order_date, platform')
       .in('platform', ['site', 'manual'])
       .is('auto_done_at', null)
       .gte('delivery_date', horizon)
@@ -251,9 +322,26 @@ export async function autoProcessSiteOrders(
         updated_at: new Date().toISOString(),
       }, { onConflict: 'key' })
 
-      const { count } = await service
+      let { count } = await service
         .from('order_items').select('id', { count: 'exact', head: true })
         .eq('order_id', order.id).eq('removed', false)
+
+      /*
+       * Порожнє замовлення з сайту добираємо з самого сайту.
+       *
+       * Сайт заводить угоду в Бітріксі й кладе в неї товари — але 30
+       * жовтня поклав не в усі: #201275 і #201278 простояли порожніми
+       * годинами, хоч у замовленні на сайті лежало шістнадцять позицій
+       * на 2961,90 ₴. Склад бачив «0 ₴, бракує товари».
+       *
+       * Угода не єдине джерело: її ключ — це ключ замовлення
+       * WooCommerce, і до нього в нас є доступ. Тож коли порожньо,
+       * питаємо першоджерело, а не чекаємо, доки хтось помітить.
+       */
+      if (!count && order.platform === 'site' && order.bitrix_deal_id) {
+        const filled = await fillFromSite(service, order)
+        if (filled) { count = filled; result.refilled = (result.refilled ?? 0) + 1 }
+      }
 
       const problems = missingFields(order, count ?? 0)
       const patch: Record<string, unknown> = {}
