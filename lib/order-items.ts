@@ -27,6 +27,38 @@ const LOOKALIKES: Record<string, string> = {
 export const foldSku = (s: string | null | undefined): string =>
   (s ?? '').trim().toUpperCase().replace(/[АВЕІКМНОРСТХ]/g, c => LOOKALIKES[c] ?? c)
 
+/**
+ * Той самий артикул, записаний латинкою по-українськи.
+ *
+ * Схожість накреслення й транслітерація — різні речі, і покладатись лише
+ * на першу не можна. Кирилична «С» схожа на латинську «C», але
+ * транслітерується як «S»: наш артикул «СВ_075» маркетплейс шле як
+ * «SV_075», і за схожістю вони не сходяться ніколи. А «Я» схожої літери
+ * не має зовсім — її шлють як «Ya», і всі сто дев'ятнадцять «Я####»
+ * просто не знаходили свого товару.
+ *
+ * Тому ключів у товару два: за схожістю й за транслітерацією. Чужий код
+ * шукаємо обома — котрийсь та збіжиться.
+ *
+ * Порядок має значення: двознаки йдуть перед однолітерними, інакше «Щ»
+ * стало б «Sh» + «ch» замість «Shch».
+ */
+const TRANSLIT: [RegExp, string][] = [
+  [/Щ/g, 'SHCH'], [/Ї/g, 'YI'], [/Ю/g, 'YU'], [/Я/g, 'YA'], [/Є/g, 'YE'],
+  [/Ж/g, 'ZH'], [/Х/g, 'KH'], [/Ц/g, 'TS'], [/Ч/g, 'CH'], [/Ш/g, 'SH'],
+  [/А/g, 'A'], [/Б/g, 'B'], [/В/g, 'V'], [/Г/g, 'H'], [/Ґ/g, 'G'],
+  [/Д/g, 'D'], [/Е/g, 'E'], [/З/g, 'Z'], [/И/g, 'Y'], [/І/g, 'I'],
+  [/Й/g, 'Y'], [/К/g, 'K'], [/Л/g, 'L'], [/М/g, 'M'], [/Н/g, 'N'],
+  [/О/g, 'O'], [/П/g, 'P'], [/Р/g, 'R'], [/С/g, 'S'], [/Т/g, 'T'],
+  [/У/g, 'U'], [/Ф/g, 'F'], [/Ь/g, ''],
+]
+
+export const translitSku = (s: string | null | undefined): string => {
+  let out = (s ?? '').trim().toUpperCase()
+  for (const [from, to] of TRANSLIT) out = out.replace(from, to)
+  return out
+}
+
 /** Weight baked into a product title: "…, 650 г" -> 0.65 kg. */
 export function weightFromTitle(title: string): number | null {
   const m = title.match(/(\d+(?:[.,]\d+)?)\s*(кг|г|мл|л)(?![а-яА-ЯіїєґІЇЄҐa-zA-Z])/i)
@@ -44,23 +76,46 @@ export interface CatalogProduct {
   external_id: string | null
   price: number | null
   attributes: Record<string, string> | null
+  /** Код 1С: товар без нього — слід старого завантаження, а не товар */
+  uid_1c?: string | null
 }
 
 /** Index the catalogue once, then resolve lines against it. */
 export function indexCatalog(products: CatalogProduct[]) {
   const byExternalId = new Map<string, CatalogProduct>()
   const bySku = new Map<string, CatalogProduct>()
+
+  /*
+   * Живий товар головніший за привида.
+   *
+   * Один артикул буває на двох рядках: справжній товар і слід старого
+   * завантаження без коду 1С. Зчепившись із другим, рядок лишається без
+   * коду, за яким його шукає 1С, — тобто саме з тим, що й так болить.
+   */
+  const better = (a: CatalogProduct, b: CatalogProduct | undefined) =>
+    !b || (!b.uid_1c && !!a.uid_1c)
+
+  const put = (map: Map<string, CatalogProduct>, key: string, p: CatalogProduct) => {
+    if (key && better(p, map.get(key))) map.set(key, p)
+  }
+
   for (const p of products) {
-    if (p.external_id) byExternalId.set(p.external_id.trim(), p)
-    if (p.sku) bySku.set(foldSku(p.sku), p)
+    if (p.external_id) put(byExternalId, p.external_id.trim(), p)
+    if (p.sku) {
+      put(bySku, foldSku(p.sku), p)
+      put(bySku, translitSku(p.sku), p)
+    }
   }
   return {
     find(externalId: string | null | undefined): CatalogProduct | null {
       const key = (externalId ?? '').trim()
       if (!key) return null
       // The marketplace sends the WooCommerce id for most lines and a SKU for
-      // the rest, so try both.
-      return byExternalId.get(key) ?? bySku.get(foldSku(key)) ?? null
+      // the rest, so try both — and a SKU in either spelling.
+      return byExternalId.get(key)
+        ?? bySku.get(foldSku(key))
+        ?? bySku.get(translitSku(key))
+        ?? null
     },
   }
 }

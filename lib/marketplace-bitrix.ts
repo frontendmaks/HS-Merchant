@@ -94,6 +94,8 @@ export interface PushResult {
   matched: number
   /** «M12» — номер замовлення в черзі свого майданчика */
   number: string | null
+  /** Позиції, яким не знайшлось артикула 1С — саме вони порожніють у накладній */
+  unmatched?: string[]
 }
 
 /**
@@ -270,24 +272,38 @@ export async function pushMarketplaceOrder(
       if (id) matched++
 
       /*
-       * Маркетплейсна позиція йде в угоду самою назвою.
+       * Артикул у рядку — те, за чим позицію впізнає 1С.
        *
-       * Артикул ми сюди ставили заради суми: без нього Бітрікс не
-       * зараховує рядок, і три позиції на 813 ₴ показували «0 грн».
-       * Але далі угоду читає 1С — і те, чого вона не впізнає за
-       * артикулом, лягає в накладну порожнім полем. На маркетплейсі
-       * таких позицій повно: товар майданчика не зобов'язаний існувати
-       * в нашій номенклатурі.
+       * Учора я прибрав його звідси зовсім, бо 1С лишала порожні поля, —
+       * і помилився в причині. Замовлення з сайту йдуть із артикулами й
+       * читаються правильно; порожніло ж те, чому артикула не знайшлось.
+       * А не знаходився він через написання: наш «Я0008» маркетплейс шле
+       * як «Ya0008», «СВ_075» — як «SV_075», і зіставлення за схожістю
+       * літер таких пар не бачить. Тепер бачить.
        *
-       * Тож назва важливіша за артикул: порожній рядок у накладній
-       * коштує повернення й повторного виїзду кур'єра, а сума угоди
-       * ставиться окремо — нижче, вручну.
+       * Позиція без пари все одно йде назвою — краще рядок, який
+       * комірник прочитає, ніж жодного, — але мовчки вона більше не
+       * проходить: нижче такі перелічені в помилці замовлення.
        */
       return {
+        ...(id ? { PRODUCT_ID: id } : {}),
         PRODUCT_NAME: l.title,
         PRICE: price,
         QUANTITY: Number(l.ordered_qty ?? 1),
       }
+    })
+
+    /*
+     * Позиції, яких 1С не впізнає, називаємо поіменно.
+     *
+     * Доти незіставлена позиція доходила до накладної порожнім полем, і
+     * помічали це вже кур'єр із комірником. Товар міг просто не мати
+     * пари в нашому каталозі — тоді його треба завести, і знати про це
+     * має людина, а не здогадуватись постфактум.
+     */
+    const unmatched = lines.filter(l => {
+      const uid = l.product_id ? uidByOurId.get(l.product_id as string) : undefined
+      return !(uid && bitrixByUid.get(uid))
     })
 
 
@@ -356,9 +372,18 @@ export async function pushMarketplaceOrder(
      */
 
     await service.from('orders')
-      .update({ bitrix_deal_id: dealId, bitrix_error: null }).eq('id', orderId)
+      .update({
+        bitrix_deal_id: dealId,
+        bitrix_error: unmatched.length
+          ? `без артикулу 1С: ${unmatched.map(l => l.title).join('; ')}`
+          : null,
+      })
+      .eq('id', orderId)
 
-    return { dealId, priced, lines: rows.length, matched, number: numberLabel }
+    return {
+      dealId, priced, lines: rows.length, matched, number: numberLabel,
+      unmatched: unmatched.map(l => l.title as string),
+    }
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)
     await service.from('orders').update({ bitrix_error: error }).eq('id', orderId)

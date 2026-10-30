@@ -31,7 +31,7 @@ export async function loadCatalog(service: Service) {
    */
   const data = await fetchAllRows(() => service
     .from('products')
-    .select('id, name, sku, external_id, price, attributes'))
+    .select('id, name, sku, external_id, price, attributes, uid_1c'))
   return indexCatalog((data ?? []) as unknown as CatalogProduct[])
 }
 
