@@ -70,7 +70,7 @@ export async function linkNumber(
 
 export interface ReservedNumber {
   number: number
-  source: 'sheet' | 'local'
+  source: 'register' | 'local'
   /** Що саме завадило взяти номер із журналу */
   note: string | null
 }
@@ -170,71 +170,80 @@ export async function reserveNumber(
   orderId: string | null = null,
 ): Promise<ReservedNumber> {
   /*
-   * Таблиця не відповіла — видаємо номер за власним журналом.
+   * Номер видає журнал Мерчанта. Таблиця — наслідок, а не умова.
    *
-   * Він веде ті самі правила, тож номер виходить той самий, який дала б
-   * таблиця. Позначаємо його «не з журналу», бо в аркуші складу його поки
-   * немає, і це треба звести руками.
+   * Доти головною була Google-таблиця: немає аркуша на місяць, не
+   * відповів Google — немає й номера. 30 жовтня це спинило всі
+   * листопадові замовлення: аркуш на листопад ніхто не завів, і
+   * замовлення висіли без чисел, хоч журнал знав, що вільне.
+   *
+   * Тепер навпаки. Номер береться з журналу — він і так веде всі
+   * правила: найменший вільний, зайняте чужим замовленням не чіпати,
+   * скасоване за номер не змагається. Запис у таблицю лишається, бо
+   * склад працює за аркушем, але невдача там не забирає номер: вона
+   * лише стає приміткою, яку видно в замовленні.
    */
-  const fallback = async (note: string): Promise<ReservedNumber> => {
-    const own = await nextFreeNumber(service, date)
-    const number = own ?? await nextManualNumber(service, date)
-    if (own != null) await noteTaken(service, date, own, customerName, orderId)
-    return { number, source: 'local', note }
-  }
-
-  if (!sheetsConfigured()) {
-    return fallback('Доступ до Google-таблиці не налаштовано')
-  }
-
-  const spreadsheetId = await registerFor(service, date)
-  if (!spreadsheetId) {
-    return fallback(`Таблицю на ${date.slice(0, 7)} не вказано`)
-  }
-
-  const tab = tabNameFor(date)
-  const taken = await takenNumbers(service, date)
-
   for (let attempt = 0; attempt < 8; attempt++) {
-    const rows = await readRange(spreadsheetId, `'${tab}'!A1:B300`)
-    if (!rows) return fallback('Таблиця не відповіла')
-
-    const target = firstFree(rows, taken)
-    if (!target) {
-      return fallback(`У вкладці ${tab} не лишилось вільних номерів`)
+    const number = await nextFreeNumber(service, date)
+    if (number == null) {
+      return {
+        number: await nextManualNumber(service, date),
+        source: 'local',
+        note: `На ${date} у журналі не лишилось вільних номерів`,
+      }
     }
-
-    const { row: targetRow, number } = target
-    const note = null
-
-    // Перечитуємо саме цю комірку — раптом її щойно зайняли
-    const fresh = await readRange(spreadsheetId, `'${tab}'!B${targetRow}`)
-    if (fresh?.[0]?.[0]?.toString().trim()) continue
 
     /*
-     * Журнал — перед аркушем.
+     * Журнал вирішує суперечку.
      *
-     * Він відмовить, якщо номер уже за кимось, і тоді в аркуш писати не
-     * можна: інакше в таблиці з'явиться друге ім'я навпроти того самого
-     * числа, і склад не розрізнить ящики. Відмова — привід узяти
-     * наступний вільний, а не привід здатися.
+     * Відмовив — номер щойно взяв хтось інший, і треба брати наступний,
+     * а не здаватись.
      */
-    const noted = await noteTaken(service, date, number, customerName, orderId)
-    if (!noted) {
-      taken.add(number)
-      continue
-    }
+    if (!await noteTaken(service, date, number, customerName, orderId)) continue
 
-    const written = await writeCell(spreadsheetId, `'${tab}'!B${targetRow}`, customerName)
-    if (!written) {
-      await freeNumber(service, { number, date, reason: 'не вдалося записати в таблицю' })
-      return fallback('Не вдалося записати в таблицю')
-    }
-
-    return { number, source: 'sheet', note }
+    return { number, source: 'register', note: await writeToSheet(service, date, number, customerName) }
   }
 
-  return fallback('Номер зайняли під час запису — спробуйте ще раз')
+  return {
+    number: await nextManualNumber(service, date),
+    source: 'local',
+    note: 'Номер зайняли під час запису — спробуйте ще раз',
+  }
+}
+
+/**
+ * Вписує ім'я в аркуш складу — найкраще, як вийде.
+ *
+ * Повертає примітку, якщо не вийшло: номер при цьому лишається за
+ * замовленням, а рядок в аркуші доведеться звести руками. Мовчати про це
+ * не можна — склад працює за аркушем.
+ */
+async function writeToSheet(
+  service: Service,
+  date: string,
+  number: number,
+  customerName: string,
+): Promise<string | null> {
+  if (!sheetsConfigured()) return 'Доступ до Google-таблиці не налаштовано'
+
+  const spreadsheetId = await registerFor(service, date)
+  if (!spreadsheetId) return `Таблицю на ${date.slice(0, 7)} не вказано`
+
+  const tab = tabNameFor(date)
+  const rows = await readRange(spreadsheetId, `'${tab}'!A1:B300`)
+  if (!rows) return 'Таблиця не відповіла'
+
+  /* Рядок шукаємо за самим числом: порядок рядків в аркуші наш не
+     обов'язково повторює, а число в колонці «№» — повторює завжди */
+  const row = rows.findIndex((r, i) => i > 0 && Number((r?.[0] ?? '').toString().trim()) === number)
+  if (row < 0) return `У вкладці ${tab} немає рядка з номером ${number}`
+
+  const taken = (rows[row]?.[1] ?? '').toString().trim()
+  if (taken) return `У таблиці номер ${number} уже за «${taken}» — звірте аркуш`
+
+  return await writeCell(spreadsheetId, `'${tab}'!B${row + 1}`, customerName)
+    ? null
+    : 'Не вдалося записати в таблицю'
 }
 
 /** «2026-10-23» → «23.10»: так дату пишуть у самому аркуші */

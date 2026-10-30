@@ -382,14 +382,14 @@ function NewOrder({ warehouses, zones, initial, onClose, onCreated }: {
           <div className="text-emerald-400 text-sm">✓ Замовлення прийнято</div>
           <div className="text-white text-3xl font-bold mt-2">№ {done.number}</div>
           <p className="text-zinc-400 text-xs mt-3">
-            {done.source === 'sheet'
-              ? 'Номер узято з журналу, ім’я клієнта вписано в таблицю.'
-              : 'Номер видав Мерчант — у журнал він не потрапив.'}
+            {done.source === 'register'
+              ? 'Номер узято з журналу Мерчанта.'
+              : 'Вільних номерів у журналі не лишилось — число видано по порядку.'}
           </p>
           {done.note && (
             <div className="mt-2 bg-amber-950/40 border border-amber-900 rounded-lg
                             px-3 py-2 text-amber-400 text-xs">
-              {done.note} — впишіть номер у журнал вручну
+              {done.note} — впишіть номер в аркуш складу вручну
             </div>
           )}
           {done.deal_id ? (

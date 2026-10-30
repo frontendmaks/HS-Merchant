@@ -574,8 +574,9 @@ export default async function SiteOrdersPage({
                       {o.manual_number ? `№${o.manual_number}` : o.external_id || '—'}
                     </span>
                     {o.number_source === 'local' && (
-                      <span className="block text-amber-500 text-xs" title="Номер узято локально, не з журналу">
-                        не з журналу
+                      <span className="block text-amber-500 text-xs"
+                        title="Вільних номерів у журналі не лишилось — число видано по порядку">
+                        понад журнал
                       </span>
                     )}
                     {o.chat_sent_at && (

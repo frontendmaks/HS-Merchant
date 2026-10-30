@@ -69,7 +69,7 @@ export async function relocateOrder(
   const relocateKey = `${order.external_id ?? order.id}@${toDate}`
 
   const reserved = await reserveNumber(service, toDate, customer)
-  if (reserved.source !== 'sheet') {
+  if (!(reserved.number > 0)) {
     return { error: reserved.note ?? 'Не вдалося взяти номер у журналі' }
   }
 

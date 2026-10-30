@@ -400,7 +400,15 @@ export async function autoProcessSiteOrders(
           service, order.delivery_date, order.customer_name ?? 'замовлення з сайту',
           order.id,
         )
-        if (reserved.source === 'sheet') {
+        /*
+         * Номер видав журнал — отже, він є.
+         *
+         * Доти ми брали число лише тоді, коли його встигли вписати і в
+         * Google-таблицю: немає аркуша на місяць — немає номера. Тепер
+         * головний журнал, а негаразди з аркушем стають приміткою поруч
+         * із замовленням, а не відмовою видати число.
+         */
+        if (reserved.number > 0) {
           /**
            * Номер зберігаємо тієї ж миті.
            *
@@ -419,6 +427,8 @@ export async function autoProcessSiteOrders(
 
           crm[FIELD.boxNumber] = String(reserved.number)
           result.numbered++
+          // Аркуш складу не прийняв рядок — номер лишається, але про це видно
+          if (reserved.note) problems.push(reserved.note)
         } else {
           problems.push(reserved.note ?? 'номер із журналу не взявся')
         }

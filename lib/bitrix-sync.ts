@@ -376,7 +376,7 @@ export async function syncSiteOrders(
            */
           if (
             !ours
-            && existing.number_source === 'sheet'
+            && existing.number_source
             && existing.manual_number != null
             && existing.delivery_date
             && fields.delivery_date

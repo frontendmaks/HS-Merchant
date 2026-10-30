@@ -71,7 +71,9 @@ export async function DELETE(
    * Видалене замовлення ящика не займає, і лишати його число зайнятим
    * означає діру в нумерації, якої ніхто потім не пояснить.
    */
-  if (order.manual_number != null && order.delivery_date && order.number_source === 'sheet') {
+  /* Номер звільняємо незалежно від того, чи дійшов він до аркуша:
+     тримає його журнал, і саме журнал має його відпустити */
+  if (order.manual_number != null && order.delivery_date && order.number_source) {
     try {
       const { releaseNumber } = await import('@/lib/manual-register')
       await releaseNumber(service, {
