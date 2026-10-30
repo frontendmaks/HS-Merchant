@@ -144,6 +144,49 @@ async function twinOf(service: Service, order: Row): Promise<Row | null> {
   return (twin as Row | undefined) ?? null
 }
 
+/**
+ * Замовлення, яке не доїхало до Бітрікса, заводимо ще раз.
+ *
+ * Телефонне замовлення вирушає в CRM один раз — тієї миті, коли його
+ * прийняли. Якщо Бітрікс у ту секунду відповів помилкою (а він відповідає:
+ * «crm.deal.add: SQL query error!» на замовленні МР-02.11-1), другої
+ * спроби не було ніколи. Правка замовлення теж не рятувала: вона шле
+ * зміни в угоду, якої немає. Замовлення лишалось жити лише в Мерчанті —
+ * і дізнавались про це з того, що воно не з'явилось у складу.
+ *
+ * Беремо тільки свої, телефонні: угода для них наша й має бути. Чуже
+ * замовлення з сайту без угоди — це угода, яку хтось свідомо видалив, і
+ * відроджувати її не нам.
+ */
+export async function retryStranded(
+  service: Service,
+  { limit = 5 }: { limit?: number } = {},
+): Promise<{ tried: number; pushed: number; problems: string[] }> {
+  const out = { tried: 0, pushed: 0, problems: [] as string[] }
+
+  // Тиждень — межа розумного: старше вже розбирали руками
+  const since = new Date(Date.now() - 7 * 86_400_000).toISOString()
+
+  const { data } = await service
+    .from('orders')
+    .select('id, external_id')
+    .eq('platform', 'manual')
+    .is('bitrix_deal_id', null)
+    .gte('created_at', since)
+    .not('status', 'in', `(${CLOSED_STAGES.map(s => `"${s}"`).join(',')})`)
+    .limit(limit)
+
+  for (const order of data ?? []) {
+    out.tried++
+    const { pushOrderToBitrix } = await import('@/lib/bitrix-deal')
+    const res = await pushOrderToBitrix(service, order.id as string)
+    if ('dealId' in res) out.pushed++
+    else out.problems.push(`${order.external_id}: ${res.error}`)
+  }
+
+  return out
+}
+
 export async function autoProcessSiteOrders(
   service: Service,
   { limit = 50, orderIds }: { limit?: number; orderIds?: string[] } = {},

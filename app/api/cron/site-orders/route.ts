@@ -2,7 +2,7 @@ export const maxDuration = 300
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { autoProcessSiteOrders } from '@/lib/site-autopilot'
+import { autoProcessSiteOrders, retryStranded } from '@/lib/site-autopilot'
 import { getSetting } from '@/lib/settings'
 import { bitrixConfigured } from '@/lib/bitrix'
 import { logCronRun } from '@/lib/cron-log'
@@ -34,6 +34,14 @@ export async function GET(request: NextRequest) {
   const startedAt = Date.now()
   const result = await autoProcessSiteOrders(service, { limit })
 
-  await logCronRun(service, 'site-autopilot', startedAt, result, result.error)
-  return NextResponse.json(result, { status: result.error ? 500 : 200 })
+  /*
+   * Заразом підбираємо те, що не доїхало до Бітрікса.
+   *
+   * Окремий розклад на це заводити не варто: прохід і так ходить що три
+   * хвилини, а невдалих заведень одиниці.
+   */
+  const stranded = await retryStranded(service)
+
+  await logCronRun(service, 'site-autopilot', startedAt, { ...result, stranded }, result.error)
+  return NextResponse.json({ ...result, stranded }, { status: result.error ? 500 : 200 })
 }
