@@ -28,6 +28,34 @@ export default async function NumbersPage({
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp.date ?? '') ? sp.date! : today
 
   const service = createServiceClient()
+
+  /*
+   * Чи є таблиця на місяць, який ось-ось почнеться.
+   *
+   * Аркуш на кожен місяць заводять руками, і поки його немає, замовлення
+   * на той місяць номера не отримують: «Таблицю на 2026-11 не вказано».
+   * Помічали це з того, що замовлення на друге листопада лишилось без
+   * числа — тобто вже з проблемою на руках.
+   *
+   * Питаємо заздалегідь: за тиждень до кінця місяця видно, чи наступний
+   * місяць готовий.
+   */
+  const monthAhead = (() => {
+    const d = new Date(`${today}T12:00:00`)
+    d.setDate(d.getDate() + 7)
+    return `${d.toISOString().slice(0, 7)}-01`
+  })()
+
+  const { data: registers } = await service
+    .from('manual_order_registers')
+    .select('month')
+    .in('month', [`${date.slice(0, 7)}-01`, monthAhead])
+
+  const haveMonths = new Set((registers ?? []).map(r => r.month as string))
+  const missingAhead = monthAhead !== `${date.slice(0, 7)}-01` && !haveMonths.has(monthAhead)
+    ? monthAhead.slice(0, 7)
+    : null
+
   const [rows, { data: orders }] = await Promise.all([
     registerFor(service, date),
     service.from('orders')
@@ -64,6 +92,14 @@ export default async function NumbersPage({
         </div>
         <DayPicker date={date} today={today} />
       </div>
+
+      {missingAhead && (
+        <div className="bg-red-950/40 border border-red-900 rounded-lg px-3 py-2
+                        text-red-400 text-xs">
+          Таблиці номерів на {missingAhead} ще немає. Замовлення на той місяць
+          номера не отримають — заведіть аркуш і вкажіть його в Мерчанті.
+        </div>
+      )}
 
       {missing.length > 0 && (
         <div className="bg-amber-950/40 border border-amber-900 rounded-lg px-3 py-2
