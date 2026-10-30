@@ -2,7 +2,7 @@ export const maxDuration = 300
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { autoProcessSiteOrders, retryStranded } from '@/lib/site-autopilot'
+import { autoProcessSiteOrders, retryStranded, sendMissingSheets } from '@/lib/site-autopilot'
 import { getSetting } from '@/lib/settings'
 import { bitrixConfigured } from '@/lib/bitrix'
 import { logCronRun } from '@/lib/cron-log'
@@ -42,6 +42,11 @@ export async function GET(request: NextRequest) {
    */
   const stranded = await retryStranded(service)
 
-  await logCronRun(service, 'site-autopilot', startedAt, { ...result, stranded }, result.error)
-  return NextResponse.json({ ...result, stranded }, { status: result.error ? 500 : 200 })
+  /* І бланки, які не дійшли до складу через збій тієї миті */
+  const sheets = await sendMissingSheets(service)
+
+  await logCronRun(service, 'site-autopilot', startedAt,
+    { ...result, stranded, sheets }, result.error)
+  return NextResponse.json({ ...result, stranded, sheets },
+    { status: result.error ? 500 : 200 })
 }

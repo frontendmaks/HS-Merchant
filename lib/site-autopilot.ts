@@ -282,6 +282,43 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
   }
 }
 
+/**
+ * Бланки, які не дійшли до складу.
+ *
+ * Бланк іде в чат тієї миті, коли замовлення стає на комплектацію. Якщо
+ * саме тоді Бітрікс відповів помилкою — а він сьогодні відповідає на
+ * тому, що насправді проходить, — статус лишався, а бланк не йшов, і
+ * ніщо його не доганяло. Замовлення №69 за 30 жовтня простояло так:
+ * у CRM комплектується, склад про нього не знає.
+ *
+ * Тому доганяємо: замовлення в роботі, якому бланк не надсилали.
+ */
+export async function sendMissingSheets(
+  service: Service,
+  { limit = 5 }: { limit?: number } = {},
+): Promise<{ sent: number; problems: string[] }> {
+  const out = { sent: 0, problems: [] as string[] }
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' })
+
+  const { data } = await service
+    .from('orders')
+    .select('id, external_id')
+    .in('platform', ['site', 'manual'])
+    .in('status', ['Комплектується', 'Спаковано'])
+    .is('chat_sent_at', null)
+    .gte('delivery_date', today)
+    .limit(limit)
+
+  for (const order of data ?? []) {
+    const { sendOrderSheet } = await import('@/lib/bitrix-chat')
+    const res = await sendOrderSheet(service, order.id as string)
+    if ('ok' in res) out.sent++
+    else out.problems.push(`${order.external_id}: ${res.error}`)
+  }
+
+  return out
+}
+
 export async function autoProcessSiteOrders(
   service: Service,
   { limit = 50, orderIds }: { limit?: number; orderIds?: string[] } = {},
