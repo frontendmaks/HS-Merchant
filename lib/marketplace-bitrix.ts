@@ -20,6 +20,7 @@ import { loadPricing, basePrice, roundOffer, categoryFor } from '@/lib/price-cat
 import { calcMarketplacePrice } from '@/lib/feed-xml'
 import {
   WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, contactFor, productIds,
+  updateDealChecked,
 } from '@/lib/bitrix-deal'
 import { getSetting } from '@/lib/settings'
 import { platformLabel, marketNumberLabel } from '@/lib/order-source'
@@ -349,7 +350,7 @@ export async function pushMarketplaceOrder(
     }
 
     const dealId = order.bitrix_deal_id
-      ? (await bitrix('crm.deal.update', { id: order.bitrix_deal_id, fields }),
+      ? (await updateDealChecked(Number(order.bitrix_deal_id), fields),
          Number(order.bitrix_deal_id))
       : Number(await bitrix<number>('crm.deal.add', {
           fields, params: { REGISTER_SONET_EVENT: 'N' },

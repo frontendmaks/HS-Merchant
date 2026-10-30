@@ -29,7 +29,7 @@ const FIELD = {
   warehouse: 'UF_BILL_ADRESS_LIST',
 } as const
 
-import { WAREHOUSE_ID } from '@/lib/bitrix-deal'
+import { WAREHOUSE_ID, updateDealChecked } from '@/lib/bitrix-deal'
 
 interface Row {
   id: string
@@ -584,7 +584,7 @@ export async function autoProcessSiteOrders(
       }
 
       if (Object.keys(crm).length && order.bitrix_deal_id) {
-        await bitrix('crm.deal.update', { id: order.bitrix_deal_id, fields: crm })
+        await updateDealChecked(Number(order.bitrix_deal_id), crm)
       }
 
       patch.auto_problem = problems.length ? problems.join(', ') : null

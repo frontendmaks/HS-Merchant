@@ -20,6 +20,7 @@ import { sendToChat } from '@/lib/bitrix-chat'
 import { getSetting } from '@/lib/settings'
 import { platformLabel, marketNumberLabel } from '@/lib/order-source'
 import { bitrix } from '@/lib/bitrix'
+import { updateDealChecked } from '@/lib/bitrix-deal'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -251,7 +252,7 @@ async function startPicking(service: Service, result: MarketplaceResult): Promis
 
     if (deal?.STAGE_ID === target) continue
 
-    await bitrix('crm.deal.update', { id: dealId, fields: { STAGE_ID: target } })
+    await updateDealChecked(dealId, { STAGE_ID: target })
 
     /*
      * Чат дізнається інше, ніж про замовлення з сайту.

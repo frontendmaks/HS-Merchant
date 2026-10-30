@@ -5,7 +5,7 @@ import { reserveNumber } from '@/lib/manual-register'
 import { changeOrderStatus } from '@/lib/order-status-change'
 import { PICKING_STAGE } from '@/lib/bitrix-chat'
 import { orderSource } from '@/lib/order-source'
-import { bitrix } from '@/lib/bitrix'
+import { updateDealChecked } from '@/lib/bitrix-deal'
 
 /**
  * POST /api/orders/<id>/approve — «беру на себе».
@@ -54,9 +54,8 @@ export async function POST(
       .eq('id', id)
 
     if (order.bitrix_deal_id) {
-      await bitrix('crm.deal.update', {
-        id: order.bitrix_deal_id,
-        fields: { UF_CRM_1607510002583: String(number) },
+      await updateDealChecked(Number(order.bitrix_deal_id), {
+        UF_CRM_1607510002583: String(number),
       })
     }
   }

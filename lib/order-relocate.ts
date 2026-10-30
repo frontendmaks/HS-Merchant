@@ -16,6 +16,7 @@ import { randomBytes } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import {
   FIELD, WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, addDealOnce,
+  updateDealChecked,
 } from '@/lib/bitrix-deal'
 import { slotId } from '@/lib/bitrix-slots'
 import { stageId, stageName } from '@/lib/bitrix-stages'
@@ -205,13 +206,10 @@ export async function relocateOrder(
    */
   const canceled = stageId('Скасовано')
   if (order.bitrix_deal_id && canceled) {
-    await bitrix('crm.deal.update', {
-      id: order.bitrix_deal_id,
-      fields: {
-        STAGE_ID: canceled,
-        [FIELD.boxNumber]: '',
-        COMMENTS: `${order.customer_comment ?? ''}\nПеренесено на ${toDate}, нова угода #${dealId}`.trim(),
-      },
+    await updateDealChecked(Number(order.bitrix_deal_id), {
+      STAGE_ID: canceled,
+      [FIELD.boxNumber]: '',
+      COMMENTS: `${order.customer_comment ?? ''}\nПеренесено на ${toDate}, нова угода #${dealId}`.trim(),
     })
   }
 

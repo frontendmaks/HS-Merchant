@@ -10,7 +10,7 @@ import { randomBytes } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import { createServiceClient } from '@/lib/supabase/service'
 import { stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
-import { WAREHOUSE_ID, CATEGORY_ID } from '@/lib/bitrix-deal'
+import { WAREHOUSE_ID, CATEGORY_ID, updateDealChecked } from '@/lib/bitrix-deal'
 import { slotLabel } from '@/lib/bitrix-slots'
 import { noteExternalNumber } from '@/lib/number-register'
 import { onStatusChanged } from '@/lib/bitrix-chat'
@@ -401,9 +401,8 @@ export async function syncSiteOrders(
             if (moved.ok && moved.number !== Number(existing.manual_number)) {
               await service.from('orders')
                 .update({ manual_number: moved.number }).eq('id', existing.id)
-              await bitrix('crm.deal.update', {
-                id: Number(deal.ID),
-                fields: { UF_CRM_1607510002583: String(moved.number) },
+              await updateDealChecked(Number(deal.ID), {
+                UF_CRM_1607510002583: String(moved.number),
               })
             }
           }

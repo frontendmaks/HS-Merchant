@@ -15,6 +15,7 @@ import { randomBytes } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import {
   FIELD, WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, contactFor, addDealOnce,
+  updateDealChecked,
 } from '@/lib/bitrix-deal'
 import { slotId } from '@/lib/bitrix-slots'
 import { stageId, stageName } from '@/lib/bitrix-stages'
@@ -295,13 +296,10 @@ export async function mergeOrders(
     }
 
     if (row.bitrix_deal_id && canceled) {
-      await bitrix('crm.deal.update', {
-        id: row.bitrix_deal_id,
-        fields: {
-          STAGE_ID: canceled,
-          [FIELD.boxNumber]: '',
-          COMMENTS: `Об’єднано в угоду #${dealId}`,
-        },
+      await updateDealChecked(Number(row.bitrix_deal_id), {
+        STAGE_ID: canceled,
+        [FIELD.boxNumber]: '',
+        COMMENTS: `Об’єднано в угоду #${dealId}`,
       }).catch(() => null)
     }
   }
@@ -342,9 +340,8 @@ export async function mergeOrders(
   })
 
   // Номер ящика склад читає з угоди — там він має з'явитись тієї ж миті
-  await bitrix('crm.deal.update', {
-    id: dealId, fields: { [FIELD.boxNumber]: String(reserved.number) },
-  }).catch(() => null)
+  await updateDealChecked(dealId, { [FIELD.boxNumber]: String(reserved.number) })
+    .catch(() => null)
 
   return {
     orderId: created.id as string,

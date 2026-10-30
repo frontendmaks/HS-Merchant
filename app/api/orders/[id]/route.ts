@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole } from '@/lib/getRole'
 import { currentActor } from '@/lib/order-events'
-import { bitrix, bitrixConfigured } from '@/lib/bitrix'
+import { bitrixConfigured } from '@/lib/bitrix'
 import { stageId } from '@/lib/bitrix-stages'
+import { updateDealChecked } from '@/lib/bitrix-deal'
 
 /** Видаляти може лише той, хто відповідає за дані, а не той, хто їх вводить */
 const ALLOWED = ['super_admin', 'admin']
@@ -54,12 +55,9 @@ export async function DELETE(
   if (bitrixConfigured() && order.bitrix_deal_id) {
     const canceled = stageId('Скасовано')
     try {
-      await bitrix('crm.deal.update', {
-        id: Number(order.bitrix_deal_id),
-        fields: {
-          STAGE_ID: canceled,
-          COMMENTS: `Замовлення видалено з Мерчанта (${actor.name})`,
-        },
+      await updateDealChecked(Number(order.bitrix_deal_id), {
+        STAGE_ID: canceled,
+        COMMENTS: `Замовлення видалено з Мерчанта (${actor.name})`,
       })
       notes.push('угоду закрито')
     } catch { notes.push('угоду закрити не вдалося') }

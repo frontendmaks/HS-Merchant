@@ -169,6 +169,10 @@ export async function updateDealChecked(
     const same = Object.entries(fields).every(([k, v]) => {
       if (v === null || v === undefined) return true
       if (typeof v === 'object') return true
+      /* Коментар Бітрікс зберігає по-своєму — переносами, розміткою,
+         власним обрамленням. Звіряти його означало б ловити розбіжність
+         там, де її немає, і кидати справжню помилку на рівному місці */
+      if (k === 'COMMENTS') return true
       const got = after[k]
       if (got === null || got === undefined) return String(v) === ''
       return String(got).trim() === String(v).trim()
