@@ -138,6 +138,46 @@ export async function productIds(
  * угода, і треба взяти її, а не робити ще одну. Ключ у полі
  * `UF_ORDER_KEY` наш і унікальний на замовлення.
  */
+/**
+ * Оновити угоду й перевірити, чи воно таки сталося.
+ *
+ * Бітрікс сьогодні віддає «crm.deal.update: SQL query error!» на
+ * оновленнях, які насправді проходять: угода 201275 переїхала в
+ * «Комплектується» й лишилась там, а оператор побачив помилку, статус
+ * відкотився на екрані, і бланк на склад не пішов — бо ми вважали, що
+ * нічого не сталось.
+ *
+ * Тому після помилки перечитуємо угоду й звіряємо те, що просили. Збіглось
+ * — значить, робота зроблена, хоч би що відповів Бітрікс. Ні — помилка
+ * справжня, і її видно далі.
+ *
+ * Звіряємо лише прості поля: стадію, числа, рядки. Позиції й коментарі
+ * сюди не потрапляють — їх перевіряють там, де вони важать.
+ */
+export async function updateDealChecked(
+  id: number,
+  fields: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await bitrix('crm.deal.update', { id, fields })
+    return
+  } catch (e) {
+    const after = await bitrix<Record<string, unknown>>('crm.deal.get', { ID: id })
+      .catch(() => null)
+    if (!after) throw e
+
+    const same = Object.entries(fields).every(([k, v]) => {
+      if (v === null || v === undefined) return true
+      if (typeof v === 'object') return true
+      const got = after[k]
+      if (got === null || got === undefined) return String(v) === ''
+      return String(got).trim() === String(v).trim()
+    })
+
+    if (!same) throw e
+  }
+}
+
 export async function dealByOrderKey(key: string): Promise<number | null> {
   if (!key) return null
   const found = await bitrix<{ ID: string }[]>('crm.deal.list', {
@@ -153,7 +193,7 @@ export async function addDealOnce(
 ): Promise<number> {
   const before = await dealByOrderKey(key)
   if (before) {
-    await bitrix('crm.deal.update', { id: before, fields })
+    await updateDealChecked(before, fields)
     return before
   }
 
@@ -335,8 +375,7 @@ export async function pushOrderToBitrix(
     }
 
     const dealId = order.bitrix_deal_id
-      ? (await bitrix<boolean>('crm.deal.update', { id: order.bitrix_deal_id, fields }),
-         order.bitrix_deal_id)
+      ? (await updateDealChecked(order.bitrix_deal_id, fields), order.bitrix_deal_id)
       : await addDealOnce(order.external_id ?? '', fields)
 
     await bitrix('crm.deal.productrows.set', { id: dealId, rows })

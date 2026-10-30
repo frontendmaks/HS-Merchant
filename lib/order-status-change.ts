@@ -136,7 +136,17 @@ export async function changeOrderStatus(
       const stage = stageId(status)
 
       if (dealId && stage) {
-        await bitrix('crm.deal.update', { id: dealId, fields: { STAGE_ID: stage } })
+        /*
+         * Перевіряємо, а не віримо на слово.
+         *
+         * Бітрікс віддає «SQL query error!» на оновленнях, які насправді
+         * проходять. Коли ми вірили помилці, статус відкочувався на
+         * екрані, бланк на склад не йшов, а в самій угоді стадія вже
+         * стояла нова — і склад не бачив замовлення, яке для CRM уже
+         * комплектувалось.
+         */
+        const { updateDealChecked } = await import('@/lib/bitrix-deal')
+        await updateDealChecked(dealId, { STAGE_ID: stage })
       } else if (dealId && !stage) {
         throw new Error(`Статус «${status}» не має стадії в Бітріксі`)
       }
