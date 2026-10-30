@@ -220,6 +220,20 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
     const byExt = new Map((products ?? []).map(p => [String(p.external_id), p]))
     const bySku = new Map((products ?? []).map(p => [String(p.sku), p]))
 
+    /*
+     * Артикул у рядку — те, за чим позицію впізнає 1С.
+     *
+     * Без нього рядок доходить до накладної самою назвою, і 1С лишає
+     * порожнє поле — рівно та біда, через яку кур'єр їздив двічі. Тож
+     * тягнемо той самий ланцюжок, що й для телефонних: наш товар →
+     * код 1С → товар у Бітріксі.
+     */
+    const { productIds } = await import('@/lib/bitrix-deal')
+    const uids = (products ?? []).map(p => p.uid_1c as string | null).filter(Boolean) as string[]
+    const bitrixByUid = await productIds(service, [...new Set(uids)])
+    const bitrixIdOf = (p?: { uid_1c?: string | null }) =>
+      p?.uid_1c ? bitrixByUid.get(p.uid_1c) ?? null : null
+
     await service.rpc('replace_order_items', {
       p_order_id: order.id,
       p_source: 'site',
@@ -228,7 +242,7 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
         return {
           position: i,
           title: l.name,
-          bitrix_product_id: null,
+          bitrix_product_id: bitrixIdOf(p),
           product_id: p?.id ?? null,
           unit: 'шт',
           unit_weight: 0,
@@ -246,9 +260,14 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
     /* Угода теж має їх отримати — саме з неї читає 1С */
     await bitrix('crm.deal.productrows.set', {
       id: order.bitrix_deal_id,
-      rows: lines.map(l => ({
-        PRODUCT_NAME: l.name, PRICE: l.price, QUANTITY: l.quantity,
-      })),
+      rows: lines.map(l => {
+        const p = byExt.get(String(l.productId)) ?? (l.sku ? bySku.get(l.sku) : undefined)
+        const id = bitrixIdOf(p)
+        return {
+          ...(id ? { PRODUCT_ID: id } : {}),
+          PRODUCT_NAME: l.name, PRICE: l.price, QUANTITY: l.quantity,
+        }
+      }),
     })
 
     return lines.length
