@@ -1,3 +1,15 @@
+/*
+ * Перенесення встигає рідко коли за десять секунд.
+ *
+ * Воно бере номер у журналі, читає позиції старої угоди, заводить нову,
+ * кладе в неї рядки, рушить картку на дошці й шле бланк — десяток
+ * викликів у Бітрікс, а Бітрікс буває повільний. Коли відведений час
+ * вичерпувався, Vercel убивав виклик посеред роботи, і браузер діставав
+ * порожню відповідь: «Unexpected end of JSON input». Для оператора це
+ * виглядало як поломка Мерчанта, хоч насправді ми просто не дочекались.
+ */
+export const maxDuration = 300
+
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'

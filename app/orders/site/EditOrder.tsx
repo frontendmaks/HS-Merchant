@@ -99,7 +99,29 @@ export default function EditOrder({ id, warehouses, onClose }: {
           delivery_fee: !dropped,
         }),
       })
-      const d = await r.json()
+      /*
+       * Порожня відповідь — теж відповідь.
+       *
+       * Коли виклик убили за часом або впала мережа, тіло приходить
+       * порожнє, і `r.json()` кидає «Unexpected end of JSON input» —
+       * текст, який оператору нічого не каже. Читаємо обережно й
+       * пояснюємо словами.
+       */
+      const raw = await r.text()
+      let d: {
+        error?: string
+        moved?: { date?: string; number?: number }
+        number_note?: string
+        crm_error?: string
+      } = {}
+      if (raw.trim()) {
+        try { d = JSON.parse(raw) } catch { d = {} }
+      }
+      if (!raw.trim()) {
+        throw new Error(r.ok
+          ? 'Сервер не відповів до кінця. Оновіть сторінку: правки могли зберегтись'
+          : `Сервер відповів помилкою ${r.status}. Оновіть сторінку й перевірте замовлення`)
+      }
       if (!r.ok) throw new Error(d.error || 'Не вдалося зберегти')
       if (d.moved) {
         /*
