@@ -2,13 +2,17 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import EditOrder from './EditOrder'
+import { useOrderViewers, type Viewer } from '@/lib/use-order-presence'
 
-export default function EditButton({ id, warehouses, recheck }: {
+export default function EditButton({ id, warehouses, recheck, me }: {
   id: string
   warehouses: string[]
   /** Замовлення з хибою — поруч стають кнопки огляду й ручного рішення */
   recheck?: boolean
+  /** Хто дивиться список — щоб не показувати себе самому собі */
+  me?: Viewer | null
 }) {
+  const viewers = useOrderViewers(id, me ?? null)
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -37,6 +41,16 @@ export default function EditButton({ id, warehouses, recheck }: {
       >
         Правити
       </button>
+      {/* Картка в когось відкрита. Не заборона — попередження: збереже
+          той, хто натисне останнім, і про це краще знати до того */}
+      {viewers.length > 0 && (
+        <span
+          className="text-amber-500 text-xs whitespace-nowrap"
+          title={`Зараз правлять: ${viewers.join(', ')}. Збережеться те, що запишуть останнім`}
+        >
+          ● {viewers.join(', ')}
+        </span>
+      )}
       {recheck && (
         <button
           disabled={busy}
@@ -69,7 +83,10 @@ export default function EditButton({ id, warehouses, recheck }: {
         </button>
       )}
       {failed && <span className="text-red-400 text-xs">{failed}</span>}
-      {open && <EditOrder id={id} warehouses={warehouses} onClose={() => setOpen(false)} />}
+      {open && (
+        <EditOrder id={id} warehouses={warehouses} me={me ?? null}
+          onClose={() => setOpen(false)} />
+      )}
     </div>
   )
 }

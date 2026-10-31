@@ -5,6 +5,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { dealUrl } from '@/lib/bitrix-portal'
 import { getCurrentRole } from '@/lib/getRole'
+import { currentActor } from '@/lib/order-events'
 import { isInProgress } from '@/lib/order-statuses'
 import { SITE_PLATFORMS, platformLabel } from '@/lib/order-source'
 import StatusSelect from '../StatusSelect'
@@ -121,6 +122,8 @@ export default async function SiteOrdersPage({
 }) {
   const role = await getCurrentRole()
   const readOnly = role === 'viewer'
+  /* Хто дивиться список: поруч із чужою відкритою карткою стане його ім'я */
+  const me = await currentActor()
   const {
     date: dateParam, stage = 'new', wh = '', slot = '', src = '', q = '', period = '',
   } = await searchParams
@@ -533,7 +536,7 @@ export default async function SiteOrdersPage({
               <div className="flex items-center gap-2
                               [&_button]:h-11 [&_button]:px-3 [&_button]:rounded-lg
                               [&_button]:bg-zinc-800/60 [&_button]:text-sm">
-                <EditButton id={o.id} warehouses={warehouses} recheck={!!o.auto_problem} />
+                <EditButton id={o.id} warehouses={warehouses} recheck={!!o.auto_problem} me={me} />
               </div>
             </div>
           ))}
@@ -697,7 +700,7 @@ export default async function SiteOrdersPage({
                     />
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">
-                    <EditButton id={o.id} warehouses={warehouses} recheck={!!o.auto_problem} />
+                    <EditButton id={o.id} warehouses={warehouses} recheck={!!o.auto_problem} me={me} />
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     {o.share_token && (

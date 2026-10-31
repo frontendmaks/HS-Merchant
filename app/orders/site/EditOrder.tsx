@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Overlay, { ProductPicker, field, money, type Line } from '@/components/OrderLinesPicker'
 import { deliveryFeeFor, DELIVERY_TITLE } from '@/lib/delivery-fee'
 import { SLOTS } from '@/lib/delivery-slots'
+import { useViewingOrder, useOrderViewers, type Viewer } from '@/lib/use-order-presence'
 
 /**
  * Правка замовлення з сайту.
@@ -12,12 +13,16 @@ import { SLOTS } from '@/lib/delivery-slots'
  * робота: оператор говорить із клієнтом і міняє замовлення. Після збереження
  * угода в Бітріксі оновлюється, інакше склад збирав би стару версію.
  */
-export default function EditOrder({ id, warehouses, onClose }: {
+export default function EditOrder({ id, warehouses, onClose, me }: {
   id: string
   warehouses: string[]
   onClose: () => void
+  /** Хто править — щоб інші бачили, що картка зайнята */
+  me?: Viewer | null
 }) {
   const router = useRouter()
+  useViewingOrder(id, me ?? null)
+  const viewers = useOrderViewers(id, me ?? null)
   const [lines, setLines] = useState<Line[]>([])
   const [address, setAddress] = useState('')
   const [warehouse, setWarehouse] = useState('')
@@ -160,6 +165,14 @@ export default function EditOrder({ id, warehouses, onClose }: {
         <div className="min-w-0">
           <h2 className="text-white font-semibold truncate">Правка замовлення</h2>
           <div className="text-zinc-500 text-xs truncate">{title}</div>
+          {/* Поруч править ще хтось. Замків немає — збережеться те, що
+              запишуть останнім, — тож домовитись треба зараз, не потім */}
+          {viewers.length > 0 && (
+            <div className="text-amber-500 text-xs mt-0.5 truncate">
+              ● Це замовлення зараз править {viewers.join(', ')} — збережеться
+              {' '}те, що запишуть останнім
+            </div>
+          )}
         </div>
         {/* Закриття — сорок чотири пікселі: у хрестик цілять пальцем */}
         <button onClick={onClose}
