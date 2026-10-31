@@ -215,7 +215,38 @@ export async function orderChecks(service: Service): Promise<Check[]> {
     .gte('delivery_date', today)
     .not('status', 'in', '("Скасовано","Виконано")')
 
-  const [noSheet, crmError, chatError, noWarehouse, noDeal, noNumber, noZone] =
+  /*
+   * Позиція без товару в каталозі — це порожнє поле в 1С.
+   *
+   * Рядок, який не знайшов свого товару, доходить до накладної самою
+   * назвою, і 1С лишає номенклатуру порожньою: комірник бачить
+   * кількості й суму, а що збирати — ні. Поки цього не було видно,
+   * дізнавались ми про таке від нього ж, у день доставки.
+   */
+  const unlinked = async () => {
+    const { data } = await service
+      .from('order_items')
+      .select('order_id, orders!inner(manual_number, external_id, status, delivery_date, platform)')
+      .is('product_id', null)
+      .eq('removed', false)
+      .gte('orders.delivery_date', today)
+      .in('orders.platform', SITE)
+      .not('orders.status', 'in', '("Скасовано","Виконано")')
+      .limit(500)
+
+    const seen = new Map<string, string>()
+    for (const row of data ?? []) {
+      /* PostgREST повертає вкладене або об'єктом, або масивом з одного —
+         залежно від того, як він вирішив про зв'язок */
+      const joined = (row as unknown as { orders?: unknown }).orders
+      const o = (Array.isArray(joined) ? joined[0] : joined) as
+        { manual_number: number | null; external_id: string | null } | undefined
+      if (o) seen.set(row.order_id as string, label(o))
+    }
+    return { count: seen.size, data: [...seen.values()] }
+  }
+
+  const [noSheet, crmError, chatError, noWarehouse, noDeal, noNumber, noZone, noProduct] =
     await Promise.all([
       base().in('platform', SITE).in('status', [PICKING, PACKED]).is('chat_sent_at', null),
       base().not('bitrix_error', 'is', null),
@@ -224,6 +255,7 @@ export async function orderChecks(service: Service): Promise<Check[]> {
       base().in('platform', SITE).is('bitrix_deal_id', null),
       base().in('platform', SITE).in('status', [PICKING, PACKED]).is('manual_number', null),
       base().in('platform', SITE).is('delivery_zone', null),
+      unlinked(),
     ])
 
   const checks: Check[] = [
@@ -256,6 +288,13 @@ export async function orderChecks(service: Service): Promise<Check[]> {
       why: 'комірник не знає, в який ящик складати',
       count: noNumber.count ?? noNumber.data?.length ?? 0, sample: pick(noNumber.data),
       severity: 'bad', href: '/orders/numbers',
+    },
+    {
+      key: 'no-product', label: 'Позиції без товару в каталозі',
+      why: '1С покаже порожню номенклатуру — комірник не знатиме, що збирати',
+      count: noProduct.count,
+      sample: noProduct.data.slice(0, 6),
+      severity: 'bad', href: '/orders/site',
     },
     {
       key: 'chat-error', label: 'Бланк не надіслався',

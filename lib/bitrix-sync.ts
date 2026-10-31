@@ -11,6 +11,9 @@ import { bitrix } from '@/lib/bitrix'
 import { createServiceClient } from '@/lib/supabase/service'
 import { stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
 import { WAREHOUSE_ID, CATEGORY_ID, updateDealChecked } from '@/lib/bitrix-deal'
+import {
+  bareName, specFromAttr, unitFromRow, needsOwnQuery, type Spec,
+} from '@/lib/catalog-match'
 import { slotLabel } from '@/lib/bitrix-slots'
 import { noteExternalNumber } from '@/lib/number-register'
 import { onStatusChanged } from '@/lib/bitrix-chat'
@@ -85,55 +88,8 @@ interface Row {
  * означало б показати «0.6 шт філе» там, де насправді 600 грамів: комірник
  * збере не те, а оператор не помітить.
  */
-function unitOf(row: Row): string {
-  const m = (row.MEASURE_NAME ?? '').trim().toLowerCase()
-  if (m.startsWith('кг')) return 'кг'
-  if (m) return 'шт'
-  // Міри немає — дробова кількість сама себе видає: штуками так не беруть
-  return Number(row.QUANTITY) % 1 === 0 ? 'шт' : 'кг'
-}
-
-/**
- * Назва позиції без хвоста складу.
- *
- * У каталозі Бітрікса той самий товар заведено окремо на кожну точку:
- * «Філе куряче - АС 2 онлайн». У нашому каталозі він один — «Філе
- * куряче», — і без цього зрізання вони не сходяться ніколи.
- */
-function bareName(title: string): string {
-  const t = title.trim()
-  for (const w of Object.keys(WAREHOUSE_ID)) {
-    const tail = ` - ${w}`
-    if (t.toLowerCase().endsWith(tail.toLowerCase())) return t.slice(0, -tail.length).trim()
-  }
-  return t
-}
-
-interface Spec { unit: string; pack: number; productId?: string }
-
-/**
- * Одиниця й вага однієї штуки з атрибутів товару.
- *
- * Знаючи, скільки важить штука, оператор може говорити з клієнтом
- * штуками, а не вагою: «чотири сардельки» — це 0.44 кг, і перерахує їх
- * Мерчант, а не людина в голові.
- *
- * Саме вага штуки, а не «Мін». «Мін» — найменша порція, якою товар
- * продається: сардельки замовляються від 400 грамів, але важить одна
- * сарделька 110. Я сплутав ці два числа, і перемикач показував «1 шт =
- * 0.4 кг» — учетверо більше за правду. Якщо сайт ваги штуки не дав,
- * перемикача краще не показувати взагалі: мовчання чесніше за вигадане
- * число, яке потраплятиме в накладну.
- */
-const specFromAttr = (attrs: Record<string, string> | null): Spec | null => {
-  const a = attrs?.['Одиниця']?.trim().toLowerCase()
-  if (!a) return null
-  const unit = a === 'кг' || a === 'л' ? 'кг' : 'шт'
-  const piece = parseFloat(attrs?.['Вага шт'] ?? '')
-  /* Вага штуки важить лише для вагового: у штучного «одна штука» і так
-     одна штука, і перемикати там нема чого */
-  return { unit, pack: unit === 'кг' && Number.isFinite(piece) && piece > 0 ? piece : 0 }
-}
+const unitOf = (row: Row): string =>
+  unitFromRow(row.MEASURE_NAME, Number(row.QUANTITY))
 
 /**
  * Одиниця з нашого каталогу, а не з того, що пришле Бітрікс.
@@ -198,7 +154,7 @@ async function catalogUnits(
        * порожнім полем.
        */
       for (const name of names) {
-        if (byName.has(name)) continue
+        if (byName.has(name) || !needsOwnQuery(name)) continue
         const { data: one } = await service
           .from('products').select('id, name, attributes, status')
           .eq('name', name).order('status').limit(5)
