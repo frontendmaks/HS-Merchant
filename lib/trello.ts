@@ -5,6 +5,8 @@
  * чинна інтеграція, не ми. Наша справа скромніша: дописати в картку те,
  * чого в ній бракує, — номер ящика й посилання на бланк.
  */
+import { isTest, heldBack } from '@/lib/env-mode'
+
 const BASE = 'https://api.trello.com/1'
 
 export const trelloConfigured = () =>
@@ -30,6 +32,11 @@ async function call<T>(
     key: process.env.TRELLO_KEY ?? '',
     token: process.env.TRELLO_TOKEN ?? '',
   })
+
+  if (isTest && method !== 'GET') {
+    heldBack('Trello', `${method} ${path}`, params)
+    return {} as T
+  }
 
   const res = await fetch(`${BASE}${path}?${query}`, {
     method,

@@ -6,6 +6,8 @@
  * ні у відповіді: помилку від Бітрікса ми показуємо, адресу запиту ні.
  */
 
+import { isTest, heldBack } from '@/lib/env-mode'
+
 export const bitrixConfigured = () => !!process.env.BITRIX_WEBHOOK_URL
 
 /**
@@ -63,6 +65,22 @@ export async function bitrix<T = unknown>(
   return call<T>(method, params, process.env.BITRIX_WEBHOOK_URL, 'BITRIX_WEBHOOK_URL')
 }
 
+/**
+ * Що можна в тестовому середовищі.
+ *
+ * Дозволяємо читання, забороняємо решту — а не навпаки. Перелік
+ * заборонених довелось би поповнювати щоразу, як у Бітріксі
+ * з'являється новий метод або в нас новий виклик, і одного забутого
+ * рядка досить, щоб тест завів справжню угоду. Перелік дозволених
+ * такої ціни помилки не має: забутий читальний метод просто впаде з
+ * виразною помилкою, і його додадуть.
+ */
+const READ_ONLY = /\.(get|list|fields|getfields|search|getlist)$/i
+
+function allowedInTest(method: string): boolean {
+  return READ_ONLY.test(method)
+}
+
 async function call<T>(
   method: string,
   params: Record<string, unknown>,
@@ -70,6 +88,20 @@ async function call<T>(
   which: string,
 ): Promise<T> {
   if (!hook) throw new Error(`${which} не налаштовано`)
+
+  if (isTest && !allowedInTest(method)) {
+    heldBack('Бітрікс', method, params)
+    /*
+     * Відповідаємо так, ніби вийшло.
+     *
+     * Інакше тест перевіряв би лише першу половину ланцюжка: заведення
+     * угоди впало б, і все, що мало статись далі — номер ящика, бланк,
+     * картка на дошці, — не перевірилось би ніколи. Номер угоди
+     * вигаданий і впізнаваний: такого в Бітріксі немає й не буде.
+     */
+    if (/\.add$/i.test(method)) return (9_000_000 + Math.floor(Math.random() * 999_999)) as T
+    return true as T
+  }
 
   const body: string[] = []
   for (const [k, v] of Object.entries(params)) toForm(v, k, body)

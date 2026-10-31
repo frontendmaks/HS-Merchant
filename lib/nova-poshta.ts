@@ -1,3 +1,4 @@
+import { isTest, heldBack } from '@/lib/env-mode'
 /**
  * Nova Poshta waybills.
  *
@@ -323,11 +324,20 @@ export interface WaybillResult {
 
 export const hasNpKey = () => !!process.env.NOVA_POSHTA_API_KEY
 
+/* Довідники міст і відділень читати можна; накладні — ні: за кожною
+   стоять гроші й реальна посилка */
+const NP_WRITES = /^(save|delete|update)$/i
+
 async function call<T>(modelName: string, calledMethod: string, methodProperties: unknown): Promise<{
   success: boolean
   data?: T[]
   errors?: string[]
 }> {
+  if (isTest && NP_WRITES.test(calledMethod)) {
+    heldBack('Нова Пошта', `${modelName}.${calledMethod}`, methodProperties)
+    return { success: true, data: [] as T[] }
+  }
+
   const res = await fetch(API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

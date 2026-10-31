@@ -5,6 +5,8 @@
  * Людина має почати розмову або поділитись контактом — тоді в нас
  * з'являється її chat_id, і лише тоді ми можемо щось сказати.
  */
+import { isTest, heldBack } from '@/lib/env-mode'
+
 import { createServiceClient } from '@/lib/supabase/service'
 import { phoneKey } from '@/lib/phone'
 import { integrationConfig } from '@/lib/integrations'
@@ -13,11 +15,19 @@ type Service = ReturnType<typeof createServiceClient>
 
 const API = 'https://api.telegram.org/bot'
 
+/* Довідатись про бота можна й у тесті, писати людям — ні */
+const TELEGRAM_READS = ['getme', 'getwebhookinfo']
+
 async function call<T>(
   token: string,
   method: string,
   body: Record<string, unknown> = {},
 ): Promise<{ ok: boolean; description?: string; result?: T }> {
+  if (isTest && !TELEGRAM_READS.includes(method.toLowerCase())) {
+    heldBack('Telegram', method, body)
+    return { ok: true } as { ok: boolean; description?: string; result?: T }
+  }
+
   const res = await fetch(`${API}${token}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

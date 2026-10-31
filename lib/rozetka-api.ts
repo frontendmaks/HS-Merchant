@@ -13,11 +13,18 @@
  *   GET  /items-create/values             — lookup allowed values for an attribute
  */
 
+import { isTest, heldBack } from '@/lib/env-mode'
+
 import { rozetkaToken, invalidateRozetkaToken, isTokenError } from '@/lib/rozetka-auth'
 
 const BASE = process.env.ROZETKA_BASE!
 
 async function once<T>(method: string, path: string, body?: unknown): Promise<T> {
+  if (isTest && method.toUpperCase() !== 'GET') {
+    heldBack('Rozetka', `${method} ${path}`, body)
+    return {} as T
+  }
+
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: {

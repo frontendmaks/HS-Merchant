@@ -8,6 +8,7 @@
  * Підпис токена робимо самі — заради одного RS256 тягнути бібліотеку немає за
  * що, а менше залежностей означає менше несподіванок при оновленнях.
  */
+import { isTest, heldBack } from '@/lib/env-mode'
 import { createSign } from 'node:crypto'
 
 const SCOPE = 'https://www.googleapis.com/auth/spreadsheets'
@@ -99,6 +100,11 @@ export async function writeCell(
   range: string,
   value: string,
 ): Promise<boolean> {
+  if (isTest) {
+    heldBack('Google Таблиці', `${range} ← ${value}`)
+    return true
+  }
+
   const token = await accessToken()
   if (!token) return false
 

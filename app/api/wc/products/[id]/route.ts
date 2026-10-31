@@ -1,3 +1,4 @@
+import { isTest, heldBack } from '@/lib/env-mode'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 
@@ -109,6 +110,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (body.step !== undefined) updateAttr('Вага', String(body.step))
       wcPayload.attributes = existingAttrs
     } catch { /* skip attrs update if WC fetch fails */ }
+  }
+
+  /* Каталог на сайті бачать покупці — з тесту його не чіпаємо */
+  if (isTest) {
+    heldBack('Сайт', `товар ${wcId}`, wcPayload)
+    return NextResponse.json({ ok: true, test: true })
   }
 
   // Push to WC

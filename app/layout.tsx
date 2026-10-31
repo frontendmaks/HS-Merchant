@@ -3,12 +3,15 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import Sidebar from '@/components/Sidebar'
 import MainWrapper from '@/components/MainWrapper'
+import { isTest } from '@/lib/env-mode'
 
 const geist = Geist({ subsets: ['latin'], variable: '--font-geist' })
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-mono' })
 
 export const metadata: Metadata = {
-  title: 'HS Merchant',
+  /* Вкладку видно у списку поруч із продакшн-вкладкою — там і має бути
+     видно, котра з них котра, ще до того, як у неї зазирнули */
+  title: isTest ? 'ТЕСТ · HS Merchant' : 'HS Merchant',
   description: 'Агрегатор XML фідів для маркетплейсів',
   icons: {
     icon: '/favicon.svg',
@@ -46,6 +49,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: applyTheme }} />
       </head>
       <body className={`${geist.variable} ${geistMono.variable} antialiased bg-zinc-950`}>
+        {/*
+          * Смуга через весь екран, а не значок у кутку.
+          *
+          * Два вікна поруч виглядають однаково, і помилитись вікном —
+          * означає скасувати справжнє замовлення, думаючи, що воно
+          * вигадане. Смугу згори видно на будь-якій сторінці, на будь-якому
+          * прокручуванні й боковим зором.
+          */}
+        {isTest && (
+          <div className="sticky top-0 z-[2000] bg-amber-500 text-amber-950 text-center
+                          text-xs font-semibold py-1 px-3 tracking-wide">
+            ТЕСТОВЕ СЕРЕДОВИЩЕ · назовні нічого не йде: ні угоди в Бітрікс,
+            ні бланки на склади, ні ТТН, ні маркетплейси
+          </div>
+        )}
         <div className="flex min-h-screen">
           <Sidebar />
           <MainWrapper>{children}</MainWrapper>

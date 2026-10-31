@@ -12,6 +12,7 @@
  *   TTN update    : PATCH /v1/merchant_public_api/orders/{id}          { delivery_tracking_number }
  */
 
+import { isTest, heldBack } from '@/lib/env-mode'
 import { createServiceClient } from '@/lib/supabase/service'
 
 const MAUDAU_JWT_TTL_MS = 23 * 60 * 60 * 1000 // 23 hours
@@ -117,6 +118,11 @@ export async function patchMaudauStatus(
   cancellationReasonId?: number,
   jwt?: string,
 ): Promise<void> {
+  if (isTest) {
+    heldBack('MauDau', `статус замовлення ${numericId}`, { status, cancellationReasonId })
+    return
+  }
+
   const token = jwt ?? (await getMaudauJwt())
   const url = `${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}/status`
   const body: Record<string, unknown> = { status }
@@ -163,6 +169,11 @@ export async function patchMaudauTtn(
   ttn: string,
   jwt?: string,
 ): Promise<void> {
+  if (isTest) {
+    heldBack('MauDau', `ТТН замовлення ${numericId}`, { ttn })
+    return
+  }
+
   const token = jwt ?? (await getMaudauJwt())
   const url = `${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`
 

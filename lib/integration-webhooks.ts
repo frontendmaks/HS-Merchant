@@ -6,6 +6,7 @@
  * лежить довго — зміну все одно видно через звичайне опитування, бо курсор
  * рахується від часу оновлення замовлення, а не від надісланих вебхуків.
  */
+import { isTest, heldBack } from '@/lib/env-mode'
 import { createHmac } from 'node:crypto'
 import { createServiceClient } from '@/lib/supabase/service'
 import { buildOrders, ORDER_FIELDS } from '@/lib/integration-order'
@@ -110,6 +111,15 @@ export async function deliverWebhooks(
     }
 
     const body = JSON.stringify(job.payload)
+
+    /* Чужі системи не мають дізнаватись про наші випробування */
+    if (isTest) {
+      heldBack('Вебхук інтеграції', url, job.event)
+      await service.from('integration_webhooks')
+        .update({ status: 'sent', attempts, last_error: null }).eq('id', job.id)
+      continue
+    }
+
     try {
       const res = await fetch(url, {
         method: 'POST',
