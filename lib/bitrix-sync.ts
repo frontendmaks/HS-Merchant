@@ -109,10 +109,24 @@ function bareName(title: string): string {
   return t
 }
 
-const unitFromAttr = (attrs: Record<string, string> | null): string | null => {
+interface Spec { unit: string; pack: number }
+
+/**
+ * Одиниця й розмір однієї фасовки з атрибутів товару.
+ *
+ * «Мін» — те, чим цей товар продається на сайті: сардельки йдуть по 400
+ * грамів, кров'янка по сто. Знаючи це число, оператор може говорити з
+ * клієнтом штуками, а не вагою: «чотири штуки» — це 1.6 кг, і перерахує
+ * їх Мерчант, а не людина в голові.
+ */
+const specFromAttr = (attrs: Record<string, string> | null): Spec | null => {
   const a = attrs?.['Одиниця']?.trim().toLowerCase()
   if (!a) return null
-  return a === 'кг' || a === 'л' ? 'кг' : 'шт'
+  const unit = a === 'кг' || a === 'л' ? 'кг' : 'шт'
+  const min = parseFloat(attrs?.['Мін'] ?? '')
+  /* Фасовка важить лише для вагового: у штучного «одна штука» і так
+     одна штука, і перемикати там нема чого */
+  return { unit, pack: unit === 'кг' && Number.isFinite(min) && min > 0 ? min : 0 }
 }
 
 /**
@@ -129,9 +143,9 @@ const unitFromAttr = (attrs: Record<string, string> | null): string | null => {
  */
 async function catalogUnits(
   service: Service, rows: Row[], ourByBitrix: Map<number, string>,
-): Promise<(row: Row) => string> {
-  const byOurId = new Map<string, string>()
-  const byName = new Map<string, string>()
+): Promise<(row: Row) => Spec> {
+  const byOurId = new Map<string, Spec>()
+  const byName = new Map<string, Spec>()
 
   const ids = [...new Set([...ourByBitrix.values()])]
   const names = [...new Set(rows.map(r => bareName(r.PRODUCT_NAME)).filter(Boolean))]
@@ -141,8 +155,8 @@ async function catalogUnits(
       const { data } = await service
         .from('products').select('id, attributes').in('id', ids)
       for (const p of data ?? []) {
-        const u = unitFromAttr(p.attributes as Record<string, string> | null)
-        if (u) byOurId.set(p.id as string, u)
+        const spec = specFromAttr(p.attributes as Record<string, string> | null)
+        if (spec) byOurId.set(p.id as string, spec)
       }
     }
 
@@ -152,10 +166,10 @@ async function catalogUnits(
       /* Знятий з продажу товар теж годиться — одиниця в нього та сама, —
          але чинний головніший: назви в каталозі повторюються */
       for (const p of data ?? []) {
-        const u = unitFromAttr(p.attributes as Record<string, string> | null)
-        if (!u) continue
+        const spec = specFromAttr(p.attributes as Record<string, string> | null)
+        if (!spec) continue
         const key = (p.name as string).trim()
-        if (p.status === 'active' || !byName.has(key)) byName.set(key, u)
+        if (p.status === 'active' || !byName.has(key)) byName.set(key, spec)
       }
     }
   } catch {
@@ -164,9 +178,9 @@ async function catalogUnits(
 
   return (row: Row) => {
     const our = ourByBitrix.get(Number(row.PRODUCT_ID))
-    return (our && byOurId.get(our))
+    return (our ? byOurId.get(our) : undefined)
       ?? byName.get(bareName(row.PRODUCT_NAME))
-      ?? unitOf(row)
+      ?? { unit: unitOf(row), pack: 0 }
   }
 }
 
@@ -683,7 +697,7 @@ async function saveRows(service: Service, orderId: string, rows: Row[]) {
    * писався трьома способами.
    */
   const ourByBitrix = await linkProducts(service, rows)
-  const unitFor = await catalogUnits(service, rows, ourByBitrix)
+  const specFor = await catalogUnits(service, rows, ourByBitrix)
 
   /*
    * Заміна однією транзакцією.
@@ -702,8 +716,10 @@ async function saveRows(service: Service, orderId: string, rows: Row[]) {
       title: r.PRODUCT_NAME,
       bitrix_product_id: Number(r.PRODUCT_ID) || null,
       product_id: ourByBitrix.get(Number(r.PRODUCT_ID)) ?? null,
-      unit: unitFor(r),
-      unit_weight: 0,
+      unit: specFor(r).unit,
+      /* Розмір фасовки — щоб оператор міг перемкнути рядок у штуки:
+         клієнт на телефоні рахує пачками, а не грамами */
+      unit_weight: specFor(r).pack,
       price_per_unit: Number(r.PRICE),
       ordered_qty: Number(r.QUANTITY),
       ordered_total: Math.round(Number(r.PRICE) * Number(r.QUANTITY) * 100) / 100,

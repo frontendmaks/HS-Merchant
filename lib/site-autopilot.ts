@@ -254,6 +254,15 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
       return a === 'кг' || a === 'л' ? 'кг' : 'шт'
     }
 
+    /* Скільки важить одна фасовка — щоб рядок можна було перемкнути в
+       штуки: клієнт на телефоні рахує пачками, а не грамами */
+    const packOf = (p?: { attributes?: unknown }) => {
+      if (unitOf(p) !== 'кг') return 0
+      const min = parseFloat(
+        (p?.attributes as Record<string, string> | undefined)?.['Мін'] ?? '')
+      return Number.isFinite(min) && min > 0 ? min : 0
+    }
+
     await service.rpc('replace_order_items', {
       p_order_id: order.id,
       p_source: 'site',
@@ -265,7 +274,7 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
           bitrix_product_id: bitrixIdOf(p),
           product_id: p?.id ?? null,
           unit: unitOf(p),
-          unit_weight: 0,
+          unit_weight: packOf(p),
           price_per_unit: l.price,
           ordered_qty: l.quantity,
           ordered_total: Math.round(l.price * l.quantity * 100) / 100,
