@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { syncMaudau } from '@/lib/sync-maudau'
 import { syncRozetka } from '@/lib/sync-rozetka'
+import { logCronRun } from '@/lib/cron-log'
 
 // String(err) on an Error prefixes "Error: " — the platform name is already
 // in front of it, so take the message alone.
@@ -56,6 +57,11 @@ export async function GET(req: NextRequest) {
     error: errorMsg,
     duration_ms: duration,
   })
+
+  /* Швидкий прохід має свій розклад і своє ім'я: інакше він ховав би
+     в оглядi стан повного, і навпаки */
+  await logCronRun(supabase, mode === 'quick' ? 'mp-sync-quick' : 'mp-sync', start,
+    { mode, maudau: maudauSynced, rozetka: rozetkasynced }, errorMsg ?? undefined)
 
   return NextResponse.json({
     success: !errorMsg,

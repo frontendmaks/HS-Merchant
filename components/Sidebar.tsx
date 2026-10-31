@@ -24,6 +24,7 @@ const nav = [
     ],
   },
   { href: '/syncs',    label: 'Синхронізації',  icon: '↻', roles: PAGE_ROLES.syncs },
+  { href: '/health',   label: 'Стан системи',   icon: '♥', roles: PAGE_ROLES.health },
   {
     href: '/orders', label: 'Замовлення', icon: '◷', roles: PAGE_ROLES.orders,
     // Сама вкладка показує потік, працюють у під'вкладках: у маркетплейсних і

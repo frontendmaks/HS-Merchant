@@ -76,6 +76,9 @@ export const PAGE_ROLES = {
   products:  ['super_admin', 'admin', 'viewer'],
   feeds:     ['super_admin', 'admin'],
   syncs:     ['super_admin', 'admin', 'manager', 'viewer'],
+  /** Стан системи — те саме коло, що й синхронізації: це не дані, а
+   *  технічний стан, і дивляться на нього ті, хто за нього відповідає */
+  health:    ['super_admin', 'admin', 'manager', 'viewer'],
   analytics: ['super_admin', 'admin', 'manager', 'analyst'],
   // Our margin against named rivals, and the rivals we watch. Commercial
   // strategy rather than trade figures, so it stays outside the analyst's view.

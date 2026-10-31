@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { runPriceCheck } from '@/lib/price-run'
 import { buildReport, sendReport } from '@/lib/price-report'
+import { logCronRun } from '@/lib/cron-log'
 
 /**
  * 09:30 Kyiv, every day.
@@ -32,6 +33,7 @@ export async function GET(request: NextRequest) {
   // Recorded the same way a manual pass is, so the page shows when the last
   // check happened whoever started it
   const service = createServiceClient()
+  const startedAt = Date.now()
   const { data: run } = await service.from('price_runs')
     .insert({ trigger: 'cron', current_step: 'Щоденна перевірка' })
     .select('id').single()
@@ -52,6 +54,8 @@ export async function GET(request: NextRequest) {
     const report = await buildReport(service)
     const notified = await sendReport(service, report)
 
+    await logCronRun(service, 'price-monitor', startedAt, { ...result, notified },
+      result.errors.length ? result.errors.join('; ') : undefined)
     return NextResponse.json({ ok: true, ...result, report, notified })
   } catch (err) {
     if (runId) {
@@ -59,6 +63,7 @@ export async function GET(request: NextRequest) {
         status: 'failed', error: String(err), finished_at: new Date().toISOString(),
       }).eq('id', runId)
     }
+    await logCronRun(service, 'price-monitor', startedAt, null, String(err))
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
   }
 }

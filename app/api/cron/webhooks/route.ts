@@ -3,6 +3,7 @@ export const maxDuration = 120
 import { NextRequest, NextResponse } from 'next/server'
 import { deliverWebhooks } from '@/lib/integration-webhooks'
 import { createServiceClient } from '@/lib/supabase/service'
+import { logCronRun } from '@/lib/cron-log'
 
 /**
  * Друга спроба для вебхуків, які не пройшли з першого разу.
@@ -15,8 +16,10 @@ export async function GET(request: NextRequest) {
   if (request.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const startedAt = Date.now()
   try {
     const result = await deliverWebhooks()
+    await logCronRun(createServiceClient(), 'webhooks', startedAt, result)
 
     // Раз на годину прибираємо історію: журнал звернень при 120 запитах за
     // хвилину — це 170 тисяч рядків на добу, і без чистки вони лишались би
@@ -27,6 +30,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ ok: true, ...result })
   } catch (e) {
+    await logCronRun(createServiceClient(), 'webhooks', startedAt, null, String(e))
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 })
   }
 }

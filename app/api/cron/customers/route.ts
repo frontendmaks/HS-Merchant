@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { importContacts } from '@/lib/bitrix-contacts'
 import { bitrixConfigured } from '@/lib/bitrix'
+import { logCronRun } from '@/lib/cron-log'
 
 /**
  * База клієнтів: перерахунок із замовлень і довантаження контактів із CRM.
@@ -19,9 +20,11 @@ export async function GET(request: NextRequest) {
   }
 
   const service = createServiceClient()
+  const startedAt = Date.now()
   const { data: refreshed } = await service.rpc('refresh_customers_from_orders')
 
   if (!bitrixConfigured()) {
+    await logCronRun(service, 'customers', startedAt, { from_orders: refreshed })
     return NextResponse.json({ from_orders: refreshed, contacts: 'Бітрікс не налаштовано' })
   }
 
@@ -42,5 +45,7 @@ export async function GET(request: NextRequest) {
     if (result.error) { error = result.error; break }
   }
 
+  await logCronRun(service, 'customers', startedAt,
+    { from_orders: refreshed, read, saved, next: cursor }, error)
   return NextResponse.json({ from_orders: refreshed, read, saved, next: cursor, error })
 }
