@@ -109,7 +109,7 @@ function bareName(title: string): string {
   return t
 }
 
-interface Spec { unit: string; pack: number }
+interface Spec { unit: string; pack: number; productId?: string }
 
 /**
  * Одиниця й вага однієї штуки з атрибутів товару.
@@ -162,20 +162,22 @@ async function catalogUnits(
         .from('products').select('id, attributes').in('id', ids)
       for (const p of data ?? []) {
         const spec = specFromAttr(p.attributes as Record<string, string> | null)
-        if (spec) byOurId.set(p.id as string, spec)
+        if (spec) byOurId.set(p.id as string, { ...spec, productId: p.id as string })
       }
     }
 
     if (names.length) {
       const { data } = await service
-        .from('products').select('name, attributes, status').in('name', names)
+        .from('products').select('id, name, attributes, status').in('name', names)
       /* Знятий з продажу товар теж годиться — одиниця в нього та сама, —
          але чинний головніший: назви в каталозі повторюються */
       for (const p of data ?? []) {
         const spec = specFromAttr(p.attributes as Record<string, string> | null)
         if (!spec) continue
         const key = (p.name as string).trim()
-        if (p.status === 'active' || !byName.has(key)) byName.set(key, spec)
+        if (p.status === 'active' || !byName.has(key)) {
+          byName.set(key, { ...spec, productId: p.id as string })
+        }
       }
     }
   } catch {
@@ -461,7 +463,9 @@ export async function syncSiteOrders(
 
           if (staleStage) result.keptStatus = (result.keptStatus ?? 0) + 1
 
-          if (!ours && knownRows) await saveRows(service, existing.id as string, rows)
+          if (!ours && knownRows) {
+            await saveRows(service, existing.id as string, rows, Number(deal.ID))
+          }
 
           /**
            * Дату перенесли в Бітріксі — номер має переїхати в журналі.
@@ -575,7 +579,7 @@ export async function syncSiteOrders(
             .select('id').single()
 
           if (created) {
-            if (knownRows) await saveRows(service, created.id as string, rows)
+            if (knownRows) await saveRows(service, created.id as string, rows, Number(deal.ID))
             touched = created.id as string
             result.created++
 
@@ -681,7 +685,65 @@ async function linkProducts(service: Service, rows: Row[]): Promise<Map<number, 
   return out
 }
 
-async function saveRows(service: Service, orderId: string, rows: Row[]) {
+/**
+ * Дописати в угоду артикули, яких у ній немає.
+ *
+ * Сайт кладе в угоду рядки без номера товару, і 1С бачить порожню
+ * номенклатуру: у замовленні №102 за 31 жовтня — п'ять рядків із
+ * кількостями й сумою 11 369,40, а назв немає. Комірник не знає, що
+ * збирати, і замовлення доводиться набивати руками.
+ *
+ * Назву ми щойно зіставили з каталогом, а звідти знаємо код 1С і номер
+ * товару в Бітріксі. Лишається повернути це в угоду.
+ *
+ * Обережність тут не зайва: `productrows.set` переписує рядки цілком.
+ * Тому чіпаємо тільки ті угоди, де номера товару немає **в жодному**
+ * рядку, — себто ні 1С, ні людина їх ще не правили, — і тільки якщо
+ * зіставились **усі** рядки. Часткова заміна гірша за відсутню: вона
+ * стерла б те, чого ми не зрозуміли.
+ */
+async function relinkDealRows(
+  service: Service,
+  dealId: number,
+  rows: Row[],
+  productIdByRow: (string | null)[],
+): Promise<boolean> {
+  if (!rows.length) return false
+  if (rows.some(r => Number(r.PRODUCT_ID) > 0)) return false
+  if (productIdByRow.some(id => !id)) return false
+
+  const { data: products } = await service
+    .from('products').select('id, uid_1c').in('id', productIdByRow as string[])
+  const uidByOur = new Map(
+    (products ?? []).filter(p => p.uid_1c).map(p => [p.id as string, p.uid_1c as string]),
+  )
+  if (uidByOur.size !== new Set(productIdByRow).size) return false
+
+  const { productIds, measureFor } = await import('@/lib/bitrix-deal')
+  const bitrixByUid = await productIds(service, [...new Set(uidByOur.values())])
+
+  const linked = rows.map((r, i) => {
+    const uid = uidByOur.get(productIdByRow[i] as string)
+    return uid ? bitrixByUid.get(uid) ?? null : null
+  })
+  if (linked.some(id => !id)) return false
+
+  await bitrix('crm.deal.productrows.set', {
+    id: dealId,
+    rows: rows.map((r, i) => ({
+      PRODUCT_ID: linked[i],
+      PRODUCT_NAME: r.PRODUCT_NAME,
+      PRICE: Number(r.PRICE),
+      QUANTITY: Number(r.QUANTITY),
+      ...measureFor(r.MEASURE_NAME),
+    })),
+  })
+  return true
+}
+
+async function saveRows(
+  service: Service, orderId: string, rows: Row[], dealId?: number,
+) {
   /**
    * Чи були товари до цього.
    *
@@ -722,6 +784,10 @@ async function saveRows(service: Service, orderId: string, rows: Row[]) {
    * позиції замість одинадцяти, бо друге замовлення читалось якраз у цю
    * щілину. Тепер назовні видно або старий склад, або новий.
    */
+  /* Що з чим зіставилось — потрібне й для рядків, і для повернення в угоду */
+  const ourFor = (r: Row) =>
+    ourByBitrix.get(Number(r.PRODUCT_ID)) ?? specFor(r).productId ?? null
+
   await service.rpc('replace_order_items', {
     p_order_id: orderId,
     p_source: 'site',
@@ -729,7 +795,16 @@ async function saveRows(service: Service, orderId: string, rows: Row[]) {
       position: i,
       title: r.PRODUCT_NAME,
       bitrix_product_id: Number(r.PRODUCT_ID) || null,
-      product_id: ourByBitrix.get(Number(r.PRODUCT_ID)) ?? null,
+      /*
+       * Товар шукаємо і за назвою, коли номера немає.
+       *
+       * Сайт заводить позиції рядком — без номера товару в Бітріксі.
+       * Такий рядок доходить до 1С порожнім полем номенклатури: саме це
+       * комірник і бачив у замовленні №102 за 31 жовтня — п'ять рядків
+       * із кількостями й сумою 11 369,40, а назв немає. Назва в рядку є
+       * завжди, і наш каталог за нею товар знаходить.
+       */
+      product_id: ourFor(r),
       unit: specFor(r).unit,
       /* Розмір фасовки — щоб оператор міг перемкнути рядок у штуки:
          клієнт на телефоні рахує пачками, а не грамами */
@@ -739,6 +814,16 @@ async function saveRows(service: Service, orderId: string, rows: Row[]) {
       ordered_total: Math.round(Number(r.PRICE) * Number(r.QUANTITY) * 100) / 100,
     })),
   })
+
+  /* І назад в угоду — щоб 1С побачила номенклатуру, а не порожні поля */
+  if (dealId) {
+    try {
+      await relinkDealRows(service, dealId, rows, rows.map(ourFor))
+    } catch (e) {
+      // Не вийшло — замовлення від цього не постраждало, спробуємо наступного разу
+      console.error('relinkDealRows failed:', e instanceof Error ? e.message : e)
+    }
+  }
 }
 
 /** Замовлення, які ще в роботі — їх варто перепитувати навіть без змін. */
