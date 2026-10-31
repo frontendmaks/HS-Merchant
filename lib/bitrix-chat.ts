@@ -111,7 +111,7 @@ export async function sendOrderSheet(
   try {
     const { data: order } = await service
       .from('orders')
-      .select('warehouse, share_token, chat_sent_at, manual_number, external_id, bitrix_deal_id, auto_done_at')
+      .select('warehouse, share_token, chat_sent_at, manual_number, external_id, bitrix_deal_id, auto_done_at, delivery_date, customer_name')
       .eq('id', orderId).single()
 
     if (!order?.share_token) return { error: 'У замовлення немає бланка' }
@@ -159,7 +159,52 @@ export async function sendOrderSheet(
       }
     }
 
-    /* Бланк без номера склад не прив'яже до ящика — краще почекати */
+    /*
+     * Номера немає — беремо його просто тут.
+     *
+     * Доти бланк чекав на огляд, бо номер видавав саме він. Але номер
+     * дає не огляд, а журнал, і звернутись до нього може будь-хто
+     * кому він потрібен. Чекати на чужий прохід не було жодної
+     * причини, крім тієї, що так склалось.
+     *
+     * Журнал витримує змагання сам: він віддає номер атомарно й
+     * повторює спробу, якщо його щойно забрали. Лишається не
+     * перебити чужу вже проставлену: пишемо тільки в порожнє поле, і
+     * якщо нас випередили — віддаємо взяте назад і беремо те, що
+     * проставили до нас.
+     */
+    if (box == null && order.delivery_date) {
+      const { reserveNumber, releaseNumber } = await import('@/lib/manual-register')
+      const date = order.delivery_date as string
+
+      const reserved = await reserveNumber(
+        service, date, (order.customer_name as string) || 'замовлення з сайту', orderId,
+      )
+
+      const { data: claimed } = await service.from('orders')
+        .update({ manual_number: reserved.number, number_source: reserved.source })
+        .eq('id', orderId).is('manual_number', null)
+        .select('manual_number')
+
+      if (claimed?.length) {
+        box = reserved.number
+      } else {
+        await releaseNumber(service, {
+          number: reserved.number, date, reason: 'номер уже був проставлений',
+        }).catch(() => false)
+        const { data: fresh } = await service
+          .from('orders').select('manual_number').eq('id', orderId).maybeSingle()
+        box = (fresh?.manual_number as number | null) ?? null
+      }
+    }
+
+    /*
+     * Дати не знаємо — номера з журналу не взяти.
+     *
+     * Тоді лишається старе правило: поки огляду не було, чекаємо, бо
+     * дату він може ще й проставити. Після огляду шлемо як є —
+     * мовчання гірше за технічне ім'я.
+     */
     if (holdSheetForNumber(box, order.auto_done_at as string | null)) {
       return { error: 'Номер ящика ще не присвоєно — бланк піде одразу після огляду' }
     }
