@@ -29,7 +29,7 @@ const FIELD = {
   warehouse: 'UF_BILL_ADRESS_LIST',
 } as const
 
-import { WAREHOUSE_ID, updateDealChecked } from '@/lib/bitrix-deal'
+import { WAREHOUSE_ID, updateDealChecked, measureFor } from '@/lib/bitrix-deal'
 
 interface Row {
   id: string
@@ -215,7 +215,7 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
       .filter(Boolean).map(String)
     const skus = lines.map(l => l.sku ?? '').filter(Boolean)
     const { data: products } = await service
-      .from('products').select('id, external_id, sku, uid_1c')
+      .from('products').select('id, external_id, sku, uid_1c, attributes')
       .or(`external_id.in.(${ids.join(',') || 'null'}),sku.in.(${skus.join(',') || 'null'})`)
 
     const byExt = new Map((products ?? []).map(p => [String(p.external_id), p]))
@@ -240,6 +240,19 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
       byExt.get(String(l.variationId)) ?? byExt.get(String(l.productId))
         ?? (l.sku ? bySku.get(l.sku) : undefined)
 
+    /*
+     * Одиницю питаємо в каталогу.
+     *
+     * Писати всюди «шт» означало показати «20.3 шт» філе там, де
+     * клієнтка просила 20.3 кг: склад збере не те, а в угоді ця сама
+     * штука закріпиться й при наступному збереженні.
+     */
+    const unitOf = (p?: { attributes?: unknown }) => {
+      const a = (p?.attributes as Record<string, string> | undefined)?.['Одиниця']
+        ?.trim().toLowerCase()
+      return a === 'кг' || a === 'л' ? 'кг' : 'шт'
+    }
+
     await service.rpc('replace_order_items', {
       p_order_id: order.id,
       p_source: 'site',
@@ -250,7 +263,7 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
           title: l.name,
           bitrix_product_id: bitrixIdOf(p),
           product_id: p?.id ?? null,
-          unit: 'шт',
+          unit: unitOf(p),
           unit_weight: 0,
           price_per_unit: l.price,
           ordered_qty: l.quantity,
@@ -271,6 +284,7 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
         return {
           ...(id ? { PRODUCT_ID: id } : {}),
           PRODUCT_NAME: l.name, PRICE: l.price, QUANTITY: l.quantity,
+          ...measureFor(unitOf(pick(l))),
         }
       }),
     })

@@ -94,6 +94,83 @@ function unitOf(row: Row): string {
 }
 
 /**
+ * Назва позиції без хвоста складу.
+ *
+ * У каталозі Бітрікса той самий товар заведено окремо на кожну точку:
+ * «Філе куряче - АС 2 онлайн». У нашому каталозі він один — «Філе
+ * куряче», — і без цього зрізання вони не сходяться ніколи.
+ */
+function bareName(title: string): string {
+  const t = title.trim()
+  for (const w of Object.keys(WAREHOUSE_ID)) {
+    const tail = ` - ${w}`
+    if (t.toLowerCase().endsWith(tail.toLowerCase())) return t.slice(0, -tail.length).trim()
+  }
+  return t
+}
+
+const unitFromAttr = (attrs: Record<string, string> | null): string | null => {
+  const a = attrs?.['Одиниця']?.trim().toLowerCase()
+  if (!a) return null
+  return a === 'кг' || a === 'л' ? 'кг' : 'шт'
+}
+
+/**
+ * Одиниця з нашого каталогу, а не з того, що пришле Бітрікс.
+ *
+ * Сайт заводить позиції рядком — без номера товару, — і мірою ставить
+ * свою усталену «Штуку» всьому підряд. Замовлення №7 за 31 жовтня через
+ * це поїхало з «20.3 шт» філе замість 20.3 кг, і виправити це з
+ * Мерчанта не виходило: кожне збереження вписувало штуки заново.
+ *
+ * Наш каталог знає правду — в атрибуті «Одиниця». Шукаємо товар спершу
+ * за зв'язком через номер у Бітріксі, тоді просто за назвою. Не
+ * знайшли — лишається те, що сказав Бітрікс.
+ */
+async function catalogUnits(
+  service: Service, rows: Row[], ourByBitrix: Map<number, string>,
+): Promise<(row: Row) => string> {
+  const byOurId = new Map<string, string>()
+  const byName = new Map<string, string>()
+
+  const ids = [...new Set([...ourByBitrix.values()])]
+  const names = [...new Set(rows.map(r => bareName(r.PRODUCT_NAME)).filter(Boolean))]
+
+  try {
+    if (ids.length) {
+      const { data } = await service
+        .from('products').select('id, attributes').in('id', ids)
+      for (const p of data ?? []) {
+        const u = unitFromAttr(p.attributes as Record<string, string> | null)
+        if (u) byOurId.set(p.id as string, u)
+      }
+    }
+
+    if (names.length) {
+      const { data } = await service
+        .from('products').select('name, attributes, status').in('name', names)
+      /* Знятий з продажу товар теж годиться — одиниця в нього та сама, —
+         але чинний головніший: назви в каталозі повторюються */
+      for (const p of data ?? []) {
+        const u = unitFromAttr(p.attributes as Record<string, string> | null)
+        if (!u) continue
+        const key = (p.name as string).trim()
+        if (p.status === 'active' || !byName.has(key)) byName.set(key, u)
+      }
+    }
+  } catch {
+    // Каталог не відповів — працюємо, як працювали досі
+  }
+
+  return (row: Row) => {
+    const our = ourByBitrix.get(Number(row.PRODUCT_ID))
+    return (our && byOurId.get(our))
+      ?? byName.get(bareName(row.PRODUCT_NAME))
+      ?? unitOf(row)
+  }
+}
+
+/**
  * Позиції одразу для багатьох угод.
  *
  * Бітрікс уміє приймати пачку викликів одним запитом — п'ятдесят за раз.
@@ -606,6 +683,7 @@ async function saveRows(service: Service, orderId: string, rows: Row[]) {
    * писався трьома способами.
    */
   const ourByBitrix = await linkProducts(service, rows)
+  const unitFor = await catalogUnits(service, rows, ourByBitrix)
 
   /*
    * Заміна однією транзакцією.
@@ -624,7 +702,7 @@ async function saveRows(service: Service, orderId: string, rows: Row[]) {
       title: r.PRODUCT_NAME,
       bitrix_product_id: Number(r.PRODUCT_ID) || null,
       product_id: ourByBitrix.get(Number(r.PRODUCT_ID)) ?? null,
-      unit: unitOf(r),
+      unit: unitFor(r),
       unit_weight: 0,
       price_per_unit: Number(r.PRICE),
       ordered_qty: Number(r.QUANTITY),

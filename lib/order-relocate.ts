@@ -16,7 +16,7 @@ import { randomBytes } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import {
   FIELD, WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, addDealOnce,
-  updateDealChecked,
+  updateDealChecked, measureFor,
 } from '@/lib/bitrix-deal'
 import { slotId } from '@/lib/bitrix-slots'
 import { stageId, stageName } from '@/lib/bitrix-stages'
@@ -39,6 +39,8 @@ interface DealRow {
   PRODUCT_NAME: string
   PRICE: number
   QUANTITY: number
+  MEASURE_CODE?: number | string | null
+  MEASURE_NAME?: string | null
 }
 
 export async function relocateOrder(
@@ -131,11 +133,14 @@ export async function relocateOrder(
     if (rows.length) {
       await bitrix('crm.deal.productrows.set', {
         id: dealId,
+        /* Міру несемо зі старої угоди: без неї Бітрікс поставить свою
+           усталену «Штуку», і кілограми переїдуть штуками */
         rows: rows.map(r => ({
           ...(r.PRODUCT_ID ? { PRODUCT_ID: r.PRODUCT_ID } : {}),
           PRODUCT_NAME: r.PRODUCT_NAME,
           PRICE: r.PRICE,
           QUANTITY: r.QUANTITY,
+          ...measureFor(r.MEASURE_NAME),
         })),
       })
     }

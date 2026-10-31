@@ -307,6 +307,7 @@ export async function pushOrderToBitrix(
         PRODUCT_NAME: l.title,
         PRICE: Number(l.price_per_unit),
         QUANTITY: Number(l.ordered_qty),
+        ...measureFor(l.unit),
       }
     })
 
@@ -394,4 +395,21 @@ export async function pushOrderToBitrix(
     await service.from('orders').update({ bitrix_error: error }).eq('id', orderId)
     return { error }
   }
+}
+
+/**
+ * Міра позиції так, як її розуміє Бітрікс.
+ *
+ * Поки ми її не передавали, Бітрікс ставив свою усталену — «Штука», код
+ * 796. На позиції без номера товару це не дрібниця: замовлення №7 за
+ * 31 жовтня поїхало з «20.3 шт» філе там, де клієнтка просила 20.3 кг, і
+ * кожне наступне збереження вписувало штуки заново — оператор правив, а
+ * воно поверталось.
+ *
+ * Коди з довідника Бітрікса: 166 — кілограм, 796 — штука.
+ */
+export function measureFor(unit: string | null | undefined) {
+  return (unit ?? '').trim().toLowerCase().startsWith('кг')
+    ? { MEASURE_CODE: 166, MEASURE_NAME: 'кг' }
+    : { MEASURE_CODE: 796, MEASURE_NAME: 'шт' }
 }

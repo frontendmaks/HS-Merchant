@@ -20,7 +20,7 @@ import { loadPricing, basePrice, roundOffer, categoryFor } from '@/lib/price-cat
 import { calcMarketplacePrice } from '@/lib/feed-xml'
 import {
   WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, contactFor, productIds,
-  updateDealChecked,
+  updateDealChecked, measureFor,
 } from '@/lib/bitrix-deal'
 import { getSetting } from '@/lib/settings'
 import { platformLabel, marketNumberLabel } from '@/lib/order-source'
@@ -291,6 +291,7 @@ export async function pushMarketplaceOrder(
         PRODUCT_NAME: l.title,
         PRICE: price,
         QUANTITY: Number(l.ordered_qty ?? 1),
+        ...measureFor(l.unit as string | null),
       }
     })
 

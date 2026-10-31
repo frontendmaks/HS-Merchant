@@ -15,7 +15,7 @@ import { randomBytes } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import {
   FIELD, WAREHOUSE_ID, CATEGORY_ID, NEW_STAGE, ASSIGNED_BY, contactFor, addDealOnce,
-  updateDealChecked,
+  updateDealChecked, measureFor,
 } from '@/lib/bitrix-deal'
 import { slotId } from '@/lib/bitrix-slots'
 import { stageId, stageName } from '@/lib/bitrix-stages'
@@ -225,6 +225,7 @@ export async function mergeOrders(
         PRODUCT_NAME: l.title,
         PRICE: Number(l.price_per_unit ?? 0),
         QUANTITY: Number(l.ordered_qty ?? 1),
+        ...measureFor(l.unit as string | null),
       })),
     })
   } catch (e) {
