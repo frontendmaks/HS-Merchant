@@ -5,6 +5,7 @@ import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { rozetkaToken } from '@/lib/rozetka-auth'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { notifyIntegrations } from '@/lib/integration-webhooks'
+import { marketplaceReason } from '@/lib/order-status-change'
 
 const ROZETKA_CANCEL_IDS = new Set([11, 12, 13, 15, 16, 17, 18, 19, 24, 25, 28, 29, 30, 31, 40, 42, 44, 45, 50])
 // IDs considered "in-progress" or "completed" — not valid cancels
@@ -96,8 +97,24 @@ export async function PATCH(
       if (!putRes.ok) throw new Error(`Rozetka cancel failed: ${putRes.status}`)
     }
   } catch (e) {
+    /*
+     * Майданчик не скасував — значить, замовлення не скасоване.
+     *
+     * Інакше в нас воно стоїть «Скасовано», а на MauDau живе й далі: там
+     * його зберуть і повезуть, поки ми вважаємо його закритим. Вертаємо
+     * як було — разом із причиною, бо причина без скасування теж
+     * неправда.
+     */
+    await supabase.from('orders')
+      .update({
+        status: before?.status ?? null,
+        cancel_reason: (before?.cancel_reason as string | null) ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+
     return NextResponse.json(
-      { success: false, error: e instanceof Error ? e.message : String(e) },
+      { success: false, error: marketplaceReason(e) },
       { status: 500 },
     )
   }

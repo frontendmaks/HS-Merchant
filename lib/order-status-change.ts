@@ -33,6 +33,34 @@ const MAUDAU_STATUS_MAP: Record<string, string> = {
 }
 
 
+/**
+ * Відмова майданчика — людською мовою.
+ *
+ * MauDau відповідає 422 і JSON-ом, де текст російською й у кілька шарів
+ * вкладеності. Оператор бачив у картці замовлення отаке:
+ *
+ *   {"error_code":"VALIDATION_ERROR","error_message":"Невалидные
+ *    параметри","error_details":{"status":["Нельзя перевести заказ в
+ *    этот статус с текущего"]}}
+ *
+ * Прочитати це можна, зрозуміти, що робити далі, — ні. Двом найчастішим
+ * відмовам даємо пораду, решту показуємо як є: вигадувати переклад тому,
+ * чого ми не передбачили, означало б збити з пантелику впевненим тоном.
+ */
+export function marketplaceReason(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e)
+
+  if (/delivery_tracking_number/i.test(raw)) {
+    return 'MauDau не переводить замовлення далі, поки в ньому немає ТТН. '
+      + 'Спершу створіть накладну — номер піде на майданчик разом зі статусом'
+  }
+  if (/в этот статус с текущего|Нельзя перевести/i.test(raw)) {
+    return 'MauDau не пускає замовлення з його теперішнього стану в цей. '
+      + 'Перевірте, який статус стоїть на майданчику: туди вже могли перевести без нас'
+  }
+  return raw
+}
+
 export interface StatusChange {
   id: string
   status: string
@@ -103,10 +131,15 @@ export async function changeOrderStatus(
 
   if (dbError) return NextResponse.json({ success: false, error: dbError.message }, { status: 500 })
 
-  if (before?.status !== status) {
-    await logOrderEvent(supabase, id, 'status',
-      { old: before?.status ?? null, new: status }, actor)
-  }
+  /*
+   * У журнал пишемо після, а не до.
+   *
+   * Маркетплейс статус може й не прийняти: MauDau не переводить
+   * замовлення в «Узгоджено», поки в ньому немає ТТН, і не скасовує те,
+   * що вже поїхало. Запис, зроблений наперед, лишався в журналі як
+   * доконаний факт — про зміну, якої не сталось.
+   */
+  const changed = before?.status !== status
 
   try {
     if (platform === 'maudau') {
@@ -122,6 +155,21 @@ export async function changeOrderStatus(
 
       const numericId = external_id.replace(/^MD-/, '')
       const jwt = await getMaudauJwt()
+
+      /*
+       * Спершу ТТН, тоді статус.
+       *
+       * MauDau не пускає замовлення далі «Прийнято», поки в ньому немає
+       * номера накладної: на спробу він відповідає 422 і
+       * «delivery_tracking_number не може бути пустим». Номер у нас уже
+       * є — ми створили накладну, — просто він не доїхав до майданчика.
+       * Тож відправляємо його тут, а не чекаємо окремого проходу.
+       */
+      const ttn = (current?.ttn as string | null)?.trim()
+      if (ttn && apiStatus !== 'accepted' && apiStatus !== 'new_order') {
+        const { patchMaudauTtn } = await import('@/lib/maudau')
+        try { await patchMaudauTtn(numericId, ttn, jwt) } catch { /* статус однаково спробуємо */ }
+      }
 
       // MauDau requires approved before delivering
       if (apiStatus === 'delivering') {
@@ -187,10 +235,27 @@ export async function changeOrderStatus(
       }
     }
   } catch (e) {
+    /*
+     * Не прийняли — вертаємо як було.
+     *
+     * Доти статус у нас уже стояв новий: оператор бачив «Узгоджено» і
+     * червоний рядок під ним, а на майданчику замовлення лишалось
+     * старим. Наступна синхронізація все одно повертала його назад —
+     * тільки за кілька хвилин і без пояснень.
+     */
+    await supabase.from('orders')
+      .update({ status: before?.status ?? null, updated_at: new Date().toISOString() })
+      .eq('id', id)
+
     return NextResponse.json(
-      { success: false, error: e instanceof Error ? e.message : String(e) },
+      { success: false, error: marketplaceReason(e) },
       { status: 500 },
     )
+  }
+
+  if (changed) {
+    await logOrderEvent(supabase, id, 'status',
+      { old: before?.status ?? null, new: status }, actor)
   }
 
   await broadcastOrderChange(id, 'status')
