@@ -732,6 +732,7 @@ async function relinkDealRows(
   dealId: number,
   rows: Row[],
   productIdByRow: (string | null)[],
+  unitByRow: string[],
 ): Promise<boolean> {
   if (!rows.length) return false
   if (rows.some(r => Number(r.PRODUCT_ID) > 0)) return false
@@ -760,7 +761,15 @@ async function relinkDealRows(
       PRODUCT_NAME: r.PRODUCT_NAME,
       PRICE: Number(r.PRICE),
       QUANTITY: Number(r.QUANTITY),
-      ...measureFor(r.MEASURE_NAME),
+      /*
+       * Міру беремо нашу, а не ту, що лежала в рядку.
+       *
+       * У рядку стоїть «шт» — Бітрікс ставить її всьому, що заведено
+       * текстом. Повернути її назад означало б дописати артикул і
+       * лишити 20.3 штуки філе там, де 20.3 кілограма. Каталог щойно
+       * сказав нам правду, нею й пишемо.
+       */
+      ...measureFor(unitByRow[i]),
     })),
   })
   return true
@@ -843,7 +852,8 @@ async function saveRows(
   /* І назад в угоду — щоб 1С побачила номенклатуру, а не порожні поля */
   if (dealId) {
     try {
-      await relinkDealRows(service, dealId, rows, rows.map(ourFor))
+      await relinkDealRows(service, dealId, rows, rows.map(ourFor),
+        rows.map(r => specFor(r).unit))
     } catch (e) {
       // Не вийшло — замовлення від цього не постраждало, спробуємо наступного разу
       console.error('relinkDealRows failed:', e instanceof Error ? e.message : e)
