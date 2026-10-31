@@ -18,7 +18,7 @@ import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { isValidSlot } from '@/lib/delivery-slots'
 import { resolveAddress } from '@/lib/delivery-zones'
 import { withDelivery, isDeliveryLine } from '@/lib/delivery-fee'
-import { sendOrderSheet } from '@/lib/bitrix-chat'
+import { sendOrderSheet, PICKING_STAGE } from '@/lib/bitrix-chat'
 import { relocateOrder } from '@/lib/order-relocate'
 import { orderTotal, lineTotal, manualWeight, type ManualLine } from '@/lib/manual-orders'
 import { pushOrderToBitrix } from '@/lib/bitrix-deal'
@@ -149,11 +149,15 @@ export async function PATCH(
      * Старий його вже отримав, і там замовлення чекатимуть дарма — але
      * мовчання для нового складу гірше: він про замовлення не дізнається
      * узагалі.
+     *
+     * Чи був бланк — питаємо вже після збереження, а не тут. Замовлення
+     * №45 за 31 жовтня правили вдвох: Оля поставила його на комплектацію
+     * о 08:17:20, а Анна за чотири секунди змінила склад на М10. Її
+     * правка почалась раніше, ніж бланк пішов, тож у прочитаному нею
+     * рядку бланка ще не було — і вона його не переслала. Бланк
+     * лишився в Панській Горі, а замовлення в Мерчанті й Трелло — на М10.
      */
-    if (order.chat_sent_at) {
-      patch.chat_sent_at = null
-      changes.chat_resend = true
-    }
+    changes.chat_resend = true
   }
 
   if (body?.delivery_slot && body.delivery_slot !== order.delivery_slot) {
@@ -234,7 +238,21 @@ export async function PATCH(
 
   // Склад змінився, а бланк уже був надісланий — новий склад має його
   // отримати зараз, а не чекати на наступну зміну статусу
-  if (changes.chat_resend) await sendOrderSheet(service, id)
+  if (changes.chat_resend) {
+    /*
+     * Стан читаємо заново — тим і відрізняється від знімка, з яким
+     * починався запит: поки ми працювали, бланк могли надіслати.
+     */
+    const { data: now } = await service
+      .from('orders').select('status, chat_sent_at').eq('id', id).maybeSingle()
+
+    /* Рано надсилати нема чого: поки замовлення в обробці, його ще
+       можуть переписати, і склад збирав би те, чого вже немає */
+    if (now?.chat_sent_at || now?.status === PICKING_STAGE) {
+      await service.from('orders').update({ chat_sent_at: null }).eq('id', id)
+      await sendOrderSheet(service, id)
+    }
+  }
 
   /*
    * Перенесення на інший день — не правка, а переїзд.

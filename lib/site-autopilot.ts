@@ -47,6 +47,7 @@ interface Row {
   number_source: string | null
   status: string | null
   platform: string | null
+  chat_sent_at: string | null
   total: number | null
   created_at: string | null
   /** День самого замовлення; `created_at` — це лише час нашого імпорту */
@@ -365,7 +366,7 @@ export async function autoProcessSiteOrders(
 
     let query = service
       .from('orders')
-      .select('id, external_id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, warehouse_pinned, delivery_zone, delivery_date, delivery_slot, manual_number, number_source, status, total, created_at, order_date, platform')
+      .select('id, external_id, bitrix_deal_id, customer_name, customer_phone, address, warehouse, warehouse_pinned, delivery_zone, delivery_date, delivery_slot, manual_number, number_source, status, total, created_at, order_date, platform, chat_sent_at')
       .in('platform', ['site', 'manual'])
       .is('auto_done_at', null)
       .gte('delivery_date', horizon)
@@ -614,6 +615,19 @@ export async function autoProcessSiteOrders(
       patch.auto_done_at = new Date().toISOString()
 
       await service.from('orders').update(patch).eq('id', order.id)
+
+      /*
+       * Склад переставили — бланк має піти туди ж.
+       *
+       * Інакше новий склад про замовлення не дізнається зовсім, а старий
+       * чекатиме дарма. Та сама біда, що й при правці руками.
+       */
+      if (patch.warehouse && patch.warehouse !== order.warehouse && order.chat_sent_at) {
+        await service.from('orders').update({ chat_sent_at: null }).eq('id', order.id)
+        const { sendOrderSheet } = await import('@/lib/bitrix-chat')
+        await sendOrderSheet(service, order.id)
+      }
+
       touched = order.id
       if (problems.length) result.problems++
       else reviewed.push(order.id)
