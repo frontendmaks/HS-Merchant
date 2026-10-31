@@ -167,17 +167,42 @@ async function catalogUnits(
     }
 
     if (names.length) {
-      const { data } = await service
-        .from('products').select('id, name, attributes, status').in('name', names)
-      /* Знятий з продажу товар теж годиться — одиниця в нього та сама, —
-         але чинний головніший: назви в каталозі повторюються */
-      for (const p of data ?? []) {
+      const take = (p: { id: unknown; name: unknown; attributes: unknown; status: unknown }) => {
         const spec = specFromAttr(p.attributes as Record<string, string> | null)
-        if (!spec) continue
+        if (!spec) return
         const key = (p.name as string).trim()
+        /* Знятий з продажу товар теж годиться — одиниця в нього та сама, —
+           але чинний головніший: назви в каталозі повторюються */
         if (p.status === 'active' || !byName.has(key)) {
           byName.set(key, { ...spec, productId: p.id as string })
         }
+      }
+
+      const { data } = await service
+        .from('products').select('id, name, attributes, status').in('name', names)
+      for (const p of data ?? []) take(p)
+
+      /*
+       * Назви з комою й лапками доводиться питати поодинці.
+       *
+       * `.in()` складає значення в один рядок через кому, і назва на
+       * кшталт «Сир кремовий натуральний ТМ "Млековіта", 125 г» у ньому
+       * розпадається — товар просто не знаходиться, без жодної помилки.
+       * Перевірено: з трьох назв повернулись дві, а `.eq()` знайшов ту
+       * третю одразу. У нашому каталозі таких назв повно — «Ковбаса
+       * "Дрогобицька" в/г, упак», «Пельмені "Родинні" ТМ "Галицька
+       * Свіжина", 700 г».
+       *
+       * Тому недобрані питаємо поштучно. Їх одиниці на угоду, і краще
+       * кілька зайвих запитів, ніж позиція, яка мовчки доїде до 1С
+       * порожнім полем.
+       */
+      for (const name of names) {
+        if (byName.has(name)) continue
+        const { data: one } = await service
+          .from('products').select('id, name, attributes, status')
+          .eq('name', name).order('status').limit(5)
+        for (const p of one ?? []) take(p)
       }
     }
   } catch {
