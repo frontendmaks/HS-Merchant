@@ -6,6 +6,7 @@ import {
 import {
   deliveryFeeFor, DELIVERY_TITLE, DELIVERY_FEE, FREE_DELIVERY_FROM,
 } from '@/lib/delivery-fee'
+import { holdSheetForNumber } from '@/lib/bitrix-chat'
 
 describe('накладна замикає замовлення', () => {
   it('номер накладної важить більше за статус — статус відстає', () => {
@@ -97,5 +98,30 @@ describe('доставка рахується з суми товарів', () =>
     const goods = [line(FREE_DELIVERY_FROM - 1)]
     const withFee = [...goods, { ...line(99), title: DELIVERY_TITLE }]
     expect(deliveryFeeFor(withFee)).toBe(deliveryFeeFor(goods))
+  })
+})
+
+describe('бланк без номера ящика', () => {
+  /*
+   * BX-201383: о 12:56:58 бланк пішов у чат, о 12:57:04 з'явився номер
+   * 74. Склад отримав «Замовлення BX-201383» і не мав за чим шукати
+   * ящик, хоч у Мерчанті номер уже стояв.
+   */
+  it('чекає, поки огляд не минув — номер ось-ось буде', () => {
+    expect(holdSheetForNumber(null, null)).toBe(true)
+  })
+
+  it('не чекає, коли номер уже є', () => {
+    expect(holdSheetForNumber(74, null)).toBe(false)
+  })
+
+  it('не чекає вічно: огляд минув, номера немає — шлемо як є', () => {
+    /* Мовчання гірше за технічне ім'я: склад хоч дізнається про
+       замовлення, а порожнє місце видно на сторінці стану */
+    expect(holdSheetForNumber(null, '2026-10-31T12:57:04Z')).toBe(false)
+  })
+
+  it('нуль — теж номер, хай і дивний', () => {
+    expect(holdSheetForNumber(0, null)).toBe(false)
   })
 })

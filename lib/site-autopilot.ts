@@ -164,7 +164,7 @@ async function twinOf(service: Service, order: Row): Promise<Row | null> {
  */
 export async function retryStranded(
   service: Service,
-  { limit = 5 }: { limit?: number } = {},
+  { limit = 15 }: { limit?: number } = {},
 ): Promise<{ tried: number; pushed: number; problems: string[] }> {
   const out = { tried: 0, pushed: 0, problems: [] as string[] }
 

@@ -43,6 +43,24 @@ export async function visibleChats(): Promise<Dialog[]> {
 export const PICKING_STAGE = 'Комплектується'
 
 /**
+ * Чи почекати з бланком, бо номер ящика ще в дорозі.
+ *
+ * Номер дає огляд, і він ходить своїм проходом. Замовлення BX-201383
+ * прийшло з сайту вже на комплектації: о 12:56:58 бланк пішов у чат, а
+ * номер 74 з'явився о 12:57:04 — на шість секунд пізніше. Склад
+ * отримав «Замовлення BX-201383» і не мав за чим шукати ящик, хоч у
+ * Мерчанті номер уже стояв.
+ *
+ * Поки огляду не було, чекаємо: той самий прохід, що дасть номер,
+ * одразу по тому догнати бланк. Коли огляд уже був, а номера немає —
+ * шлемо як є: мовчання гірше за технічне ім'я.
+ */
+export const holdSheetForNumber = (
+  box: number | null | undefined,
+  autoDoneAt: string | null | undefined,
+): boolean => box == null && !autoDoneAt
+
+/**
  * Реакція на зміну статусу — одна для всіх, хто його міняє.
  *
  * Статус міняють із трьох місць: оператор у Мерчанті, оператор у Бітріксі
@@ -93,7 +111,7 @@ export async function sendOrderSheet(
   try {
     const { data: order } = await service
       .from('orders')
-      .select('warehouse, share_token, chat_sent_at, manual_number, external_id, bitrix_deal_id')
+      .select('warehouse, share_token, chat_sent_at, manual_number, external_id, bitrix_deal_id, auto_done_at')
       .eq('id', orderId).single()
 
     if (!order?.share_token) return { error: 'У замовлення немає бланка' }
@@ -139,6 +157,11 @@ export async function sendOrderSheet(
       } catch {
         // Мовчання Бітрікса не привід лишати склад без бланка
       }
+    }
+
+    /* Бланк без номера склад не прив'яже до ящика — краще почекати */
+    if (holdSheetForNumber(box, order.auto_done_at as string | null)) {
+      return { error: 'Номер ящика ще не присвоєно — бланк піде одразу після огляду' }
     }
 
     const number = box != null
