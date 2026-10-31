@@ -125,9 +125,23 @@ function mapProduct(p: any, variation?: { price: number | null; stock: number | 
   const uid1c = (getMetaVal('uid') as string | null)?.trim() || null
   const code1c = (getMetaVal('code') as string | null)?.trim() || null
 
+  /*
+   * Вага однієї штуки — окреме число, не «Мін».
+   *
+   * «Мін» і «Крок» кажуть, якими порціями товар можна взяти: сардельки
+   * замовляються від 400 грамів. Скільки важить одна сарделька, каже
+   * інше поле — `additional_unit_indicator`, і це 0.11 кг. Я був
+   * прийняв «Мін» за розмір фасовки, і перемикач штук показував «1 шт =
+   * 0.4 кг» — учетверо більше за правду.
+   *
+   * Сайт пише про це на картці товару: «~ вага 1 шт. 0.11 кг».
+   */
+  const pieceKg = parseFloat(getMetaVal('additional_unit_indicator') ?? '') || null
+
   if (stepVal && stepVal > 0) attributes['Крок'] = String(stepVal)
   if (minVal && minVal > 0)   attributes['Мін']  = String(minVal)
   if (unitBase)               attributes['Одиниця'] = unitBase
+  if (pieceKg && pieceKg > 0) attributes['Вага шт'] = String(pieceKg)
 
   const category_name = pickMainCategory(p, categoryMap)
   const categories = (p.categories ?? [])

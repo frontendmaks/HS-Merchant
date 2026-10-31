@@ -135,7 +135,15 @@ async function catalogue(): Promise<CatalogueItem[]> {
 
   const items = linked.map(p => {
     const attrs = p.attributes ?? {}
-    const pack = Number(attrs['Мін'] ?? attrs['Крок'] ?? 0)
+    /*
+     * Вага однієї штуки, а не найменша порція.
+     *
+     * «Мін» каже, від скількох товар продається: сардельки — від 400
+     * грамів. Скільки важить одна сарделька, каже «Вага шт» — 110
+     * грамів. Поки тут стояв «Мін», оператор додавав «1 шт» і в
+     * замовлення лягало 0.4 кг — учетверо більше, ніж просив клієнт.
+     */
+    const pack = Number(attrs['Вага шт'] ?? 0)
     return {
       id: p.id as string,
       name: p.name as string,
@@ -151,7 +159,7 @@ async function catalogue(): Promise<CatalogueItem[]> {
        * «16 шт філе» замість «1.6 кг» це зовсім інша кількість.
        */
       unit: attrs['Одиниця'] || (p.unit as string) || 'шт',
-      /** Крок продажу вагового товару: «0.4» означає фасування по 400 г */
+      /** Вага однієї штуки: «0.11» означає, що сарделька важить 110 г */
       pack: pack > 0 ? pack : null,
       stock: p.stock == null ? null : Number(p.stock),
       status: p.status as string,

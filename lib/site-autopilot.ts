@@ -254,13 +254,15 @@ async function fillFromSite(service: Service, order: Row): Promise<number> {
       return a === 'кг' || a === 'л' ? 'кг' : 'шт'
     }
 
-    /* Скільки важить одна фасовка — щоб рядок можна було перемкнути в
-       штуки: клієнт на телефоні рахує пачками, а не грамами */
+    /* Скільки важить одна штука — щоб рядок можна було перемкнути в
+       штуки: клієнт на телефоні рахує штуками, а не грамами. Саме вага
+       штуки, а не «Мін»: «Мін» — це найменша порція замовлення, і для
+       сардельок це 0.4 кг при вазі штуки 0.11 */
     const packOf = (p?: { attributes?: unknown }) => {
       if (unitOf(p) !== 'кг') return 0
-      const min = parseFloat(
-        (p?.attributes as Record<string, string> | undefined)?.['Мін'] ?? '')
-      return Number.isFinite(min) && min > 0 ? min : 0
+      const piece = parseFloat(
+        (p?.attributes as Record<string, string> | undefined)?.['Вага шт'] ?? '')
+      return Number.isFinite(piece) && piece > 0 ? piece : 0
     }
 
     await service.rpc('replace_order_items', {
