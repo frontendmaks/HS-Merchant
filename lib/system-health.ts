@@ -18,6 +18,7 @@
  * що хтось інакше знайшов би руками.
  */
 import { createServiceClient } from '@/lib/supabase/service'
+import { isDeliveryLine } from '@/lib/delivery-fee'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -226,8 +227,19 @@ export async function orderChecks(service: Service): Promise<Check[]> {
   const unlinked = async () => {
     const { data } = await service
       .from('order_items')
-      .select('order_id, orders!inner(manual_number, external_id, status, delivery_date, platform)')
+      .select('order_id, title, orders!inner(manual_number, external_id, status, delivery_date, platform)')
       .is('product_id', null)
+      /*
+       * Артикул Бітрікса рятує й без нашого товару.
+       *
+       * «Кульки фірмові Малі 100шт» комірник докладає в 1С, і в нашому
+       * каталозі їх немає зовсім — але свій номер у Бітріксі вони
+       * мають, і 1С їх упізнає. Та сама історія з рядком доставки.
+       * Перша версія цієї перевірки рахувала їх за біду й показала
+       * двадцять замовлень, де все гаразд. Сторінка, яка кричить
+       * даремно, вчить на себе не дивитись.
+       */
+      .is('bitrix_product_id', null)
       .eq('removed', false)
       .gte('orders.delivery_date', today)
       .in('orders.platform', SITE)
@@ -236,6 +248,8 @@ export async function orderChecks(service: Service): Promise<Check[]> {
 
     const seen = new Map<string, string>()
     for (const row of data ?? []) {
+      /* Доставку підставляємо своїм товаром уже при відправці в угоду */
+      if (isDeliveryLine({ title: (row as { title?: string }).title ?? '' })) continue
       /* PostgREST повертає вкладене або об'єктом, або масивом з одного —
          залежно від того, як він вирішив про зв'язок */
       const joined = (row as unknown as { orders?: unknown }).orders
