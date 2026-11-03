@@ -46,12 +46,25 @@ interface Deal {
   UF_CRM_1606294264905: string | null   // адреса
   UF_DEST_PERSONA: string | null
   UF_ORDER_KEY: string | null
+  UF_SHIPPING: string | null            // спосіб доставки
 }
+
+/**
+ * Чим їде замовлення.
+ *
+ * 176 — наш кур'єр за нашим графіком, 425 — Нова Пошта. Різниця не
+ * косметична: НП-замовлення приходять без дати доставки, бо її ще нема
+ * з ким домовляти, і в списку по днях вони не належать жодному дню.
+ * Поки ми цього поля не читали, вони лежали в базі невидимими — і так
+ * пролежали півсотні.
+ */
+const SHIPPING_KIND: Record<string, string> = { '176': 'courier', '425': 'np' }
 
 const DEAL_FIELDS = [
   'ID', 'TITLE', 'STAGE_ID', 'CONTACT_ID', 'OPPORTUNITY', 'DATE_CREATE', 'DATE_MODIFY',
   'COMMENTS', 'UF_CRM_1607510002583', 'UF_BILL_ADRESS_LIST', 'UF_CRM_1606047095',
   'UF_CRM_1606047143435', 'UF_CRM_1606294264905', 'UF_DEST_PERSONA', 'UF_ORDER_KEY',
+  'UF_SHIPPING',
 ]
 
 /** Телефони й імена контактів — одним запитом на всю сторінку угод. */
@@ -328,6 +341,7 @@ export async function syncSiteOrders(
            * Мерчант — вони просто не мали дати.
            */
           delivery_date: deal.UF_CRM_1606047095?.slice(0, 10) || null,
+          shipping: SHIPPING_KIND[(deal.UF_SHIPPING ?? '').trim()] ?? null,
           delivery_slot: await slotLabel(deal.UF_CRM_1606047143435),
           warehouse: WAREHOUSE_BY_ID.get(deal.UF_BILL_ADRESS_LIST ?? '') ?? null,
           customer_name: person?.name || persona.name || deal.TITLE,

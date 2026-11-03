@@ -46,6 +46,8 @@ interface Row {
   auto_done_at: string | null; auto_problem: string | null; chat_sent_at: string | null
   bitrix_deal_id: number | null; bitrix_error: string | null
   customer_comment: string | null
+  /** courier — наш кур'єр, np — Нова Пошта */
+  shipping: string | null
   /** Оцінка клієнта, якщо він її лишив */
   review?: { rating: number; comment: string | null }[] | null
 }
@@ -81,15 +83,23 @@ const DONE = 'Виконано'
  * «Виконані» — день закрито. Проставляється щоночі, але перевести можна
  *   й раніше руками, якщо замовлення вже доїхало.
  */
+/**
+ * Замовлення чекає на дату — і доти належить лише своїй черзі.
+ *
+ * Інакше воно стояло б і в «Нових» сьогоднішнього дня, хоч до сьогодні
+ * стосунку не має: везти його будемо тоді, коли оператор домовиться.
+ */
+const awaitingDate = (o: Row) => o.shipping === 'np' && !o.delivery_date
+
 const FUNNEL: { key: string; label: string; match: (o: Row) => boolean }[] = [
   {
     key: 'new', label: 'Нові',
-    match: o => o.status === PROCESSING && !o.auto_done_at,
+    match: o => o.status === PROCESSING && !o.auto_done_at && !awaitingDate(o),
   },
   {
     key: 'checked', label: 'Перевірено',
     match: o => o.status === PROCESSING && !!o.auto_done_at && !o.auto_problem
-      && o.manual_number != null,
+      && o.manual_number != null && !awaitingDate(o),
   },
   {
     /**
@@ -100,12 +110,29 @@ const FUNNEL: { key: string; label: string; match: (o: Row) => boolean }[] = [
      * замовлення, яке поїхало.
      */
     key: 'problem', label: 'Потребує уваги',
-    match: o => !!o.auto_problem && (o.status === PROCESSING || o.status === PREORDER),
+    match: o => !!o.auto_problem && !awaitingDate(o)
+      && (o.status === PROCESSING || o.status === PREORDER),
   },
-  { key: 'preorder', label: 'Передзамовлення', match: o => o.status === PREORDER },
+  {
+    key: 'preorder', label: 'Передзамовлення',
+    match: o => o.status === PREORDER && !awaitingDate(o),
+  },
   {
     key: 'picking', label: 'Комплектується',
-    match: o => o.status === PICKING || o.status === PACKED,
+    match: o => (o.status === PICKING || o.status === PACKED) && !awaitingDate(o),
+  },
+  {
+    /**
+     * Нова Пошта — окрема черга, бо в неї немає дня.
+     *
+     * Такі замовлення приходять із сайту без дати доставки: її ще нема з
+     * ким домовляти. У списку по днях вони не належали жодному дню — і
+     * були невидимі, хоч у базі лежали. Оператор проставляє дату тут, і
+     * замовлення йде у звичайну чергу свого дня.
+     */
+    key: 'np', label: 'Нова Пошта',
+    match: o => o.shipping === 'np' && !o.delivery_date
+      && o.status !== CANCELED && o.status !== DONE,
   },
   { key: 'done', label: 'Виконані', match: o => o.status === DONE },
   { key: 'canceled', label: 'Скасовано', match: o => o.status === CANCELED },
@@ -152,6 +179,13 @@ export default async function SiteOrdersPage({
     return d.toLocaleDateString('en-CA')
   })()
 
+  /* Докуди назад показувати непризначені НП-замовлення */
+  const npHorizon = (() => {
+    const d = new Date(`${date}T12:00:00`)
+    d.setMonth(d.getMonth() - 2)
+    return d.toLocaleDateString('en-CA')
+  })()
+
   const monthly = period === 'month' || q.trim().length > 0
   const monthStart = `${date.slice(0, 7)}-01`
   const monthEnd = (() => {
@@ -163,7 +197,7 @@ export default async function SiteOrdersPage({
 
   const supabase = createServiceClient()
 
-  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, bitrix_deal_id, bitrix_error, customer_comment, review:order_reviews(rating, comment)'
+  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, bitrix_deal_id, bitrix_error, customer_comment, shipping, review:order_reviews(rating, comment)'
 
   const pager = <T,>(q: unknown) => q as unknown as {
     range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
@@ -177,7 +211,8 @@ export default async function SiteOrdersPage({
    * фільтра коштувало семи подорожей до бази поспіль — і саме це було
    * видно як затримку.
    */
-  const [lastSync, queuedRes, nowCheckingRes, zonesRes, dated, undated] = await Promise.all([
+  const [lastSync, queuedRes, nowCheckingRes, zonesRes, dated, undated, awaitingNp] =
+    await Promise.all([
     lastCronRun(supabase, 'bitrix-sync'),
 
     supabase.from('orders')
@@ -230,13 +265,36 @@ export default async function SiteOrdersPage({
           .limit(1000)
           .then(r => (r.data ?? []) as unknown as Row[])
       : Promise.resolve([] as Row[]),
+
+    /*
+     * Черга Нової Пошти видна завжди, хоч який день обрано.
+     *
+     * У цих замовлень дати немає зовсім, тож «показати їх у дні» нема
+     * як: вони не належать жодному. А чекати на них не можна — клієнт
+     * уже заплатив. Тому вони приїжджають у список за будь-якого
+     * фільтра дня й живуть у власній вкладці.
+     *
+     * Горизонт у два місяці: глибше лежить те, з чим має розбиратись
+     * людина, а не список.
+     */
+    supabase.from('orders').select(COLUMNS)
+      .in('platform', [...SITE_PLATFORMS])
+      .eq('shipping', 'np')
+      .is('delivery_date', null)
+      .gte('order_date', npHorizon)
+      .not('status', 'in', '("Виконано","Скасовано","Повернено","Не вдалося")')
+      .order('order_date', { ascending: false })
+      .limit(500)
+      .then(r => (r.data ?? []) as unknown as Row[]),
   ])
 
   const queued = queuedRes.count
   const nowChecking = nowCheckingRes.data
   const warehouses = [...new Set((zonesRes.data ?? []).map(z => z.warehouse as string))].sort()
 
-  const inScope = [...dated, ...undated]
+  const seenIds = new Set([...dated, ...undated].map(o => o.id))
+  const inScope = [...dated, ...undated,
+    ...awaitingNp.filter(o => !seenIds.has(o.id))]
 
   /*
    * Зріз дня: склад, період, джерело, пошук.
@@ -460,6 +518,12 @@ export default async function SiteOrdersPage({
                     <span className="ml-2 text-xs font-normal text-zinc-500">
                       {platformLabel(o.platform)}
                     </span>
+                    {o.shipping === 'np' && (
+                      /* Посилку пакують інакше, ніж ящик у фургон — це
+                         має бути видно з першого погляду, а не з адреси */
+                      <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded
+                                       bg-sky-950 text-sky-400 align-middle">НП</span>
+                    )}
                   </div>
                   <div className="text-zinc-400 text-xs mt-0.5">
                     {shortDate(o.delivery_date)}
@@ -498,7 +562,9 @@ export default async function SiteOrdersPage({
                 )}
                 {o.bitrix_error && <span className="text-red-400">⚠ {o.bitrix_error}</span>}
                 {sharesNumber(o) && <span className="text-red-400">⚠ номер зайнято двічі</span>}
-                {!o.delivery_date && <span className="text-amber-500">⚠ немає дати доставки</span>}
+                {!o.delivery_date && (o.shipping === 'np'
+                  ? <span className="text-sky-400">дату проставить оператор</span>
+                  : <span className="text-amber-500">⚠ немає дати доставки</span>)}
                 {o.chat_sent_at && <span className="text-emerald-600">бланк у чаті</span>}
               </div>
 
@@ -624,12 +690,19 @@ export default async function SiteOrdersPage({
                         ⚠ той самий клієнт цього дня
                       </span>
                     )}
-                    {!o.delivery_date && (
+                    {!o.delivery_date && (o.shipping === 'np' ? (
+                      /* Для Нової Пошти це не хиба, а стан: дати ще нема
+                         з ким домовляти, і проставить її оператор */
+                      <span className="block text-sky-400 text-xs"
+                        title="Нова Пошта: дату доставки проставляє оператор, коли домовиться з клієнтом">
+                        дату проставить оператор
+                      </span>
+                    ) : (
                       <span className="block text-amber-500 text-xs"
                         title="В угоді не заповнена дата доставки — замовлення не належить жодному дню">
                         ⚠ немає дати доставки
                       </span>
-                    )}
+                    ))}
                     {Number(o.total ?? 0) === 0 && o.status !== 'Скасовано' && (
                       <span className="block text-amber-500 text-xs"
                         title="В угоді немає жодної позиції — збирати нема чого">

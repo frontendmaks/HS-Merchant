@@ -160,6 +160,13 @@ export async function PATCH(
     changes.chat_resend = true
   }
 
+  /* Дату, якої не було, просто записуємо — і даємо огляду глянути заново:
+     від неї залежить і номер ящика, і те, в який день замовлення стане */
+  if (body?.delivery_date && !order.delivery_date) {
+    patch.delivery_date = body.delivery_date
+    changes.delivery_date = body.delivery_date
+  }
+
   if (body?.delivery_slot && body.delivery_slot !== order.delivery_slot) {
     if (!isValidSlot(body.delivery_slot)) {
       return NextResponse.json({ error: 'Невідомий період доставки' }, { status: 400 })
@@ -266,7 +273,20 @@ export async function PATCH(
    * дату разом з адресою чи складом, і нове замовлення має поїхати з
    * виправленими даними, а не з тими, що були до правки.
    */
-  if (body?.delivery_date && body.delivery_date !== order.delivery_date) {
+  /*
+   * Перша дата — не переїзд.
+   *
+   * Замовлення на Нову Пошту приходять із сайту без дати: її проставляє
+   * оператор, коли домовиться з клієнтом. Для правила нижче це виглядало
+   * як зміна дати — і воно створило б нове замовлення, а це скасувало:
+   * оператор поставив би число й побачив, що замовлення зникло, а
+   * натомість з'явилось чуже з іншим номером.
+   *
+   * Переїзд — це коли дата була й стала інша. Коли її не було, ми просто
+   * нарешті дізнались, коли везти.
+   */
+  if (body?.delivery_date && order.delivery_date
+      && body.delivery_date !== order.delivery_date) {
     const moved = await relocateOrder(service, { orderId: id, toDate: body.delivery_date })
     if ('error' in moved) {
       return NextResponse.json({
