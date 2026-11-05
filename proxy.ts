@@ -1,3 +1,4 @@
+import { accessTokenFromCookies, tokenNeedsRefresh, transientAuthError } from '@/lib/auth-session-cookie'
 import { deadline, timedFetch } from '@/lib/http'
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
@@ -33,7 +34,7 @@ export async function proxy(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
-      global: { fetch: timedFetch(3500) },
+      global: { fetch: timedFetch(15000) },
       cookies: {
         getAll() {
           return request.cookies.getAll()
@@ -49,44 +50,28 @@ export async function proxy(request: NextRequest) {
     }
   )
 
-  // The session is read from the token itself rather than by asking the Auth
-  // service. This project signs with ES256, so the signature is verified here
-  // against a cached public key — no network call, except when the token is
-  // near expiry and genuinely needs refreshing.
-  //
-  // It was the round trip per request that took the whole panel down with it:
-  // Auth slowed to ten seconds a call, every page and every asset waited on it,
-  // and Vercel returned 504 for a site whose data was fine all along.
-  //
-  // The trade: a session revoked at Supabase stays usable here until its
-  // access token expires, an hour at most.
-  let data
+  const token = accessTokenFromCookies(request.cookies.getAll(), process.env.NEXT_PUBLIC_SUPABASE_URL!)
+  if (!token) return NextResponse.redirect(new URL('/login', request.url))
   try {
-    ;({ data } = await deadline(supabase.auth.getClaims(), 4500))
+    // A still-valid token is verified directly; even the last 90 seconds of
+    // its life do not require an Auth round trip just to open a page.
+    // Do not race a token rotation against an abandoned response: wait for
+    // the SDK's bounded refresh/retry cycle and return its Set-Cookie headers.
+    const { data, error } = tokenNeedsRefresh(token)
+      ? await supabase.auth.getClaims()
+      : await deadline(supabase.auth.getClaims(token), 16000)
+    if (error && transientAuthError(error)) return authUnavailable()
+    if (!data?.claims?.sub) return NextResponse.redirect(new URL('/login', request.url))
+    return supabaseResponse
   } catch {
-    const url = new URL('/login', request.url)
-    url.searchParams.set('retry', '1')
-    return NextResponse.redirect(url)
+    return authUnavailable()
   }
-  const user = data?.claims ? { id: data.claims.sub as string } : null
+}
 
-  // Login / set-password: redirect to home if already logged in (except set-password needs auth)
-  if (pathname === '/login') {
-    if (user) return NextResponse.redirect(new URL('/', request.url))
-    return supabaseResponse
-  }
-
-  // Set password page — allowed for authenticated users (just accepted invite)
-  if (pathname === '/set-password') {
-    return supabaseResponse
-  }
-
-  // All other routes: require auth
-  if (!user) {
-    return NextResponse.redirect(new URL('/login', request.url))
-  }
-
-  return supabaseResponse
+function authUnavailable() {
+  // Fail closed without redirecting or deleting/overwriting refresh cookies.
+  return new NextResponse(`<!doctype html><html lang="uk"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>HS Merchant — повторити запит</title><body style="font-family:system-ui;max-width:560px;margin:15vh auto;padding:24px"><h1>Тимчасова затримка авторизації</h1><p>Повторіть відкриття сторінки за кілька секунд. Повторно вводити пароль поки не потрібно.</p><button onclick="location.reload()" style="padding:12px 20px">Повторити</button></body></html>`,
+    { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Retry-After': '3' } })
 }
 
 export const config = {

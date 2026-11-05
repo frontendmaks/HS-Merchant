@@ -8,7 +8,7 @@ export async function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
-      global: { fetch: timedFetch(4000) },
+      global: { fetch: timedFetch(15000) },
       cookies: {
         getAll() { return cookieStore.getAll() },
         setAll(cookiesToSet) {

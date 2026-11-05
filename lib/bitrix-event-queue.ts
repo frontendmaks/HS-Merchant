@@ -1,3 +1,4 @@
+import { acquireLease } from '@/lib/job-lease'
 import { createServiceClient } from '@/lib/supabase/service'
 import { syncSiteOrders } from '@/lib/bitrix-sync'
 import { autoProcessSiteOrders } from '@/lib/site-autopilot'
@@ -5,6 +6,12 @@ import { getSetting } from '@/lib/settings'
 import { logCronRun } from '@/lib/cron-log'
 
 export async function drainBitrixEvents(limit = 3): Promise<void> {
+  const release = await acquireLease('bitrix-event-worker', 240)
+  if (!release) return
+  try { await drainUnlocked(limit) } finally { await release() }
+}
+
+async function drainUnlocked(limit: number): Promise<void> {
   const service = createServiceClient()
   const token = crypto.randomUUID()
   const { data, error } = await service.rpc('merchant_claim_bitrix', { p_token: token, p_limit: limit })

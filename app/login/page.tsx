@@ -3,10 +3,9 @@
 import { useState, Suspense } from 'react'
 import { deadline } from '@/lib/http'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 
 function LoginForm() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const isNewUser = searchParams.get('invited') === '1'
   const [email, setEmail] = useState('')
@@ -21,12 +20,15 @@ function LoginForm() {
     setError('')
     setLoading(true)
     try {
-      const { error } = await deadline(supabase.auth.signInWithPassword({ email, password }), 15000)
+      const { error } = await deadline(supabase.auth.signInWithPassword({ email, password }), 35000)
       if (error) throw error
-      router.push('/')
-      router.refresh()
+      // Fresh document reads the newly stored cookies and clears stale auth locks.
+      window.location.assign('/')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Помилка входу')
+      const message = e instanceof Error ? e.message : String(e)
+      setError(/timeout|timed out|fetch|network|temporar|сервіс тимчасово/i.test(message)
+        ? 'Не вдалося дочекатися відповіді сервісу входу. Повторіть спробу за кілька секунд.'
+        : /invalid login credentials/i.test(message) ? 'Неправильний email або пароль' : message)
     } finally {
       setLoading(false)
     }
