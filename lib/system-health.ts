@@ -19,6 +19,7 @@
  */
 import { createServiceClient } from '@/lib/supabase/service'
 import { isDeliveryLine } from '@/lib/delivery-fee'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -113,16 +114,14 @@ const lateAfter = (everyMinutes: number) =>
 export async function cronHealth(service: Service): Promise<JobState[]> {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-  /* Беремо добу одним запитом, а не останній запис на кожен розклад:
-     сімнадцять запитів поспіль коштували б більше, ніж уся сторінка */
-  const { data } = await service
+  /* Читаємо добу сторінками: PostgREST обрізає відповідь до 1000 рядків,
+     через що часті запуски приховували успішні добові розклади. */
+  const runs = await fetchAllRows(() => service
     .from('cron_runs')
     .select('name, ran_at, duration_ms, error')
     .gte('ran_at', since)
     .order('ran_at', { ascending: false })
-    .limit(5000)
-
-  const runs = data ?? []
+  )
   const now = Date.now()
 
   return JOBS.map(job => {
