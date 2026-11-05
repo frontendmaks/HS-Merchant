@@ -679,8 +679,7 @@ async function autoProcessSiteOrdersUnlocked(
 
   // Черга скінчилась — прибираємо позначку, щоб не висіла назавжди
   await service.from('app_settings')
-    .upsert({ key: 'autopilot_now', value: null, updated_at: new Date().toISOString() },
-      { onConflict: 'key' })
+    .delete().eq('key', 'autopilot_now')
     .then(() => {}, () => {})
 
   return result
