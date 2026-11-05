@@ -1,3 +1,4 @@
+import { acquireLease } from '@/lib/job-lease'
 /**
  * Ручне замовлення → угода в Бітріксі.
  *
@@ -191,7 +192,14 @@ export async function dealByOrderKey(key: string): Promise<number | null> {
   return id > 0 ? id : null
 }
 
-export async function addDealOnce(
+export async function addDealOnce(key: string, fields: Record<string, unknown>): Promise<number> {
+  if (!key) throw new Error('Немає ключа замовлення для безпечного створення угоди')
+  const release = await acquireLease(`deal:${key}`, 120)
+  if (!release) throw new Error('Ця угода вже створюється — зачекайте завершення синхронізації')
+  try { return await addDealOnceUnlocked(key, fields) } finally { await release() }
+}
+
+async function addDealOnceUnlocked(
   key: string,
   fields: Record<string, unknown>,
 ): Promise<number> {

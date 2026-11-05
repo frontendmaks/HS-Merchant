@@ -26,6 +26,7 @@ export async function broadcastOrderChange(
   try {
     await fetch(`${url}/realtime/v1/api/broadcast`, {
       method: 'POST',
+      signal: AbortSignal.timeout(3000),
       headers: { 'Content-Type': 'application/json', apikey: key },
       body: JSON.stringify({
         messages: [{

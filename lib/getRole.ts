@@ -1,25 +1,11 @@
-import { createClient } from '@/lib/supabase/server'
-import { createServiceClient } from '@/lib/supabase/service'
+import { currentProfile } from '@/lib/session'
 import type { UserRole } from '@/lib/roles'
 
 export type { UserRole }
 export * from '@/lib/roles'
 
 export async function getCurrentRole(): Promise<UserRole> {
-  try {
-    const supabase = await createClient()
-    // Read from the signed token rather than asking the Auth service — every
-    // page render went through here, and the round trip bought nothing the
-    // signature does not already prove
-    const { data: claims } = await supabase.auth.getClaims()
-    const userId = claims?.claims?.sub as string | undefined
-    if (!userId) return null
-    const service = createServiceClient()
-    const { data } = await service.from('profiles').select('role').eq('id', userId).single()
-    return (data?.role as UserRole) ?? 'viewer'
-  } catch {
-    return null
-  }
+  return (await currentProfile())?.role ?? null
 }
 
 export const ADMIN_ROLES: UserRole[] = ['super_admin', 'admin']

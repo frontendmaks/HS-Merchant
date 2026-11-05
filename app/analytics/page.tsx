@@ -1,3 +1,4 @@
+import { unstable_cache } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/service'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
@@ -99,6 +100,13 @@ export default async function AnalyticsPage({
     return { from: iso(start), to: iso(end) }
   })()
 
+  const report = await loadReport(from, to, previousRange.from, previousRange.to, limited)
+  return <AnalyticsClient from={from} to={to} platform={platform} limited={limited} {...report} />
+}
+
+// Only aggregate report data is cached; role-specific visibility is in the key.
+const loadReport = unstable_cache(async (from: string, to: string, previousFrom: string, previousTo: string, limited: boolean) => {
+  const previousRange = { from: previousFrom, to: previousTo }
   const supabase = createServiceClient()
 
   // Запускаємо одразу: зони ні від чого не залежать і чекати на них нема чого
@@ -189,11 +197,14 @@ export default async function AnalyticsPage({
   // Із журналу потрібні лише п'ять видів записів — решту не тягнемо
   const EVENT_TYPES = ['created', 'status', 'ttn', 'cancel', 'cancel_reason']
 
-  const eventPages = await Promise.all(chunks.map(chunk => fetchAllRows(() => supabase
-    .from('order_events')
-    .select('order_id, actor_id, actor_name, type, new_value, created_at')
-    .in('type', EVENT_TYPES)
-    .in('order_id', chunk))))
+  const eventPages: unknown[][] = []
+  for (let offset = 0; !limited && offset < chunks.length; offset += 2) {
+    const batch = await Promise.all(chunks.slice(offset, offset + 2).map(chunk => fetchAllRows(() => supabase
+      .from('order_events')
+      .select('order_id, actor_id, actor_name, type, new_value, created_at')
+      .in('type', EVENT_TYPES).in('order_id', chunk).order('id'), 1000, 1)))
+    eventPages.push(...batch)
+  }
 
   const events = eventPages.flat() as unknown as OperatorEventRow[]
 
@@ -202,14 +213,14 @@ export default async function AnalyticsPage({
   // trail — profiles.last_seen_at is a single overwritten moment.
   // Присутність — хвилина на рядок: за місяць на кількох операторів це
   // десятки тисяч, і тисячний поріг тут ріже найбільше
-  const [shiftRows, tickRows] = await Promise.all([
-    fetchAllRows(() => supabase.from('work_shifts')
-      .select('operator_id, work_date')
-      .gte('work_date', from).lte('work_date', to)),
-    fetchAllRows(() => supabase.from('presence_ticks')
-      .select('user_id, minute')
-      .gte('minute', `${from}T00:00:00Z`).lte('minute', `${to}T23:59:59Z`)),
+  const [shiftRows, presence] = await Promise.all([
+    limited ? Promise.resolve([]) : fetchAllRows(() => supabase.from('work_shifts')
+      .select('operator_id, work_date').gte('work_date', from).lte('work_date', to).order('work_date')),
+    limited ? Promise.resolve({ data: [], error: null })
+      : supabase.rpc('merchant_presence_minutes', { p_from: from, p_to: to }),
   ])
+  if (presence.error) throw presence.error
+  const onlineByActor = new Map<string, number>((presence.data ?? []).map((r: { user_id: string; online_minutes: number }) => [r.user_id, r.online_minutes]))
 
   const roster = new Map<string, Set<string>>()
   for (const r of shiftRows ?? []) {
@@ -218,22 +229,16 @@ export default async function AnalyticsPage({
     roster.get(id)!.add(r.work_date as string)
   }
 
-  const ticks = new Map<string, string[]>()
-  for (const r of tickRows ?? []) {
-    const id = r.user_id as string
-    ticks.set(id, [...(ticks.get(id) ?? []), r.minute as string])
-  }
-
   // The heartbeat is newer than the orders, so shifts worked before it exist
   // with no presence data at all — unmeasured, not absent
   // The journal begins the day it was built; a cancellation older than that
   // has no entry to be missing, so absence there is not evidence
-  const { data: firstEvent } = await supabase
-    .from('order_events').select('created_at').order('created_at').limit(1).maybeSingle()
+  const [{ data: firstEvent }, { data: firstTick }] = await Promise.all([
+    supabase.from('order_events').select('created_at').order('created_at').limit(1).maybeSingle(),
+    supabase.from('presence_ticks').select('minute').order('minute').limit(1).maybeSingle(),
+  ])
   const journalFrom = (firstEvent?.created_at as string | undefined)?.slice(0, 10) ?? null
 
-  const { data: firstTick } = await supabase
-    .from('presence_ticks').select('minute').order('minute').limit(1).maybeSingle()
   const presenceSince = firstTick?.minute ? new Date(firstTick.minute as string) : null
 
   /** Everything the page shows, for one slice of the orders. */
@@ -360,19 +365,14 @@ export default async function AnalyticsPage({
         })),
         operatorIds,
         roster,
-        ticks,
+        new Map(),
         presenceSince,
+        onlineByActor,
       ),
     }
   }
 
-  return (
-    <AnalyticsClient
-      from={from}
-      to={to}
-      platform={platform}
-      limited={limited}
-      previous={{
+  return { previous: {
         from: previousRange.from,
         to: previousRange.to,
         totals: {
@@ -383,8 +383,7 @@ export default async function AnalyticsPage({
           web: previousTotals(previous.filter(o => o.platform === 'site')),
           phone: previousTotals(previous.filter(o => o.platform === 'manual')),
         },
-      }}
-      bundles={{
+      }, bundles: {
         all: bundle(orders),
         maudau: bundle(orders.filter(o => o.platform === 'maudau')),
         rozetka: bundle(orders.filter(o => o.platform === 'rozetka')),
@@ -394,7 +393,5 @@ export default async function AnalyticsPage({
         site: bundle(orders.filter(o => o.platform === 'site' || o.platform === 'manual')),
         web: bundle(orders.filter(o => o.platform === 'site')),
         phone: bundle(orders.filter(o => o.platform === 'manual')),
-      }}
-    />
-  )
-}
+      } }
+}, ['analytics-report-v2'], { revalidate: 60 })

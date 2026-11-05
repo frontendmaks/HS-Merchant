@@ -1,7 +1,8 @@
 'use client'
 import Link from 'next/link'
+import { sharedJson } from '@/lib/shared-json'
 import { usePathname, useRouter } from 'next/navigation'
-import { createBrowserClient } from '@supabase/ssr'
+import { createClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
 import { isChromeless } from '@/lib/chromeless'
 import { PAGE_ROLES, ROLE_LABELS } from '@/lib/roles'
@@ -186,29 +187,40 @@ export default function Sidebar() {
   const [loaded, setLoaded] = useState(false)
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [desktop, setDesktop] = useState(false)
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1024px)')
+    const sync = () => setDesktop(media.matches)
+    sync(); media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
   const [counts, setCounts] = useState<NavCounts | null>(null)
 
   // Marks this user online on every page for as long as the tab is open
   usePresence(userId)
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+  const supabase = createClient()
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (!session) { setUserId(null); setLoaded(true); return }
+    let activeUser: string | null = null
+    let alive = true
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      activeUser = session?.user.id ?? null
+      if (!session) { setUserId(null); setProfile(null); setLoaded(true); return }
       setUserId(session.user.id)
+      // Never await Supabase inside its auth callback (auth lock).
+      setTimeout(async () => {
       const { data } = await supabase
         .from('profiles')
         .select('full_name,email,role')
         .eq('id', session.user.id)
         .single()
+      if (!alive || activeUser !== session.user.id) return
       setProfile(data ?? { full_name: null, email: session.user.email || '', role: 'viewer' })
       setLoaded(true)
+      }, 0)
     })
-    return () => subscription.unsubscribe()
+    return () => { alive = false; subscription.unsubscribe() }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -216,20 +228,22 @@ export default function Sidebar() {
   // order updates the count as soon as you leave the page.
   useEffect(() => {
     let alive = true
+    let inFlight = false
     const load = async () => {
+      if (document.visibilityState !== 'visible' || inFlight) return
       if (!userId) { if (alive) setCounts(null); return }
       try {
-        const res = await fetch('/api/nav-counts')
-        if (!res.ok) return
-        const data = await res.json()
+        inFlight = true
+        const data = await sharedJson<NavCounts>('/api/nav-counts', userId, 20000)
         if (alive) setCounts(data)
       } catch {
         // A failed poll just leaves the previous figures on screen
-      }
+      } finally { inFlight = false }
     }
     void load()
     const timer = setInterval(load, COUNTS_POLL_MS)
-    return () => { alive = false; clearInterval(timer) }
+    document.addEventListener('visibilitychange', load)
+    return () => { alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', load) }
   }, [userId, path])
 
   // Escape closes the drawer, matching the backdrop tap.
@@ -276,7 +290,7 @@ export default function Sidebar() {
         <img src="/logo.svg" alt="" className="w-7 h-7 rounded-full" />
         <span className="text-white font-semibold text-sm">HS Merchant</span>
         <div className="ml-auto">
-          <NotificationBell enabled={loaded && !!profile} />
+          <NotificationBell userId={userId} enabled={loaded && !!profile && !desktop} />
         </div>
       </header>
 
@@ -420,7 +434,7 @@ export default function Sidebar() {
       <div className="px-3 py-4 border-t border-zinc-800 space-y-2 shrink-0">
         {/* Below lg the bell lives in the mobile top bar instead */}
         <div className="hidden lg:block">
-          <NotificationBell enabled={loaded && !!profile} />
+          <NotificationBell userId={userId} enabled={loaded && !!profile && desktop} />
         </div>
         {loaded && profile && (
           <div className="px-3 py-2.5 rounded-lg bg-zinc-800/50">

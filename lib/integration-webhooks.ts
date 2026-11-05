@@ -1,3 +1,4 @@
+import { acquireLease } from '@/lib/job-lease'
 /**
  * Сповіщення зовнішніх систем про зміни.
  *
@@ -6,6 +7,7 @@
  * лежить довго — зміну все одно видно через звичайне опитування, бо курсор
  * рахується від часу оновлення замовлення, а не від надісланих вебхуків.
  */
+import { after } from 'next/server'
 import { isTest, heldBack } from '@/lib/env-mode'
 import { createHmac } from 'node:crypto'
 import { createServiceClient } from '@/lib/supabase/service'
@@ -30,39 +32,46 @@ export async function notifyIntegrations(
   orderId: string,
   event: WebhookEvent,
   service: Service = createServiceClient(),
+  eventKey?: string,
 ) {
   try {
-    const { data: clients } = await service
+    const { data: clients, error: clientsError } = await service
       .from('integration_clients')
       .select('id')
       .eq('is_active', true)
       .not('webhook_url', 'is', null)
 
+    if (clientsError) throw clientsError
     if (!clients?.length) return
 
-    const { data: order } = await service
+    const { data: order, error: orderError } = await service
       .from('orders').select(ORDER_FIELDS).eq('id', orderId).single()
+    if (orderError) throw orderError
     if (!order) return
 
     const [payload] = await buildOrders(service, [order])
 
-    await service.from('integration_webhooks').insert(
+    const { error: enqueueError } = await service.from('integration_webhooks').upsert(
       clients.map(c => ({
         client_id: c.id,
+        event_key: eventKey ?? null,
         event,
         order_id: orderId,
         payload: { event, sent_at: new Date().toISOString(), order: payload },
       })),
+      { onConflict: 'client_id,event_key', ignoreDuplicates: true },
     )
+    if (enqueueError) throw enqueueError
 
     // Відправляємо одразу, не чекаючи крона.
     //
     // Черга потрібна для повторів, а не для затримки: інакше «вебхук летить за
     // секунди» означало б «у середньому через дві з половиною хвилини».
     // Помилка тут нічого не ламає — те, що не пішло, забере крон.
-    await deliverWebhooks(service, clients.length).catch(() => {})
-  } catch {
-    // Мовчки: збій сповіщення не повинен валити дію, яка його спричинила
+    after(() => deliverWebhooks(service, clients.length).then(() => {}).catch(console.error))
+  } catch (e) {
+    if (eventKey) throw e // Outbox retries this event without duplicate inserts.
+    console.error('Integration notification enqueue failed', e)
   }
 }
 
@@ -75,7 +84,13 @@ export const signPayload = (secret: string, body: string) =>
  *
  * @returns скільки доставлено і скільки лишилось
  */
-export async function deliverWebhooks(
+export async function deliverWebhooks(service: Service = createServiceClient(), batch = 5): Promise<{ sent: number; failed: number }> {
+  const release = await acquireLease('integration-webhook-delivery', 180)
+  if (!release) return { sent: 0, failed: 0 }
+  try { return await deliverWebhooksUnlocked(service, Math.min(batch, 5)) } finally { await release() }
+}
+
+async function deliverWebhooksUnlocked(
   service: Service = createServiceClient(),
   batch = 25,
 ): Promise<{ sent: number; failed: number }> {

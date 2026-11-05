@@ -613,6 +613,7 @@ export function operatorStats(
   /** When the heartbeat started recording. Shifts worked before it are not
    *  absences, they are unmeasured, and must not be scored as either. */
   presenceSince: Date | null = null,
+  onlineByActor?: Map<string, number>,
 ): OperatorStat[] {
   const orderById = new Map(orders.map(o => [o.id, o]))
   const byActor = new Map<string, { name: string; rows: OperatorEventRow[] }>()
@@ -711,7 +712,7 @@ export function operatorStats(
     //              is the only honest denominator for presence
     const workedMins = elapsedShiftMinutes(workDates)
     const measuredMins = elapsedShiftMinutes(workDates, new Date(), { measuredSince: presenceSince })
-    const onlineMins = onlineMinutes(ticks.get(id) ?? [], workDates)
+    const onlineMins = onlineByActor ? (onlineByActor.get(id) ?? 0) : onlineMinutes(ticks.get(id) ?? [], workDates)
 
     return {
       id,

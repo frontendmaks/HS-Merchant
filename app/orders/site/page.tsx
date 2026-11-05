@@ -43,7 +43,7 @@ interface Row {
   customer_phone: string | null; address: string | null; warehouse: string | null
   delivery_zone: string | null; delivery_date: string | null; delivery_slot: string | null
   total: number | null; status: string | null; share_token: string | null
-  auto_done_at: string | null; auto_problem: string | null; chat_sent_at: string | null
+  auto_done_at: string | null; auto_problem: string | null; chat_sent_at: string | null; chat_error: string | null
   bitrix_deal_id: number | null; bitrix_error: string | null
   customer_comment: string | null
   /** courier — наш кур'єр, np — Нова Пошта */
@@ -143,16 +143,15 @@ export default async function SiteOrdersPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    date?: string; stage?: string
+    date?: string; stage?: string; page?: string
     wh?: string; slot?: string; src?: string; q?: string; period?: string
   }>
 }) {
-  const role = await getCurrentRole()
+  const [role, me] = await Promise.all([getCurrentRole(), currentActor()])
   const readOnly = role === 'viewer'
   /* Хто дивиться список: поруч із чужою відкритою карткою стане його ім'я */
-  const me = await currentActor()
   const {
-    date: dateParam, stage = 'new', wh = '', slot = '', src = '', q = '', period = '',
+    date: dateParam, page: pageParam, stage = 'new', wh = '', slot = '', src = '', q = '', period = '',
   } = await searchParams
 
   // За замовчуванням — сьогодні: саме сьогоднішні замовлення возять
@@ -197,7 +196,7 @@ export default async function SiteOrdersPage({
 
   const supabase = createServiceClient()
 
-  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, bitrix_deal_id, bitrix_error, customer_comment, shipping, review:order_reviews(rating, comment)'
+  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, chat_error, bitrix_deal_id, bitrix_error, customer_comment, shipping, review:order_reviews(rating, comment)'
 
   const pager = <T,>(q: unknown) => q as unknown as {
     range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
@@ -319,6 +318,12 @@ export default async function SiteOrdersPage({
 
   const matcher = FUNNEL.find(f => f.key === stage) ?? FUNNEL[0]
   const orders = scoped.filter(matcher.match)
+  const pageCount = Math.max(1, Math.ceil(orders.length / 50))
+  const page = Math.min(pageCount, Math.max(1, Number(pageParam) || 1))
+  const visibleOrders = orders.slice((page - 1) * 50, page * 50)
+  const pageHref = (next: number) => '?' + new URLSearchParams({
+    date, stage, wh, slot, src, q, period, page: String(next),
+  })
 
   /*
    * Що можна звести в одне замовлення.
@@ -509,7 +514,7 @@ export default async function SiteOrdersPage({
             <div className="text-center py-10 text-zinc-500 text-sm">
               {monthly ? 'За цей місяць тут порожньо' : 'На цю дату тут порожньо'}
             </div>
-          ) : orders.map(o => (
+          ) : visibleOrders.map(o => (
             <div key={o.id} className="p-3 space-y-2">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -565,6 +570,7 @@ export default async function SiteOrdersPage({
                 {!o.delivery_date && (o.shipping === 'np'
                   ? <span className="text-sky-400">дату проставить оператор</span>
                   : <span className="text-amber-500">⚠ немає дати доставки</span>)}
+                {!o.chat_sent_at && o.chat_error && <span className="text-red-400">⚠ {o.chat_error}</span>}
                 {o.chat_sent_at && <span className="text-emerald-600">бланк у чаті</span>}
               </div>
 
@@ -636,7 +642,7 @@ export default async function SiteOrdersPage({
                     </Link>
                   </td>
                 </tr>
-              ) : orders.map(o => (
+              ) : visibleOrders.map(o => (
                 <tr key={o.id} className="border-b border-zinc-800/60 last:border-0 align-top">
                   <td className="px-3 py-2 whitespace-nowrap">
                     <span className="text-white">
@@ -648,6 +654,7 @@ export default async function SiteOrdersPage({
                         понад журнал
                       </span>
                     )}
+                    {!o.chat_sent_at && o.chat_error && <span className="block text-red-400 text-xs">⚠ {o.chat_error}</span>}
                     {o.chat_sent_at && (
                       <span className="block text-emerald-600 text-xs" title="Бланк надіслано в чат складу">
                         бланк у чаті
@@ -802,6 +809,11 @@ export default async function SiteOrdersPage({
         </WideScroll>
         </div>
       </div>
+      {pageCount > 1 && <div className="flex items-center gap-4 text-sm text-zinc-400">
+        <span>Сторінка {page} з {pageCount}</span>
+        {page > 1 && <Link href={pageHref(page - 1)}>← Назад</Link>}
+        {page < pageCount && <Link href={pageHref(page + 1)}>Далі →</Link>}
+      </div>}
     </div>
   )
 }

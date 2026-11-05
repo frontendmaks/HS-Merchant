@@ -83,9 +83,15 @@ export function useOrderUpdatesThrottled(
   handler.current = onChange
 
   useOrderUpdates(() => {
-    if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => handler.current(), quietMs)
+    if (document.visibilityState !== 'visible' || timer.current) return
+    // Fixed upper bound: continuous events must not postpone refresh forever.
+    timer.current = setTimeout(() => {
+      timer.current = null
+      handler.current()
+    }, quietMs)
   })
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
 
   /*
    * Страховка на випадок, коли сповіщення не прийшло.

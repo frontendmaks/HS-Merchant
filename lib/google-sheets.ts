@@ -1,3 +1,5 @@
+import { timedFetch } from '@/lib/http'
+const fetchBounded = timedFetch(12000)
 /**
  * Доступ до Google Таблиць із сервера.
  *
@@ -56,7 +58,7 @@ async function accessToken(): Promise<string | null> {
   signer.update(`${header}.${claims}`)
   const jwt = `${header}.${claims}.${b64(signer.sign(creds.private_key))}`
 
-  const res = await fetch('https://oauth2.googleapis.com/token', {
+  const res = await fetchBounded('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -86,7 +88,7 @@ export async function readRange(
   const token = await accessToken()
   if (!token) return null
 
-  const res = await fetch(
+  const res = await fetchBounded(
     api(`${spreadsheetId}/values/${encodeURIComponent(range)}`),
     { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) },
   )
@@ -108,7 +110,7 @@ export async function writeCell(
   const token = await accessToken()
   if (!token) return false
 
-  const res = await fetch(
+  const res = await fetchBounded(
     api(`${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`),
     {
       method: 'PUT',
@@ -125,7 +127,7 @@ export async function sheetTitles(spreadsheetId: string): Promise<string[] | nul
   const token = await accessToken()
   if (!token) return null
 
-  const res = await fetch(
+  const res = await fetchBounded(
     api(`${spreadsheetId}?fields=sheets.properties.title`),
     { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) },
   )

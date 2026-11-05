@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole } from '@/lib/getRole'
 import { isInProgress, isNew } from '@/lib/order-statuses'
@@ -77,13 +78,13 @@ export default async function OrdersOverviewPage() {
   const readOnly = role === 'viewer'
 
   const supabase = createServiceClient()
-  const { data } = await supabase
+  const data = await fetchAllRows(() => supabase
     .from('orders')
     .select('id, external_id, manual_number, platform, order_date, customer_name, total, status, delivery_date, delivery_slot')
     .gte('order_date', from)
     .lte('order_date', to)
     .order('order_date', { ascending: false })
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: false }).order('id'), 1000, 1)
 
   const orders = data ?? []
   const marketplace = orders.filter(o => orderSource(o.platform) === 'marketplace')

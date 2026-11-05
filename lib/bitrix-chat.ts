@@ -71,8 +71,8 @@ export async function onStatusChanged(
   service: Service,
   orderId: string,
   status: string | null,
-): Promise<void> {
-  if (status !== PICKING_STAGE) return
+): Promise<{ error?: string }> {
+  if (status !== PICKING_STAGE) return {}
 
   /*
    * Два адресати однієї події.
@@ -84,7 +84,7 @@ export async function onStatusChanged(
    * Клієнта повідомляємо після складу й окремо: якщо в нього немає
    * чату або месенджер мовчить, бланк на склад має піти однаково.
    */
-  await sendOrderSheet(service, orderId)
+  const sheet = await sendOrderSheet(service, orderId)
 
   try {
     const { notifyPicking } = await import('@/lib/customer-notify')
@@ -92,6 +92,7 @@ export async function onStatusChanged(
   } catch (e) {
     console.error('notifyPicking failed:', e instanceof Error ? e.message : e)
   }
+  return 'error' in sheet ? { error: sheet.error } : {}
 }
 
 export async function sendToChat(dialogId: string, text: string): Promise<void> {
@@ -213,10 +214,32 @@ export async function sendOrderSheet(
       ? `№${box}`
       : (order.external_id as string | null) ?? ''
 
+    const { data: claimed, error: claimError } = await service.rpc('merchant_claim_sheet', { p_order_id: orderId })
+    if (claimError) throw claimError
+    if (!claimed) {
+      const { data: delivery } = await service.rpc('merchant_sheet_state', { p_order_id: orderId })
+      if (delivery?.state === 'sent') {
+        await service.from('orders').update({ chat_sent_at: delivery.created_at, chat_error: null }).eq('id', orderId)
+        return { ok: true }
+      }
+      const error = 'Бланк уже надсилається або потребує перевірки попередньої відправки'
+      await service.from('orders').update({ chat_error: error }).eq('id', orderId)
+      return { error }
+    }
+
+    try {
     await sendToChat(
       chat.dialog_id as string,
       `Замовлення ${number}: ${base}/zamovlennya/${order.share_token}`.replace('  ', ' '),
     )
+
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      await service.rpc('merchant_finish_sheet', { p_order_id: orderId, p_error: message })
+      throw new Error('Відправку бланка не підтверджено. Перевірте чат складу перед повторенням: ' + message)
+    }
+    const { error: finishError } = await service.rpc('merchant_finish_sheet', { p_order_id: orderId })
+    if (finishError) throw finishError
 
     await service.from('orders')
       .update({ chat_sent_at: new Date().toISOString(), chat_error: null })

@@ -1,3 +1,5 @@
+import { timedFetch } from '@/lib/http'
+const fetchBounded = timedFetch(12000)
 /**
  * Доступ до Trello.
  *
@@ -38,7 +40,7 @@ async function call<T>(
     return {} as T
   }
 
-  const res = await fetch(`${BASE}${path}?${query}`, {
+  const res = await fetchBounded(`${BASE}${path}?${query}`, {
     method,
     signal: AbortSignal.timeout(20_000),
   })

@@ -1,26 +1,17 @@
 'use client'
 
-import { useState, useCallback, useEffect, useTransition } from 'react'
+import { useState, useCallback, useRef, useEffect, useTransition } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { useOrderUpdates } from '@/lib/use-order-updates'
+import { useOrderUpdatesThrottled } from '@/lib/use-order-updates'
 
 export default function OrdersToolbar() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
-  // Someone else changing an order should show here at once rather than at the
-  // next poll — a stale status is how two operators work the same order.
-  useOrderUpdates(() => router.refresh())
-
-  // The poll stays as the floor: a dropped socket or a change made while the
-  // tab was asleep still lands, just later.
-  useEffect(() => {
-    const timer = setInterval(() => router.refresh(), 60_000)
-    const onFocus = () => router.refresh()
-    window.addEventListener('focus', onFocus)
-    return () => { clearInterval(timer); window.removeEventListener('focus', onFocus) }
-  }, [router])
+  useOrderUpdatesThrottled(() => router.refresh())
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (searchTimer.current) clearTimeout(searchTimer.current) }, [])
 
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<string | null>(null)
@@ -99,7 +90,11 @@ export default function OrdersToolbar() {
         type="text"
         placeholder="Пошук за ПІБ або номером..."
         defaultValue={search}
-        onChange={e => setParam('search', e.target.value)}
+        onChange={e => {
+          const value = e.target.value
+          if (searchTimer.current) clearTimeout(searchTimer.current)
+          searchTimer.current = setTimeout(() => setParam('search', value), 350)
+        }}
         className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 w-64 placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
       />
 

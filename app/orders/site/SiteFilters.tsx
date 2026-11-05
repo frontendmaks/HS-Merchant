@@ -57,6 +57,7 @@ export default function SiteFilters({
    */
   function go(next: Record<string, string>) {
     const q = new URLSearchParams(params.toString())
+    q.delete('page')
     for (const [k, v] of Object.entries(next)) {
       if (v) q.set(k, v); else q.delete(k)
     }

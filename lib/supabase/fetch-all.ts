@@ -29,21 +29,20 @@ export async function fetchAllRows<T>(
    */
   parallel = 4,
 ): Promise<T[]> {
-  const all: T[] = []
-
-  for (let batch = 0; ; batch++) {
-    const offsets = Array.from({ length: parallel }, (_, i) => (batch * parallel + i) * pageSize)
-    const pages = await Promise.all(offsets.map(async offset => {
-      const { data, error } = await makeQuery().range(offset, offset + pageSize - 1)
-      if (error) throw error
-      return data ?? []
-    }))
-
-    for (const page of pages) all.push(...page)
-
-    // Коротка сторінка означає кінець: далі порожньо
-    if (pages.some(page => page.length < pageSize)) break
+  if (!Number.isInteger(pageSize) || pageSize < 1 || !Number.isInteger(parallel) || parallel < 1) {
+    throw new Error('Invalid pagination settings')
   }
-
-  return all
+  const first = await makeQuery().range(0, pageSize - 1)
+  if (first.error) throw first.error
+  const all: T[] = first.data ?? []
+  if (all.length < pageSize) return all
+  for (let offset = pageSize; ; offset += parallel * pageSize) {
+    const pages = await Promise.all(Array.from({ length: parallel }, async (_, i) => {
+      const r = await makeQuery().range(offset + i * pageSize, offset + (i + 1) * pageSize - 1)
+      if (r.error) throw r.error
+      return r.data ?? []
+    }))
+    for (const page of pages) all.push(...page)
+    if (pages.some(page => page.length < pageSize)) return all
+  }
 }

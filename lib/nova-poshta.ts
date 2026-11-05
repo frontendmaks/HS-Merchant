@@ -1,3 +1,5 @@
+import { timedFetch } from '@/lib/http'
+const fetchBounded = timedFetch(12000)
 import { isTest, heldBack } from '@/lib/env-mode'
 /**
  * Nova Poshta waybills.
@@ -338,7 +340,7 @@ async function call<T>(modelName: string, calledMethod: string, methodProperties
     return { success: true, data: [] as T[] }
   }
 
-  const res = await fetch(API, {
+  const res = await fetchBounded(API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

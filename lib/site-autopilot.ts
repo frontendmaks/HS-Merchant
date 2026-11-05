@@ -1,3 +1,4 @@
+import { acquireLease } from '@/lib/job-lease'
 /**
  * Самостійне опрацювання замовлень із сайту й телефону.
  *
@@ -345,7 +346,13 @@ export async function sendMissingSheets(
   return out
 }
 
-export async function autoProcessSiteOrders(
+export async function autoProcessSiteOrders(...args: Parameters<typeof autoProcessSiteOrdersUnlocked>) {
+  const release = await acquireLease('autoProcessSiteOrders', 600)
+  if (!release) return { looked: 0, numbered: 0, rezoned: 0, problems: 0, postponed: 0, twins: 0 }
+  try { return await autoProcessSiteOrdersUnlocked(...args) } finally { await release() }
+}
+
+async function autoProcessSiteOrdersUnlocked(
   service: Service,
   { limit = 50, orderIds }: { limit?: number; orderIds?: string[] } = {},
 ): Promise<AutopilotResult> {

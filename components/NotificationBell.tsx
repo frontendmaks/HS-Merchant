@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { sharedJson } from '@/lib/shared-json'
 import { useRouter } from 'next/navigation'
 
 interface Notification {
@@ -73,7 +74,7 @@ function chime() {
   } catch { /* audio unavailable — the visual badge still shows */ }
 }
 
-export default function NotificationBell({ enabled }: { enabled: boolean }) {
+export default function NotificationBell({ enabled, userId }: { enabled: boolean; userId: string | null }) {
   const router = useRouter()
   const [items, setItems] = useState<Notification[]>([])
   const [unread, setUnread] = useState(0)
@@ -117,11 +118,12 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
     }
   }, [router])
 
+  const inFlight = useRef(false)
   const load = useCallback(async () => {
+    if (!userId || inFlight.current) return
+    inFlight.current = true
     try {
-      const res = await fetch('/api/notifications')
-      if (!res.ok) return
-      const data = await res.json() as { notifications: Notification[]; unread: number }
+      const data = await sharedJson<{ notifications: Notification[]; unread: number }>('/api/notifications', userId, 15000)
 
       const fresh = data.notifications.filter(n => !n.is_read && !known.current?.has(n.id))
       const firstLoad = known.current === null
@@ -136,7 +138,8 @@ export default function NotificationBell({ enabled }: { enabled: boolean }) {
         if (localStorage.getItem(SOUND_KEY) !== 'off') chime()
       }
     } catch { /* offline — retry on the next tick */ }
-  }, [popDesktop])
+    finally { inFlight.current = false }
+  }, [popDesktop, userId])
 
   useEffect(() => {
     if (!enabled) return

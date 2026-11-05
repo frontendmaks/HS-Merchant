@@ -46,3 +46,6 @@ HS-Merchant
 collector/node_modules
 collector/.env
 bitrix-credentials.txt
+
+# Supabase CLI local cache
+supabase/.temp/

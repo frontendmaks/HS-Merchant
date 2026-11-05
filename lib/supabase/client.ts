@@ -1,3 +1,4 @@
+import { timedFetch } from '@/lib/http'
 import { createBrowserClient } from '@supabase/ssr'
 
 /**
@@ -9,13 +10,12 @@ import { createBrowserClient } from '@supabase/ssr'
  * of each, and the token refreshes alone accounted for most of the auth
  * traffic the project was carrying.
  */
-type BrowserClient = ReturnType<typeof createBrowserClient>
-
-let browserClient: BrowserClient | undefined
-
-export function createClient(): BrowserClient {
-  return (browserClient ??= createBrowserClient(
+function buildClient() {
+  return createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  ))
+    { global: { fetch: timedFetch(12000) } },
+  )
 }
+let browserClient: ReturnType<typeof buildClient> | undefined
+export function createClient() { return browserClient ??= buildClient() }

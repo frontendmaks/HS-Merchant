@@ -1,3 +1,4 @@
+import { unstable_cache } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { fetchAllRows } from '@/lib/supabase/fetch-all'
@@ -51,7 +52,7 @@ export interface CatalogueItem {
 const TTL_MS = 5 * 60 * 1000
 let cache: { at: number; items: CatalogueItem[] } | null = null
 
-async function catalogue(): Promise<CatalogueItem[]> {
+async function buildCatalogue(): Promise<CatalogueItem[]> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.items
 
   const service = createServiceClient()
@@ -106,7 +107,7 @@ async function catalogue(): Promise<CatalogueItem[]> {
      * продали востаннє, і кажемо, коли це було.
      */
     fetchAllRows<{ product_id: number; price: number | null; sold_on: string | null }>(
-      () => service.from('bitrix_last_price').select('product_id, price, sold_on')),
+      () => service.from('bitrix_last_price').select('product_id, price, sold_on').order('product_id')),
   ])
 
   const priced = new Map(
@@ -233,6 +234,13 @@ async function catalogue(): Promise<CatalogueItem[]> {
 
   cache = { at: Date.now(), items: all }
   return all
+}
+
+const sharedCatalogue = unstable_cache(buildCatalogue, ['manual-catalogue-v2'], { revalidate: 300 })
+let filling: Promise<CatalogueItem[]> | null = null
+function catalogue() {
+  if (!filling) filling = sharedCatalogue().finally(() => { filling = null })
+  return filling
 }
 
 export async function GET() {

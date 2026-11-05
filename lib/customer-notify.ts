@@ -1,3 +1,4 @@
+import { acquireLease } from '@/lib/job-lease'
 /**
  * Повідомлення клієнтові про його замовлення.
  *
@@ -305,7 +306,19 @@ export async function notifyNewOrders(
  * людини немає — інакше вона дістане те саме двічі й відпишеться від
  * обох.
  */
-async function deliver(
+async function deliver(service: Service, order: OrderRow, text: string, event = ORDER_RECEIVED): Promise<'sent' | 'unknown' | 'failed'> {
+  const release = await acquireLease(`customer-message:${order.id}:${event}`, 120)
+  if (!release) return 'unknown'
+  try {
+    const { count, error } = await service.from('customer_messages')
+      .select('id', { count: 'exact', head: true }).eq('order_id', order.id).eq('event', event)
+    if (error) throw error
+    if (count) return 'unknown'
+    return await deliverUnlocked(service, order, text, event)
+  } finally { await release() }
+}
+
+async function deliverUnlocked(
   service: Service,
   order: OrderRow,
   text: string,

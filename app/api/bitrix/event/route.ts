@@ -1,12 +1,9 @@
-export const maxDuration = 60
+export const maxDuration = 180
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { syncSiteOrders } from '@/lib/bitrix-sync'
-import { autoProcessSiteOrders } from '@/lib/site-autopilot'
-import { getSetting } from '@/lib/settings'
+import { drainBitrixEvents } from '@/lib/bitrix-event-queue'
 import { CATEGORY_ID } from '@/lib/bitrix-deal'
-import { logCronRun } from '@/lib/cron-log'
 
 /**
  * POST /api/bitrix/event — Бітрікс сам каже, що змінилось.
@@ -49,33 +46,11 @@ export async function POST(req: NextRequest) {
   }
 
   const service = createServiceClient()
-  const startedAt = Date.now()
-
-  // Фільтр за воронкою — у самій синхронізації: угоди інших воронок просто
-  // не повернуться, і ми нічого з ними не зробимо
-  const sync = await syncSiteOrders(service, { dealIds: [dealId], maxPages: 1 })
-
-  let auto = null
-  if (sync.created || sync.updated) {
-    const { data: order } = await service
-      .from('orders').select('id').eq('bitrix_deal_id', Number(dealId)).maybeSingle()
-
-    if (order && await getSetting(service, 'auto_process_site_orders')) {
-      auto = await autoProcessSiteOrders(service, { orderIds: [order.id as string], limit: 1 })
-    }
-  }
-
-  /**
-   * Слід від кожної події.
-   *
-   * Поки вебхук налаштовують, це єдиний спосіб переконатися, що він справді
-   * дійшов: у замовленнях може не змінитись нічого видимого, а подія при
-   * цьому була.
-   */
-  await logCronRun(service, 'bitrix-event', startedAt,
-    { event, deal: dealId, ...sync, auto }, sync.error)
-
-  return NextResponse.json({ ok: true, event, deal: dealId, category: CATEGORY_ID, sync, auto })
+  const { error } = await service.rpc('merchant_enqueue_bitrix', { p_deal_id: Number(dealId) })
+  if (error) return NextResponse.json({ ok: false, error: 'Не вдалося прийняти подію' }, { status: 503 })
+  // Acknowledge only after durable enqueue. Bursts for one deal coalesce.
+  after(() => drainBitrixEvents(1))
+  return NextResponse.json({ ok: true, queued: true, event, deal: dealId, category: CATEGORY_ID })
 }
 
 /** Бітрікс перевіряє адресу GET-запитом, перш ніж зберегти вебхук. */

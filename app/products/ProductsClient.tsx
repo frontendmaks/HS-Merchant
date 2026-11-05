@@ -27,6 +27,8 @@ type Product = {
 
 type Props = {
   allProducts: Product[]
+  initialCount: number
+  saleCategories: string[]
   warehouseName: string
   readOnly: boolean
 }
@@ -56,21 +58,6 @@ function calcPer100g(price: number, attrs: Record<string, string> | null): numbe
   if (unit === 'кг' || unit === 'л') return Math.round(price / 10 * 10) / 10
   if ((unit === 'г' || unit === 'мл') && min > 0) return Math.round(price / min * 100 * 10) / 10
   return null
-}
-
-function isWeightUnit(attrs: Record<string, string> | null): boolean {
-  const u = (attrs?.['Одиниця'] ?? '').toLowerCase()
-  return ['кг', 'г', 'мл', 'л'].includes(u)
-}
-
-function getSaleCategories(products: Product[]): string[] {
-  const set = new Set<string>()
-  for (const p of products) {
-    for (const cat of p.categories ?? []) {
-      if (cat.toLowerCase().includes('акці')) set.add(cat)
-    }
-  }
-  return [...set].sort()
 }
 
 function getProductSaleCats(p: Product, saleCats: Set<string>): string[] {
@@ -200,7 +187,13 @@ function EditPanel({
         })
         setLoading(false)
       })
-      .catch((e: Error) => {
+      .catch(async (e: Error) => {
+        let fallbackDescription = product.description
+        try {
+          const stored = await fetch(`/api/products/${product.id}`)
+          if (!stored.ok) throw new Error()
+          fallbackDescription = (await stored.json()).description
+        } catch { setError('Не вдалося завантажити дані товару. Закрийте й відкрийте картку знову'); setLoading(false); return }
         setError(`Не вдалось завантажити дані з WC: ${e.message}`)
         // Fallback to Supabase data
         const attrs = product.attributes
@@ -213,8 +206,8 @@ function EditPanel({
           .filter((id): id is number => id !== undefined)
         setEdit({
           name: product.name,
-          description: product.description ?? '',
-          short_description: htmlToText(product.description ?? ''),
+          description: fallbackDescription ?? '',
+          short_description: htmlToText(fallbackDescription ?? ''),
           categoryIds: initCatIds,
           min: attrs?.['Мін'] ?? '',
           step: attrs?.['Вага'] ?? attrs?.['Крок'] ?? '',
@@ -391,7 +384,7 @@ function EditPanel({
 }
 
 // ─── Main component ────────────────────────────────────────────────
-export default function ProductsClient({ allProducts, warehouseName, readOnly }: Props) {
+export default function ProductsClient({ allProducts, initialCount, saleCategories, warehouseName, readOnly }: Props) {
   const router = useRouter()
   const [syncing, setSyncing] = useState(false)
   const [, startTransition] = useTransition()
@@ -424,7 +417,6 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
     } catch { /* ignore */ }
   }, [])
 
-  const saleCategories = useMemo(() => getSaleCategories(allProducts), [allProducts])
   const saleCatSet = useMemo(() => new Set(saleCategories), [saleCategories])
 
   const handleSort = (key: SortKey) => {
@@ -439,39 +431,42 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
     setPage(1)
   }, [])
 
-  const filteredProducts = useMemo(() => {
-    let list = allProducts
-    if (filterStatus === 'active') list = list.filter(p => p.status === 'active')
-    else if (filterStatus === 'inactive') list = list.filter(p => p.status !== 'active')
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      list = list.filter(p => p.name.toLowerCase().includes(q) || (p.sku ?? '').toLowerCase().includes(q))
-    }
-    if (filterInStock) list = list.filter(p => p.stock !== null && p.stock > 0)
-    if (filterOutStock) list = list.filter(p => p.stock !== null && p.stock <= 0)
-    if (filterWarehouse) list = list.filter(p => p.stock !== null)
-    if (filterSale) list = list.filter(p => p.price_old != null)
-    if (filterSaleCat) list = list.filter(p => (p.categories ?? []).includes(filterSaleCat))
-    if (filterNoSaleCat) list = list.filter(p => p.price_old != null && getProductSaleCats(p, saleCatSet).length === 0)
-    if (filterUnit === 'weight') list = list.filter(p => isWeightUnit(p.attributes))
-    if (filterUnit === 'piece') list = list.filter(p => !isWeightUnit(p.attributes))
-    list = [...list].sort((a, b) => {
-      let va: string | number = ''
-      let vb: string | number = ''
-      if (sortKey === 'name') { va = a.name; vb = b.name }
-      else if (sortKey === 'price') { va = a.price; vb = b.price }
-      else if (sortKey === 'stock') { va = a.stock ?? -1; vb = b.stock ?? -1 }
-      else if (sortKey === 'status') { va = a.status; vb = b.status }
-      else if (sortKey === 'category_name') { va = a.category_name ?? ''; vb = b.category_name ?? '' }
-      else if (sortKey === 'brand') { va = a.brand ?? ''; vb = b.brand ?? '' }
-      const cmp = typeof va === 'number' ? (va as number) - (vb as number) : (va as string).localeCompare(vb as string, 'uk')
-      return sortDir === 'asc' ? cmp : -cmp
-    })
-    return list
-  }, [allProducts, search, filterStatus, filterInStock, filterOutStock, filterWarehouse, filterSale, filterSaleCat, filterNoSaleCat, filterUnit, saleCatSet, sortKey, sortDir])
-
-  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PER_PAGE))
-  const paginated = filteredProducts.slice((page - 1) * PER_PAGE, page * PER_PAGE)
+  const [result, setResult] = useState({ products: allProducts, count: initialCount })
+  const [loadingList, setLoadingList] = useState(false)
+  const [listError, setListError] = useState('')
+  const [details, setDetails] = useState<Record<string, { description: string | null }>>({})
+  const filters = JSON.stringify({ q: search.trim(), status: filterStatus, inStock: filterInStock,
+    outStock: filterOutStock, warehouse: filterWarehouse, sale: filterSale,
+    saleCat: filterSaleCat, noSaleCat: filterNoSaleCat, unit: filterUnit,
+    sort: sortKey, dir: sortDir, page })
+  const firstList = useRef(true)
+  useEffect(() => {
+    if (firstList.current) { firstList.current = false; return }
+    const controller = new AbortController()
+    const timer = setTimeout(async () => {
+      setLoadingList(true); setListError('')
+      try {
+        const res = await fetch(`/api/products/list?filters=${encodeURIComponent(filters)}`, { signal: controller.signal })
+        if (!res.ok) throw new Error('Не вдалося завантажити товари')
+        const data = await res.json()
+        if (!controller.signal.aborted) setResult(data)
+      } catch (e) {
+        if (!controller.signal.aborted) setListError(e instanceof Error ? e.message : String(e))
+      } finally { if (!controller.signal.aborted) setLoadingList(false) }
+    }, 300)
+    return () => { clearTimeout(timer); controller.abort() }
+  }, [filters, allProducts])
+  useEffect(() => {
+    if (!expandedId || details[expandedId]) return
+    const controller = new AbortController()
+    void fetch(`/api/products/${expandedId}`, { signal: controller.signal })
+      .then(async res => { if (!res.ok) throw new Error('Не вдалося завантажити опис'); return res.json() })
+      .then(data => setDetails(old => ({ ...old, [expandedId]: data })))
+      .catch(e => { if (!controller.signal.aborted) setListError(e.message) })
+    return () => controller.abort()
+  }, [expandedId, details])
+  const totalPages = Math.max(1, Math.ceil(result.count / PER_PAGE))
+  const paginated = result.products
 
   const SortBtn = ({ col, label, className = '' }: { col: SortKey; label: string; className?: string }) => (
     <button onClick={() => handleSort(col)} className={`text-xs text-zinc-500 uppercase tracking-wide flex items-center gap-1 hover:text-zinc-300 transition-colors ${className}`}>
@@ -517,7 +512,7 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm">🔍</span>
             <input type="text" placeholder="Пошук товарів..." value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} className="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-red-500 transition-colors" />
           </div>
-          <div className="text-xs text-zinc-500">{filteredProducts.length} товарів</div>
+          <div className="text-xs text-zinc-500">{result.count} товарів</div>
           {!readOnly && (
             <button onClick={handleSync} disabled={syncing} className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm text-zinc-300 transition-colors disabled:opacity-50">
               <span className={syncing ? 'animate-spin inline-block' : ''}>🔄</span>
@@ -562,13 +557,16 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
           <SortBtn col="status" label="Статус" className="justify-center" />
         </div>
 
-        <div className="divide-y divide-zinc-800">
+        {loadingList && <p className="px-4 py-2 text-zinc-400 text-sm">Завантаження…</p>}
+        {listError && <p role="alert" className="px-4 py-2 text-red-400 text-sm">{listError}</p>}
+        <div className={`divide-y divide-zinc-800 ${loadingList ? 'opacity-60' : ''}`}>
           {paginated.length === 0 && (
             <div className="py-16 text-center text-zinc-600">
               {search ? `Нічого не знайдено за запитом "${search}"` : 'Товарів немає'}
             </div>
           )}
-          {paginated.map(p => {
+          {paginated.map(listProduct => {
+            const p = { ...listProduct, ...(details[listProduct.id] ?? {}) }
             const img = p.images?.[0]
             const noImg = !img
             const noPrice = !p.price || Number(p.price) <= 0
@@ -595,7 +593,7 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
                 >
                   <div className="text-zinc-600 text-xs select-none">{isExpanded ? '▾' : '▸'}</div>
                   <div className="w-14 h-14 rounded-lg overflow-hidden bg-zinc-800 shrink-0">
-                    {img ? <img src={img} alt={p.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-zinc-600 text-xl">□</div>}
+                    {img ? <img src={img} alt={p.name} loading="lazy" decoding="async" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-zinc-600 text-xl">□</div>}
                   </div>
                   <div className="min-w-0" onClick={e => e.stopPropagation()}>
                     <div className="text-sm text-white leading-snug flex items-start gap-1.5">
@@ -748,7 +746,7 @@ export default function ProductsClient({ allProducts, warehouseName, readOnly }:
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3 text-xs text-zinc-500">
-          <span>{filteredProducts.length} товарів · сторінка {page} з {totalPages}</span>
+          <span>{result.count} товарів · сторінка {page} з {totalPages}</span>
           <span className="hidden sm:inline text-zinc-700">{PER_PAGE} на сторінці</span>
         </div>
         {totalPages > 1 && (

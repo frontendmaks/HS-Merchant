@@ -1,3 +1,5 @@
+import { timedFetch } from '@/lib/http'
+const fetchBounded = timedFetch(10000)
 /**
  * MauDau API helpers — shared across all API routes.
  *
@@ -55,7 +57,7 @@ async function saveJwtToDb(jwt: string): Promise<void> {
 }
 
 async function loginMaudau(): Promise<string> {
-  const res = await fetch(
+  const res = await fetchBounded(
     `${process.env.MAUDAU_BASE}/v1/merchant_public_api/login`,
     {
       method: 'POST',
@@ -128,7 +130,7 @@ export async function patchMaudauStatus(
   const body: Record<string, unknown> = { status }
   if (cancellationReasonId != null) body.cancellation_reason_id = cancellationReasonId
 
-  const res = await fetch(url, {
+  const res = await fetchBounded(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
@@ -138,7 +140,7 @@ export async function patchMaudauStatus(
     // Token expired — invalidate and retry once
     invalidateMaudauJwt()
     const freshToken = await getMaudauJwt()
-    const retry = await fetch(url, {
+    const retry = await fetchBounded(url, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${freshToken}` },
       body: JSON.stringify(body),
@@ -177,7 +179,7 @@ export async function patchMaudauTtn(
   const token = jwt ?? (await getMaudauJwt())
   const url = `${process.env.MAUDAU_BASE}/v1/merchant_public_api/orders/${numericId}`
 
-  const res = await fetch(url, {
+  const res = await fetchBounded(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ delivery_tracking_number: ttn }),
@@ -186,7 +188,7 @@ export async function patchMaudauTtn(
   if (res.status === 401) {
     invalidateMaudauJwt()
     const freshToken = await getMaudauJwt()
-    const retry = await fetch(url, {
+    const retry = await fetchBounded(url, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${freshToken}` },
       body: JSON.stringify({ delivery_tracking_number: ttn }),

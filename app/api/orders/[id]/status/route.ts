@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireWrite } from '@/lib/api-guard'
 import { currentActor } from '@/lib/order-events'
 import { changeOrderStatus } from '@/lib/order-status-change'
 
@@ -15,6 +16,8 @@ export async function PATCH(
   // Раніше цей маршрут не питав нікого ні про що: будь-хто, знаючи адресу, міг
   // змінити статус будь-якого замовлення. Перевірки стояли лише в інтерфейсі,
   // а він не єдиний спосіб сюди потрапити.
+  const denied = await requireWrite('orders')
+  if (denied) return denied
   const actor = await currentActor()
   if (!actor) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })

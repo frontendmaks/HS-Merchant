@@ -1,3 +1,5 @@
+import { timedFetch } from '@/lib/http'
+const fetchBounded = timedFetch(10000)
 /**
  * Rozetka access tokens.
  *
@@ -59,7 +61,7 @@ async function login(): Promise<string> {
   }
 
   // POST /sites, not /sites/login — the latter answers 5404 not_found
-  const res = await fetch(`${BASE}/sites`, {
+  const res = await fetchBounded(`${BASE}/sites`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

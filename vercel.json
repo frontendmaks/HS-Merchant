@@ -76,5 +76,8 @@
       "path": "/api/cron/zones-sunday",
       "schedule": "20 3 * * *"
     }
+  ],
+  "regions": [
+    "fra1"
   ]
 }

@@ -1,3 +1,4 @@
+import { acquireLease } from '@/lib/job-lease'
 /**
  * Замовлення з сайту — з Бітрікса в Мерчант.
  *
@@ -6,7 +7,7 @@
  * воронці сто двадцять тисяч угод, і повне вичитування не має сенсу ні разу
  * на п'ять хвилин, ні взагалі.
  */
-import { randomBytes } from 'node:crypto'
+import { randomBytes, createHash } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import { createServiceClient } from '@/lib/supabase/service'
 import { stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
@@ -248,7 +249,14 @@ export interface SyncResult {
  * правильно: якщо оператор пересунув таке замовлення в CRM, Мерчант має
  * показувати те саме.
  */
-export async function syncSiteOrders(
+export async function syncSiteOrders(...args: Parameters<typeof syncSiteOrdersUnlocked>): Promise<SyncResult> {
+  if (args[1].dealIds?.length) return syncSiteOrdersUnlocked(...args)
+  const release = await acquireLease('bitrix-sweep', 600)
+  if (!release) return { seen: 0, created: 0, updated: 0, skipped: 1 }
+  try { return await syncSiteOrdersUnlocked(...args) } finally { await release() }
+}
+
+async function syncSiteOrdersUnlocked(
   service: Service,
   { since, maxPages = 10, dealIds, byCreated = false, startPage = 0 }: {
     since?: string
@@ -380,12 +388,21 @@ export async function syncSiteOrders(
           updated_at: new Date().toISOString(),
         }
 
+        const { updated_at: _timestamp, ...stableFields } = fields
+        const fingerprint = createHash('sha256').update(JSON.stringify({ fields: stableFields, rows, knownRows })).digest('hex')
         const { data: existing } = await service
           .from('orders')
-          .select('id, platform, status, address, delivery_date, manual_number, number_source, customer_phone, auto_problem, updated_at')
+          .select('id, platform, status, address, delivery_date, manual_number, number_source, customer_phone, auto_problem, updated_at, sync_hash')
           .eq('bitrix_deal_id', Number(deal.ID)).maybeSingle()
 
         if (existing) {
+          const releaseOrder = await acquireLease(`status:${existing.id}`, 180)
+          if (!releaseOrder) { result.notes = [...(result.notes ?? []), 'Угода зайнята — повторимо']; continue }
+          try {
+          if (existing.sync_hash === fingerprint && existing.status === status) {
+            result.skipped = (result.skipped ?? 0) + 1
+            continue
+          }
           /*
            * Маркетплейсне замовлення цій синхронізації не належить зовсім.
            *
@@ -453,7 +470,10 @@ export async function syncSiteOrders(
               })()
 
           if (patch) {
-            await service.from('orders').update(patch).eq('id', existing.id)
+            const { data: applied, error } = await service.from('orders').update(patch)
+              .eq('id', existing.id).eq('updated_at', existing.updated_at).select('id')
+            if (error) throw error
+            if (!applied?.length) { result.keptStatus = (result.keptStatus ?? 0) + 1; continue }
           }
 
           if (staleStage) result.keptStatus = (result.keptStatus ?? 0) + 1
@@ -559,7 +579,10 @@ export async function syncSiteOrders(
             await onStatusChanged(service, existing.id as string, status)
             touched = existing.id as string
           }
+          const { error: fingerprintError } = await service.from('orders').update({ sync_hash: fingerprint }).eq('id', existing.id)
+          if (fingerprintError) throw fingerprintError
           result.updated++
+          } finally { await releaseOrder() }
         } else {
           /**
            * Токен бланка — одразу при появі замовлення.

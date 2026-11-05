@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, Suspense } from 'react'
-import { createBrowserClient } from '@supabase/ssr'
+import { deadline } from '@/lib/http'
+import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 function LoginForm() {
@@ -13,17 +14,14 @@ function LoginForm() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+  const supabase = createClient()
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      const { error } = await deadline(supabase.auth.signInWithPassword({ email, password }), 15000)
       if (error) throw error
       router.push('/')
       router.refresh()
@@ -44,6 +42,7 @@ function LoginForm() {
           <p className="text-zinc-500 text-sm mt-1">Вхід в адмін-панель</p>
         </div>
 
+        {searchParams.get('retry') === '1' && <p className="text-amber-400 text-sm mb-4">Перевірка сесії затрималась. Спробуйте увійти ще раз.</p>}
         {isNewUser && (
           <div className="bg-emerald-950/50 border border-emerald-800 rounded-xl px-4 py-3 text-emerald-400 text-sm text-center mb-4">
             ✓ Пароль встановлено! Тепер увійдіть зі своїми даними.

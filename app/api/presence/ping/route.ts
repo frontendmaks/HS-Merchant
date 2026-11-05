@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { currentUserId } from '@/lib/session'
 
 /**
  * Stamps the signed-in user as seen just now.
@@ -12,14 +11,8 @@ import { cookies } from 'next/headers'
  */
 export async function POST() {
   try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-    )
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return NextResponse.json({ ok: false }, { status: 401 })
+    const id = await currentUserId()
+    if (!id) return NextResponse.json({ ok: false }, { status: 401 })
 
     const service = createServiceClient()
     const now = new Date()
@@ -32,11 +25,11 @@ export async function POST() {
     await Promise.all([
       service.from('profiles')
         .update({ last_seen_at: now.toISOString() })
-        .eq('id', user.id),
+        .eq('id', id),
       // The trail time-online is reconstructed from; last_seen_at alone cannot
       // answer how long anyone was here
       service.from('presence_ticks')
-        .upsert({ user_id: user.id, minute: minute.toISOString() },
+        .upsert({ user_id: id, minute: minute.toISOString() },
                 { onConflict: 'user_id,minute', ignoreDuplicates: true }),
     ])
 

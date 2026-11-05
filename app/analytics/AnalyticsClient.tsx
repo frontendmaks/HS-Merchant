@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import UkraineMap from './UkraineMap'
+import dynamic from 'next/dynamic'
+const UkraineMap = dynamic(() => import('./UkraineMap'), { ssr: false })
 import AreaBreakdown, { type AreaStat } from './AreaBreakdown'
-import DeliveryMap, { type ZoneLoad } from './DeliveryMap'
+import type { ZoneLoad } from './DeliveryMap'
+const DeliveryMap = dynamic(() => import('./DeliveryMap'), { ssr: false })
 import type {
   Totals, DayBucket, SourceKey, ProductStat, CategoryStat, CustomerStat, RegionStat,
 } from '@/lib/analytics'

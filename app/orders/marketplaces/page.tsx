@@ -1,5 +1,7 @@
 export const dynamic = 'force-dynamic'
 
+import Link from 'next/link'
+import { fetchAllRows } from '@/lib/supabase/fetch-all'
 import { Suspense } from 'react'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
@@ -58,6 +60,7 @@ interface SearchParams {
   status?: string
   search?: string
   month?: string
+  page?: string
 }
 
 export default async function MarketplaceOrdersPage({
@@ -69,6 +72,8 @@ export default async function MarketplaceOrdersPage({
   const platform = sp.platform || ''
   const statusFilter = sp.status || ''
   const search = sp.search || ''
+  const page = Math.max(1, Math.min(10000, Number(sp.page) || 1))
+  const perPage = 50
   const currentMonth = new Date().toISOString().slice(0, 7)
   const selectedMonth = sp.month || currentMonth
 
@@ -83,21 +88,20 @@ export default async function MarketplaceOrdersPage({
 
   // Сторінка маркетплейсів — лише їхні замовлення: ручні живуть у «Сайт», і
   // в тутешніх картках вони зсували б і відсотки, і комісію
-  const statsQuery = supabase
-    .from('orders')
+  const statsQuery = () => supabase.from('orders')
     .select('platform,status,total,commission')
     .in('platform', [...MARKETPLACE_PLATFORMS])
-    .gte('order_date', from)
-    .lte('order_date', to)
+    .gte('order_date', from).lte('order_date', to).order('id')
 
   let query = supabase
     .from('orders')
-    .select('*')
+    .select('id,external_id,market_number,platform,order_date,customer_name,customer_phone,address,branch,items,total,commission,status,is_paid,ttn,cancel_reason,customer_comment,operator_comment, md_placed:raw->>created_at, rz_placed:raw->>created', { count: 'exact' })
     .in('platform', [...MARKETPLACE_PLATFORMS])
     .gte('order_date', from)
     .lte('order_date', to)
     .order('order_date', { ascending: false })
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: false }).order('id')
+    .range((page - 1) * perPage, page * perPage - 1)
 
   if (platform) query = query.eq('platform', platform)
   if (statusFilter === 'other') {
@@ -121,10 +125,10 @@ export default async function MarketplaceOrdersPage({
   //
   // Раніше картки чекали на свій запит, і лише потім починався запит таблиці —
   // виходило дві повні подорожі до бази поспіль на кожне перемикання місяця.
-  const [{ data: allOrders }, { data: tableOrders }] = await Promise.all([
-    statsQuery,
-    query,
+  const [allOrders, { data: tableOrders, count: rowCount, error: listError }] = await Promise.all([
+    fetchAllRows(statsQuery, 1000, 1), query,
   ])
+  if (listError) throw listError
 
   const allOrders2 = allOrders || []
   // Stats cards respect the platform filter
@@ -230,7 +234,7 @@ export default async function MarketplaceOrdersPage({
                     market_number={order.market_number}
                     platform={order.platform}
                     order_date={order.order_date}
-                    arrival={arrivalTime(order.platform, order.raw)}
+                    arrival={arrivalTime(order.platform, { created_at: order.md_placed, created: order.rz_placed })}
                     customer_name={order.customer_name}
                     customer_phone={order.customer_phone}
                     address={order.address}
@@ -252,6 +256,11 @@ export default async function MarketplaceOrdersPage({
             </tbody>
           </table>
         </WideScroll>
+      </div>
+      <div className="flex gap-4 items-center text-sm text-zinc-400">
+        <span>{rowCount ?? 0} замовлень · сторінка {page} з {Math.max(1, Math.ceil((rowCount ?? 0) / perPage))}</span>
+        {page > 1 && <Link href={`?${new URLSearchParams({ ...sp, page: String(page - 1) })}`}>← Назад</Link>}
+        {page * perPage < (rowCount ?? 0) && <Link href={`?${new URLSearchParams({ ...sp, page: String(page + 1) })}`}>Далі →</Link>}
       </div>
     </div>
   )

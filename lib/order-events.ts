@@ -1,5 +1,4 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { currentProfile } from '@/lib/session'
 import { createServiceClient } from '@/lib/supabase/service'
 
 type Service = ReturnType<typeof createServiceClient>
@@ -23,30 +22,8 @@ export const EVENT_META: Record<OrderEventType, { label: string; icon: string }>
 
 /** Who is acting, resolved from the session cookie. Null for cron/sync. */
 export async function currentActor(): Promise<{ id: string; name: string } | null> {
-  try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-    )
-    // Same as getCurrentRole: the token is signed, so verifying it here beats
-    // a round trip to Auth on every write
-    const { data: claims } = await supabase.auth.getClaims()
-    const userId = claims?.claims?.sub as string | undefined
-    if (!userId) return null
-
-    const service = createServiceClient()
-    const { data } = await service
-      .from('profiles').select('full_name, email').eq('id', userId).single()
-    const email = claims?.claims?.email as string | undefined
-    return {
-      id: userId,
-      name: data?.full_name?.trim() || data?.email || email || 'Користувач',
-    }
-  } catch {
-    return null
-  }
+  const profile = await currentProfile()
+  return profile ? { id: profile.id, name: profile.name } : null
 }
 
 /**

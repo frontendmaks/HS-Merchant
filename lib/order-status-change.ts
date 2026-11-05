@@ -9,18 +9,15 @@
  * причина перед скасуванням, заборона чіпати те, що вже в дорозі — живуть тут
  * і діють однаково, хто б не звертався.
  */
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt, patchMaudauStatus } from '@/lib/maudau'
-import { logOrderEvent } from '@/lib/order-events'
 import { rozetkaToken } from '@/lib/rozetka-auth'
-import { broadcastOrderChange } from '@/lib/order-broadcast'
-import { notifyIntegrations } from '@/lib/integration-webhooks'
 import { isHandedOver, requiresPayment } from '@/lib/order-statuses'
 import { orderSource } from '@/lib/order-source'
-import { bitrix } from '@/lib/bitrix'
+import { acquireLease } from '@/lib/job-lease'
+import { drainOrderEffects } from '@/lib/order-effects'
 import { stageId } from '@/lib/bitrix-stages'
-import { onStatusChanged } from '@/lib/bitrix-chat'
 
 const MAUDAU_STATUS_MAP: Record<string, string> = {
   'Нове': 'new_order',
@@ -69,15 +66,25 @@ export interface StatusChange {
   actor: { id: string; name: string }
 }
 
-export async function changeOrderStatus(
-  { id, status, platform, external_id, actor }: StatusChange,
-): Promise<NextResponse> {
+export async function changeOrderStatus(input: StatusChange): Promise<NextResponse> {
+  const release = await acquireLease(`status:${input.id}`, 120)
+  if (!release) return NextResponse.json({ success: false,
+    error: 'Статус уже змінюється. Зачекайте й оновіть список' }, { status: 409 })
+  try { return await changeLocked(input) } finally { await release() }
+}
+
+async function changeLocked({ id, status, actor }: StatusChange): Promise<NextResponse> {
   const supabase = createServiceClient()
-
-  // A parcel already with the courier is driven by the marketplace from here
-  const { data: current } = await supabase
-    .from('orders').select('status, ttn, cancel_reason, is_paid, bitrix_deal_id').eq('id', id).single()
-
+  const { data: current, error: readError } = await supabase.from('orders')
+    .select('status, ttn, cancel_reason, is_paid, bitrix_deal_id, platform, external_id, updated_at')
+    .eq('id', id).single()
+  if (readError || !current) return NextResponse.json({ success: false, error: 'Не вдалося прочитати замовлення' }, { status: 503 })
+  // Derive platform/identifier from the database, never from the request body.
+  const platform = current.platform as string
+  const external_id = (current.external_id as string) || ''
+  const { statusOptions } = await import('@/lib/order-status-options')
+  if (!statusOptions(platform).includes(status)) return NextResponse.json({ success: false, error: 'Невідомий статус' }, { status: 400 })
+  if (current.status === status) return NextResponse.json({ success: true, unchanged: true })
   // Cancelling is the one move that ends an order, and a cancellation with no
   // reason answers nothing later — not for the marketplace, which asks for one,
   // and not for us, where a sixth of last month's lost revenue sits under
@@ -120,27 +127,6 @@ export async function changeOrderStatus(
     )
   }
 
-  // Read the previous value first so the journal can show the transition
-  const { data: before } = await supabase
-    .from('orders').select('status').eq('id', id).single()
-
-  const { error: dbError } = await supabase
-    .from('orders')
-    .update({ status, updated_at: new Date().toISOString() })
-    .eq('id', id)
-
-  if (dbError) return NextResponse.json({ success: false, error: dbError.message }, { status: 500 })
-
-  /*
-   * У журнал пишемо після, а не до.
-   *
-   * Маркетплейс статус може й не прийняти: MauDau не переводить
-   * замовлення в «Узгоджено», поки в ньому немає ТТН, і не скасовує те,
-   * що вже поїхало. Запис, зроблений наперед, лишався в журналі як
-   * доконаний факт — про зміну, якої не сталось.
-   */
-  const changed = before?.status !== status
-
   try {
     if (platform === 'maudau') {
       const apiStatus = MAUDAU_STATUS_MAP[status]
@@ -148,9 +134,7 @@ export async function changeOrderStatus(
 
       // Cancellation must go through the cancel route (needs a reason)
       if (apiStatus === 'canceled') {
-        await broadcastOrderChange(id, 'status')
-        await notifyIntegrations(id, 'order.status_changed')
-  return NextResponse.json({ success: true })
+        // Cancellation was confirmed through the dedicated reason route.
       }
 
       const numericId = external_id.replace(/^MD-/, '')
@@ -203,6 +187,7 @@ export async function changeOrderStatus(
 
       const detailRes = await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
         headers: { Authorization: `Bearer ${await rozetkaToken()}` },
+        signal: AbortSignal.timeout(10000),
       })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const detail: any = await detailRes.json()
@@ -215,14 +200,12 @@ export async function changeOrderStatus(
       )
 
       if (!match) {
-        return NextResponse.json(
-          { success: false, error: 'Статус недоступний для цього замовлення' },
-          { status: 500 },
-        )
+        throw new Error('Статус недоступний для цього замовлення')
       }
 
       const putRes = await fetch(`${process.env.ROZETKA_BASE}/orders/${numericId}`, {
         method: 'PUT',
+        signal: AbortSignal.timeout(10000),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${await rozetkaToken()}`,
@@ -235,83 +218,20 @@ export async function changeOrderStatus(
       }
     }
   } catch (e) {
-    /*
-     * Не прийняли — вертаємо як було.
-     *
-     * Доти статус у нас уже стояв новий: оператор бачив «Узгоджено» і
-     * червоний рядок під ним, а на майданчику замовлення лишалось
-     * старим. Наступна синхронізація все одно повертала його назад —
-     * тільки за кілька хвилин і без пояснень.
-     */
-    await supabase.from('orders')
-      .update({ status: before?.status ?? null, updated_at: new Date().toISOString() })
-      .eq('id', id)
-
     return NextResponse.json(
       { success: false, error: marketplaceReason(e) },
       { status: 500 },
     )
   }
 
-  if (changed) {
-    await logOrderEvent(supabase, id, 'status',
-      { old: before?.status ?? null, new: status }, actor)
-  }
-
-  await broadcastOrderChange(id, 'status')
-  await notifyIntegrations(id, 'order.status_changed')
-  // Комплектація — момент, коли бланк потрібен складу
-  await onStatusChanged(supabase, id, status)
-
-  /*
-   * Скасування клієнт має почути від нас, а не здогадатись із того, що
-   * ніхто не приїхав. Причину не переказуємо: вона наша, внутрішня, і
-   * «гість не відповідає» в листі покупцеві звучить як звинувачення.
-   */
-  if (status === 'Скасовано') {
-    try {
-      const { notifyOnce, orderCanceledText, ORDER_CANCELED } =
-        await import('@/lib/customer-notify')
-      await notifyOnce(supabase, id, ORDER_CANCELED, orderCanceledText)
-    } catch (e) {
-      console.error('notify canceled failed:', e instanceof Error ? e.message : e)
-    }
-
-    /*
-     * Ящик скасованого замовлення вільний.
-     *
-     * Номер лишався за ним до кінця дня, хоч ящика не буде: нумерація
-     * йшла далі, в аркуші стояло ім'я клієнта, якому нічого не везуть, а
-     * наступне замовлення отримувало більше число на порожньому місці.
-     */
-    try {
-      const { data: o } = await supabase.from('orders')
-        .select('manual_number, delivery_date').eq('id', id).single()
-
-      if (o?.manual_number != null && o.delivery_date) {
-        const { releaseNumber } = await import('@/lib/manual-register')
-        await releaseNumber(supabase, {
-          number: Number(o.manual_number), date: o.delivery_date as string,
-        })
-      }
-    } catch (e) {
-      console.error('release number failed:', e instanceof Error ? e.message : e)
-    }
-
-    /*
-     * Картка на дошці теж має піти з роботи.
-     *
-     * Скасоване замовлення, що лишилось серед робочих карток, — це ящик,
-     * який хтось таки збере. Складу воно коштує дорожче, ніж нам зайвий
-     * виклик до Trello.
-     */
-    try {
-      const { cardCanceled } = await import('@/lib/trello-cards')
-      await cardCanceled(supabase, id)
-    } catch (e) {
-      console.error('trello cancel failed:', e instanceof Error ? e.message : e)
-    }
-  }
-
+  const { data: committed, error: commitError } = await supabase.rpc('merchant_commit_status', {
+    p_order_id: id, p_expected_at: current.updated_at, p_status: status, p_actor: actor,
+  })
+  if (commitError) return NextResponse.json({ success: false,
+    error: 'Не вдалося зберегти результат. Оновіть список перед повторною спробою' }, { status: 503 })
+  if (!committed) return NextResponse.json({ success: false,
+    error: 'Замовлення змінилось паралельно. Оновіть список' }, { status: 409 })
+  // Work is durable before responding. Cron recovers interrupted after() jobs.
+  after(() => drainOrderEffects(3))
   return NextResponse.json({ success: true })
 }

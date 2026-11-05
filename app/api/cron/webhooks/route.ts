@@ -1,6 +1,8 @@
-export const maxDuration = 120
+export const maxDuration = 300
 
 import { NextRequest, NextResponse } from 'next/server'
+import { drainBitrixEvents } from '@/lib/bitrix-event-queue'
+import { drainOrderEffects } from '@/lib/order-effects'
 import { deliverWebhooks } from '@/lib/integration-webhooks'
 import { createServiceClient } from '@/lib/supabase/service'
 import { logCronRun } from '@/lib/cron-log'
@@ -18,6 +20,7 @@ export async function GET(request: NextRequest) {
   }
   const startedAt = Date.now()
   try {
+    await Promise.all([drainOrderEffects(5), drainBitrixEvents(3)])
     const result = await deliverWebhooks()
     await logCronRun(createServiceClient(), 'webhooks', startedAt, result)
 

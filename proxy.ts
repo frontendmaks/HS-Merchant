@@ -1,13 +1,15 @@
+import { deadline, timedFetch } from '@/lib/http'
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Before anything else, and before any client is built: an icon or a script
   // needs no session, and asking for one on every asset multiplied the auth
   // traffic by however many files a page happens to load.
   if (
+    pathname === '/login' || pathname === '/set-password' ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
     pathname.match(/\.(svg|png|ico|jpg|jpeg|webp)$/) ||
@@ -31,6 +33,7 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      global: { fetch: timedFetch(3500) },
       cookies: {
         getAll() {
           return request.cookies.getAll()
@@ -57,7 +60,14 @@ export async function middleware(request: NextRequest) {
   //
   // The trade: a session revoked at Supabase stays usable here until its
   // access token expires, an hour at most.
-  const { data } = await supabase.auth.getClaims()
+  let data
+  try {
+    ;({ data } = await deadline(supabase.auth.getClaims(), 4500))
+  } catch {
+    const url = new URL('/login', request.url)
+    url.searchParams.set('retry', '1')
+    return NextResponse.redirect(url)
+  }
   const user = data?.claims ? { id: data.claims.sub as string } : null
 
   // Login / set-password: redirect to home if already logged in (except set-password needs auth)

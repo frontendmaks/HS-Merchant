@@ -1,3 +1,4 @@
+import { acquireLease } from '@/lib/job-lease'
 /**
  * Самостійне опрацювання маркетплейсних замовлень.
  *
@@ -40,7 +41,13 @@ export interface MarketplaceResult {
   error?: string
 }
 
-export async function processMarketplaceOrders(
+export async function processMarketplaceOrders(...args: Parameters<typeof processMarketplaceOrdersUnlocked>) {
+  const release = await acquireLease('processMarketplaceOrders', 600)
+  if (!release) return { looked: 0, accepted: 0, pushed: 0, picking: 0, problems: [] }
+  try { return await processMarketplaceOrdersUnlocked(...args) } finally { await release() }
+}
+
+async function processMarketplaceOrdersUnlocked(
   service: Service,
   { limit = 20 }: { limit?: number } = {},
 ): Promise<MarketplaceResult> {
