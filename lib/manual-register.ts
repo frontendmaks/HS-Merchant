@@ -267,23 +267,33 @@ const shortDate = (date: string) => {
  * сталось, замість мовчазної дірки.
  */
 export const MOVED_MARK = 'перенесено на '
+export const CANCELED_MARK = 'скасовано'
 
-export async function blockMovedNumber(
+/** Позначки, що тримають номер навмисно: прибирання їх не чіпає */
+export const HELD_MARKS = [MOVED_MARK, CANCELED_MARK]
+
+/** Чи тримає цей рядок номер навмисно, а не через покинутий резерв */
+export const isHeldMark = (name: string | null | undefined): boolean =>
+  HELD_MARKS.some(m => (name ?? '').startsWith(m))
+
+/**
+ * Закрити номер написом замість імені.
+ *
+ * Рядок не звільняємо, а переписуємо: для таблиці комірка лишається
+ * непорожньою, отже зайнятою; для журналу рядок лишається взятим; а для
+ * людини видно, що сталось, замість мовчазної дірки.
+ *
+ * Рядок лишається за тим самим замовленням. Без цього він виглядає як
+ * покинутий резерв — зайнято, а ким, невідомо, — і прибирання, яке
+ * шукає саме такі рядки, повертало його в обіг. Два номери так і
+ * звільнились того ж дня, хоч мали лишатись закритими до вечора.
+ */
+async function blockNumber(
   service: Service,
-  { number, date, toDate, orderId = null }: {
-    number: number; date: string; toDate: string; orderId?: string | null
+  { number, date, mark, orderId = null }: {
+    number: number; date: string; mark: string; orderId?: string | null
   },
 ): Promise<boolean> {
-  const mark = `${MOVED_MARK}${shortDate(toDate)}`
-
-  /*
-   * Рядок лишається за тим замовленням, яке поїхало.
-   *
-   * Без цього він виглядає як покинутий резерв — зайнято, а ким,
-   * невідомо, — і прибирання, яке шукає саме такі рядки, повертало його
-   * в обіг. Два номери так і звільнились того ж дня, хоч мали лишатись
-   * закритими до вечора.
-   */
   await takeNumber(service, { date, number, orderId, customerName: mark })
 
   if (!sheetsConfigured()) return false
@@ -301,6 +311,38 @@ export async function blockMovedNumber(
     }
   }
   return false
+}
+
+export async function blockMovedNumber(
+  service: Service,
+  { number, date, toDate, orderId = null }: {
+    number: number; date: string; toDate: string; orderId?: string | null
+  },
+): Promise<boolean> {
+  return blockNumber(service, {
+    number, date, orderId, mark: `${MOVED_MARK}${shortDate(toDate)}`,
+  })
+}
+
+/**
+ * Номер скасованого замовлення теж лишається зайнятим.
+ *
+ * Доти ми його звільняли — міркування було просте: ящика не буде, хай
+ * число працює далі. Але воно вже прозвучало: комірник записав «десятий»
+ * на наліпці, кур'єр має його в маршруті, в чаті про нього домовлялись.
+ * Другий «десятий» того самого дня плутає рівно там, де плутати
+ * найдорожче — на складі з ящиками в руках.
+ *
+ * Тому замість звільнення пишемо в аркуш «скасовано»: число лишається
+ * закритим до кінця дня, а в таблиці видно, чому воно порожнє.
+ */
+export async function blockCanceledNumber(
+  service: Service,
+  { number, date, orderId = null }: {
+    number: number; date: string; orderId?: string | null
+  },
+): Promise<boolean> {
+  return blockNumber(service, { number, date, orderId, mark: CANCELED_MARK })
 }
 
 /**
@@ -520,6 +562,7 @@ export async function sweepStaleHolds(
      * рядок свідомо, і прибирання тут не для нього.
      */
     .not('customer_name', 'ilike', `${MOVED_MARK}%`)
+    .not('customer_name', 'ilike', `${CANCELED_MARK}%`)
 
   const holds = (data ?? []) as {
     delivery_date: string; number: number; customer_name: string | null; order_id: string | null
@@ -527,8 +570,8 @@ export async function sweepStaleHolds(
   result.looked = holds.length
 
   for (const hold of holds) {
-    // Перенесене закрите навмисно — його прибирання не стосується
-    if ((hold.customer_name ?? '').startsWith(MOVED_MARK)) continue
+    // Закрите навмисно — перенесене чи скасоване — прибирання не стосується
+    if (isHeldMark(hold.customer_name)) continue
 
     /*
      * Живе замовлення на це число — не чіпаємо.

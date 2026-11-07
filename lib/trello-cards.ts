@@ -24,7 +24,7 @@ type Service = ReturnType<typeof createServiceClient>
 const MARK = '— — — Мерчант — — —'
 
 /** Усе, що потрібно, аби зіставити картку із замовленням і дописати її */
-const COLUMNS = 'id, platform, manual_number, delivery_date, delivery_slot, address, customer_name, customer_phone, warehouse, share_token, status, trello_card_id, duplicate_of'
+const COLUMNS = 'id, platform, manual_number, delivery_date, delivery_slot, address, customer_name, customer_phone, warehouse, share_token, status, trello_card_id, duplicate_of, customer_comment'
 
 export interface CardResult {
   looked: number
@@ -102,6 +102,7 @@ interface OrderRow {
   status: string | null
   /** Якщо заповнено — це другий примірник, і дошці він не потрібен */
   duplicate_of: string | null
+  customer_comment: string | null
 }
 
 /**
@@ -173,6 +174,20 @@ function ourBlock(order: OrderRow, issues: string[]): string {
   if (order.warehouse) lines.push(`Склад: ${order.warehouse}`)
   if (isMarketplace(order)) {
     lines.push(`Маркетплейс: ${order.platform === 'maudau' ? 'MauDau' : 'Rozetka'} — везе пошта, ящика немає`)
+  }
+  /*
+   * Прохання покупця — на картку кур'єра.
+   *
+   * «Подзвоніть перед приїздом», «домофон не працює», «залишити в
+   * сусідів» — це пише сама людина, замовляючи. Досі воно жило в
+   * замовленні й на бланку складу, а кур'єр, який і має це зробити,
+   * картку бачив без нього.
+   *
+   * Ставимо перед переліком хиб: прохання стосується самої доставки, а
+   * хиби — нашої роботи з карткою.
+   */
+  if (order.customer_comment?.trim()) {
+    lines.push('', '💬 Клієнт просить:', order.customer_comment.trim())
   }
   if (issues.length) lines.push('', '⚠️ Перевірити:', ...issues.map(i => `• ${i}`))
   return lines.join('\n')

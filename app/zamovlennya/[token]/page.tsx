@@ -234,17 +234,49 @@ export default async function OrderSheet({
           * лише в замовленні, а на бланк не потрапляв — і те, про що
           * просили, читав хіба що оператор.
           */}
+        {/*
+          * Заголовок — вивернутий, текст — великий.
+          *
+          * Бланк читають не за столом: його друкують і кладуть на ящик,
+          * або дивляться з телефона в цеху. Тонка сіра рамка там
+          * зливалася з таблицею позицій, і прохання «подзвоніть перед
+          * приїздом» помічали вже після того, як не подзвонили.
+          *
+          * Чорна смуга із білим написом видно боковим зором і на папері,
+          * і на екрані — а друк її не губить, бо це суцільна заливка, а
+          * не відтінок.
+          */}
         {order.customer_comment && (
-          <div className="mt-5 rounded p-3 text-sm" style={{ border: `2px solid ${INK}` }}>
-            <div className="font-semibold mb-1">Коментар клієнта</div>
-            <div className="whitespace-pre-wrap">{order.customer_comment}</div>
+          <div className="mt-5 text-sm print:mt-4" style={{ border: `3px solid ${INK}` }}>
+            <div className="px-3 py-1.5 font-bold tracking-wide uppercase text-xs"
+              style={{ background: INK, color: '#fff', printColorAdjust: 'exact',
+                       WebkitPrintColorAdjust: 'exact' }}>
+              Коментар клієнта
+            </div>
+            <div className="px-3 py-2.5 whitespace-pre-wrap font-semibold text-base leading-snug">
+              {order.customer_comment}
+            </div>
           </div>
         )}
 
+        {/*
+          * Коментар оператора — так само помітний, але інший на вигляд.
+          *
+          * Дві однакові рамки поруч зливаються в одну думку, і комірник
+          * читає чуже прохання як клієнтове. Тут заливка сіра, а не
+          * чорна: видно одразу, що це інша тема, ще до того, як прочитав
+          * заголовок.
+          */}
         {!forCustomer && order.operator_comment && (
-          <div className="mt-3 rounded p-3 text-sm" style={{ border: `1px solid ${GREY}` }}>
-            <div className="font-semibold mb-1">Коментар оператора</div>
-            <div className="whitespace-pre-wrap">{order.operator_comment}</div>
+          <div className="mt-3 text-sm" style={{ border: `3px solid ${INK}` }}>
+            <div className="px-3 py-1.5 font-bold tracking-wide uppercase text-xs"
+              style={{ background: GREY, color: INK, printColorAdjust: 'exact',
+                       WebkitPrintColorAdjust: 'exact' }}>
+              Коментар оператора
+            </div>
+            <div className="px-3 py-2.5 whitespace-pre-wrap font-semibold text-base leading-snug">
+              {order.operator_comment}
+            </div>
           </div>
         )}
 
