@@ -555,7 +555,11 @@ export default async function SiteOrdersPage({
               <div className="text-zinc-400 text-xs">{o.address || '—'}</div>
 
               {o.customer_comment && (
-                <div className="text-amber-200 text-xs border-l-2 border-amber-600/60 pl-2
+                /* Червоним — щоб не змішувалось із нашими зауваженнями.
+                   Помаранчеве в цьому рядку наше: «бракує складу»,
+                   «зона приблизна». А це — слова покупця, і зробити їх
+                   треба, а не взяти до відома */
+                <div className="text-red-300 text-xs border-l-2 border-red-500 pl-2
                                 whitespace-pre-wrap break-words">
                   {o.customer_comment}
                 </div>
@@ -754,9 +758,11 @@ export default async function SiteOrdersPage({
                     {/* Коментар покупця — поруч з адресою, бо найчастіше
                         він саме про неї: домофон, під'їзд, «подзвоніть
                         перед приїздом». Читати його треба до того, як
-                        замовлення поїде, а не після дзвінка клієнта */}
+                        замовлення поїде, а не після дзвінка клієнта.
+                        Червоний відрізняє його від наших помаранчевих
+                        зауважень: ті до відома, це — зробити */}
                     {o.customer_comment && (
-                      <span className="block mt-1 text-amber-200 border-l-2 border-amber-600/60 pl-2
+                      <span className="block mt-1 text-red-300 border-l-2 border-red-500 pl-2
                                        whitespace-pre-wrap break-words">
                         {o.customer_comment}
                       </span>

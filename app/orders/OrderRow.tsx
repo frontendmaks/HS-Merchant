@@ -320,9 +320,12 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
         )}
         <div className="whitespace-nowrap">{props.external_id}</div>
         {/* High up the row on purpose: a comment is the one thing here the
-            operator must read before touching the order */}
+            operator must read before touching the order.
+            Червоний, а не помаранчевий: помаранчеве в цих рядках наше —
+            «бракує складу», «зона приблизна», — і його беруть до відома.
+            А це слова покупця, і їх треба зробити */}
         {props.customer_comment && (
-          <div className="mt-1 min-w-[180px] max-w-[240px] font-sans whitespace-pre-wrap break-words text-amber-200 border-l-2 border-amber-600/60 pl-2">
+          <div className="mt-1 min-w-[180px] max-w-[240px] font-sans whitespace-pre-wrap break-words text-red-300 border-l-2 border-red-500 pl-2">
             {props.customer_comment}
           </div>
         )}
@@ -550,7 +553,7 @@ function OrderDetailModal(
                     {props.arrival && <span className="text-zinc-500"> о {props.arrival}</span>}
                   </span>
                   {props.customer_comment && (
-                    <span className="text-amber-400 text-xs" title="Клієнт залишив коментар">
+                    <span className="text-red-400 text-xs" title="Клієнт залишив коментар">
                       ✎ коментар
                     </span>
                   )}
@@ -577,8 +580,8 @@ function OrderDetailModal(
                     the other is how the operator catches it */}
                 {props.customer_comment && (
                   <div>
-                    <div className="text-amber-400/90 text-xs">Коментар клієнта</div>
-                    <div className="text-zinc-100 text-sm mt-1 whitespace-pre-wrap bg-amber-950/20 border border-amber-900/40 rounded-lg px-3 py-2">
+                    <div className="text-red-400/90 text-xs">Коментар клієнта</div>
+                    <div className="text-zinc-100 text-sm mt-1 whitespace-pre-wrap bg-red-950/25 border border-red-900/50 rounded-lg px-3 py-2">
                       {props.customer_comment}
                     </div>
                   </div>
