@@ -147,14 +147,30 @@ export async function noteExternalNumber(
  * складі два ящики мали однаковий номер.
  */
 export async function nextFreeNumber(service: Service, date: string): Promise<number | null> {
+  /*
+   * Скасоване замовлення свій номер не віддає.
+   *
+   * Доти воно тут не рахувалось: ящика ж не буде, хай число працює
+   * далі. Але воно вже прозвучало — комірник написав «сорок перший» на
+   * наліпці, кур'єр має його в маршруті, в чаті про нього домовлялись.
+   * Другий «сорок перший» того самого дня плутає рівно там, де плутати
+   * найдорожче.
+   *
+   * 9 листопада саме так і сталось: BX-202104 узяло 41, його скасували,
+   * і через годину 41 дістало BX-202117 — той самий клієнт, два ящики
+   * під одним числом. До того ж 7 листопада номер 54 устиг побувати в
+   * трьох замовлень поспіль.
+   *
+   * Тепер правило тримається самою вибіркою, а не написом у журналі:
+   * число, яке того дня бодай комусь належало, більше нічиїм не стає.
+   */
   const [{ data: held }, { data: orders }] = await Promise.all([
     service.from('order_numbers')
       .select('number').eq('delivery_date', date).is('released_at', null),
     service.from('orders')
       .select('manual_number')
       .eq('delivery_date', date)
-      .not('manual_number', 'is', null)
-      .neq('status', 'Скасовано'),
+      .not('manual_number', 'is', null),
   ])
 
   const taken = new Set<number>([
