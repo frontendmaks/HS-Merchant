@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  offerWeightKg, wholeHryvnia, usablePicture, needsUpdate, itemParams, buildItem,
+  offerWeightKg, wholeHryvnia, usablePicture, needsUpdate, itemParams, buildItem, contentHash,
   type RozetkaItemContext, type RozetkaItemDraft,
 } from '@/lib/rozetka-items'
 import type { PricingContext, PriceCategory } from '@/lib/price-category'
@@ -19,7 +19,14 @@ const pricing: PricingContext = {
 const ctx: RozetkaItemContext = {
   categoryIds: { 'Шашлики': '4632859' },
   producerIds: { 'Галицька Свіжина': 822418 },
-  weightAttr: { '4632859': 48739 },
+  categoryAttrs: {
+    '4632859': [
+      { id: 48739, title: 'Вага в упаковці', type: 'Decimal', values: [] },
+      { id: 98900, title: 'Країна-виробник', type: 'ListValues',
+        values: [{ id: 1, value: 'Україна' }, { id: 2, value: 'Польща' }] },
+      { id: 137119, title: 'Умови зберігання', type: 'TextArea', values: [] },
+    ],
+  },
   pricing,
   promos: [{
     id: 'p1', feed_id: 'f1', scope: 'all', category_name: null, product_id: null,
@@ -92,7 +99,10 @@ describe('вага порції', () => {
   })
 
   it('без ваги характеристик немає, а без них Rozetka картку не бере', () => {
-    const draft = { weightAttrId: 48739, weightKg: null } as RozetkaItemDraft
+    const draft = {
+      weightKg: null, facts: {},
+      attributes: [{ id: 48739, title: 'Вага в упаковці', type: 'Decimal', values: [] }],
+    } as unknown as RozetkaItemDraft
     expect(itemParams(draft)).toEqual([])
   })
 })
@@ -121,17 +131,86 @@ describe('що не поїде на Rozetka', () => {
 })
 
 describe('кого турбуємо наступним проходом', () => {
-  const draft = { price: 148, priceOld: 185, stock: 3, available: true } as RozetkaItemDraft
+  const draft = buildItem(line(product()), ctx)
+  if (!('item' in draft)) throw new Error('не зібралось')
+  const params = itemParams(draft.item)
+  const hash = contentHash(draft.item, params)
 
   it('нічого не змінилось — не турбуємо', () => {
-    expect(needsUpdate(draft, { price: 148, price_old: 185, stock: 3, available: true })).toBe(false)
+    expect(needsUpdate(draft.item, params, { content_hash: hash })).toBe(false)
+  })
+
+  it('змінився опис — турбуємо, хоч ціна та сама', () => {
+    /* Поки звіряли лише ціну й залишок, дописані описи не доїжджали:
+       картка лишалась порожньою, бо гроші в ній не рухались */
+    const edited = buildItem(line(product({ description_own: 'новий опис' })), ctx)
+    if (!('item' in edited)) throw new Error('не зібралось')
+    expect(needsUpdate(edited.item, itemParams(edited.item), { content_hash: hash })).toBe(true)
   })
 
   it('змінився залишок — турбуємо', () => {
-    expect(needsUpdate(draft, { price: 148, price_old: 185, stock: 0, available: false })).toBe(true)
+    const moved = buildItem(line(product({ stock: 0 })), ctx)
+    if (!('item' in moved)) throw new Error('не зібралось')
+    expect(needsUpdate(moved.item, itemParams(moved.item), { content_hash: hash })).toBe(true)
   })
 
   it('картка, якої ми ще не бачили, — завжди', () => {
-    expect(needsUpdate(draft, null)).toBe(true)
+    expect(needsUpdate(draft.item, params, null)).toBe(true)
+    expect(needsUpdate(draft.item, params, { content_hash: null })).toBe(true)
+  })
+})
+
+describe('характеристики картки', () => {
+  const facts = (over: Record<string, string> = {}) => ({
+    'Одиниця': 'кг', 'Мін': '0.4', 'Країна': 'Україна',
+    'Умови зберігання': 'Зберігати за температури від 0 до +4 °C', ...over,
+  })
+
+  it('вага йде завжди, решта — коли є що сказати', () => {
+    const built = buildItem(line(product({ attrs_own: facts() })), ctx)
+    if (!('item' in built)) throw new Error(built.error)
+    const params = itemParams(built.item)
+    expect(params.map(p => p.title)).toEqual([
+      'Вага в упаковці', 'Країна-виробник', 'Умови зберігання',
+    ])
+  })
+
+  it('значення зі списку йде з номером, бо текст Rozetka мовчки ковтає', () => {
+    const built = buildItem(line(product({ attrs_own: facts() })), ctx)
+    if (!('item' in built)) throw new Error(built.error)
+    const country = itemParams(built.item).find(p => p.title === 'Країна-виробник')
+    expect(country?.value).toEqual([{ id: 1, value: 'Україна' }])
+  })
+
+  it('значення, якого немає в довіднику категорії, не вигадуємо', () => {
+    const built = buildItem(line(product({ attrs_own: facts({ 'Країна': 'Молдова' }) })), ctx)
+    if (!('item' in built)) throw new Error(built.error)
+    expect(itemParams(built.item).some(p => p.title === 'Країна-виробник')).toBe(false)
+  })
+})
+
+describe('виробник', () => {
+  it('знайдений бренд іде своїм номером', () => {
+    const built = buildItem(line(product()), ctx)
+    expect('item' in built && built.item.producer).toEqual({ id: 822418, title: 'Галицька Свіжина' })
+  })
+
+  it('бренду немає в довіднику Rozetka — йде нулем, але з назвою', () => {
+    /* Сімнадцяти наших брендів у їхньому довіднику просто немає, а
+       порожнє поле виробника гірше за назву без номера */
+    const built = buildItem(line(product({ brand: 'Наминака' })), ctx)
+    expect('item' in built && built.item.producer).toEqual({ id: 0, title: 'Наминака' })
+  })
+})
+
+describe('наш опис головніший за сайтів', () => {
+  it('написане нами перемагає', () => {
+    const built = buildItem(line(product({ description: 'з сайту', description_own: 'наше' })), ctx)
+    expect('item' in built && built.item.description).toBe('наше')
+  })
+
+  it('коли свого немає — беремо те, що з сайту', () => {
+    const built = buildItem(line(product({ description: 'з сайту' })), ctx)
+    expect('item' in built && built.item.description).toBe('з сайту')
   })
 })

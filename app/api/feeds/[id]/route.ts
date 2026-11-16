@@ -10,6 +10,7 @@ import {
 import {
   generateRozetkaYML, type RozetkaFeedContext, type RzCategoryMeta,
 } from '@/lib/rozetka-feed'
+import { descriptionFor, attrsFor } from '@/lib/product-content'
 
 export async function GET(
   request: NextRequest,
@@ -139,7 +140,7 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
     .filter((fp: any) => fp.is_active && fp.product)
     .map((fp: any) => {
       const p = fp.product
-      const attrs = (p.attributes as Record<string, string>) ?? {}
+      const attrs = attrsFor(p)
       const weightLabel = minWeightLabel(attrs)
       const baseName = fp.custom_name ?? p.name
       const name = weightLabel ? `${baseName}, ${weightLabel}` : baseName
@@ -173,7 +174,7 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       <currencyId>${p.currency}</currencyId>
       <categoryId>${p.category_id ?? 1}</categoryId>
       ${images}
-      <description><![CDATA[${p.description ?? ''}]]></description>
+      <description><![CDATA[${descriptionFor(p)}]]></description>
       <vendor>${escapeXml(p.vendor ?? '')}</vendor>
       <vendorCode>${escapeXml(p.sku ?? '')}</vendorCode>
       ${attrsXml}
@@ -267,13 +268,13 @@ function generateMaudauYML(
   const offersXml = activeFps
     .map((fp: any) => {
       const p = fp.product
-      const attrs_map = { ...(p.attributes as Record<string, string>) ?? {}, ...(fp.custom_params ?? {}) }
-      const weightLabel = minWeightLabel(p.attributes as Record<string, string> | null)
+      const attrs_map = { ...attrsFor(p), ...(fp.custom_params ?? {}) }
+      const weightLabel = minWeightLabel(attrsFor(p))
       const baseNameUa = fp.custom_name ?? p.name
       const nameUa = weightLabel ? `${baseNameUa}, ${weightLabel}` : baseNameUa
       const nameRu = fp.name_ru ?? nameUa
       // MauDau requires non-empty description — fall back to product name if empty
-      const descUa = (p.description && p.description.trim()) ? p.description.trim() : nameUa
+      const descUa = descriptionFor(p) || nameUa
       const descRu = (fp.description_ru && fp.description_ru.trim()) ? fp.description_ru.trim() : (descUa === nameUa ? nameRu : descUa)
       const stock = fp.custom_stock ?? p.stock
       const catId = catIdMap.get(p.category_name ?? 'Без категорії') ?? '1'

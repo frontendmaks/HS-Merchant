@@ -23,6 +23,7 @@
 import { promoFor, oldPriceFor, type Promo } from '@/lib/price-promo'
 import { basePrice, roundOffer, categoryFor, type PricingContext } from '@/lib/price-category'
 import { calcMarketplacePrice, minWeightLabel, offerStock } from '@/lib/feed-xml'
+import { descriptionFor, attrsFor } from '@/lib/product-content'
 
 /** Rozetka відмовляє посиланням із кирилицею, пробілами й плюсом. */
 export const usablePicture = (url: string) =>
@@ -69,13 +70,20 @@ export function offerWeightKg(attrs: Record<string, string> | null): number | nu
  */
 export const wholeHryvnia = (price: number) => Math.ceil(Math.round(price * 100) / 100)
 
+export interface RzAttribute {
+  id: number
+  title: string
+  type: string
+  values: { id: number; value: string }[]
+}
+
 export interface RozetkaItemContext {
   /** наша категорія → id категорії Rozetka */
   categoryIds: Record<string, string>
   /** бренд → id виробника в довіднику Rozetka */
   producerIds: Record<string, number>
-  /** id категорії Rozetka → id характеристики «Вага в упаковці» */
-  weightAttr: Record<string, number>
+  /** id категорії Rozetka → її характеристики з допустимими значеннями */
+  categoryAttrs: Record<string, RzAttribute[]>
   pricing: PricingContext
   promos: Promo[]
 }
@@ -94,7 +102,10 @@ export interface RozetkaItemDraft {
   article: string | null
   producer: { id: number; title: string } | null
   weightKg: number | null
-  weightAttrId: number | null
+  /** Характеристики цієї категорії — з них збираються params */
+  attributes: RzAttribute[]
+  /** Що ми знаємо про товар, іменами наших полів */
+  facts: Record<string, string>
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -113,7 +124,7 @@ export function buildItem(
   fp: FeedProduct, ctx: RozetkaItemContext,
 ): { item: RozetkaItemDraft } | { error: string; name: string } {
   const p: Product = fp.product
-  const attrs = (p.attributes as Record<string, string>) ?? {}
+  const attrs = attrsFor(p)
   const label = String(fp.custom_name ?? p.name ?? p.id)
 
   const offerId = String(p.external_id ?? '').trim()
@@ -157,8 +168,9 @@ export function buildItem(
 
   const brand = String(p.brand ?? '').trim()
   const producerId = ctx.producerIds[brand]
-  const weightKg = offerWeightKg(attrs)
-  const weightAttrId = ctx.weightAttr[String(catId)] ?? null
+  /* Вага, яку ми проставили самі, важить більше: саме її й проставляли
+     там, де на сайті ваги немає ніде */
+  const weightKg = Number(p.weight_own) > 0 ? Number(p.weight_own) : offerWeightKg(attrs)
 
   return {
     item: {
@@ -171,16 +183,35 @@ export function buildItem(
       stock: Math.max(0, Math.ceil(quantity ?? 0)),
       available,
       pictures,
-      description: String(p.description ?? '').slice(0, 50_000),
+      description: descriptionFor(p).slice(0, 50_000),
       article: (p.sku as string) || null,
-      producer: producerId ? { id: producerId, title: brand } : null,
+      /*
+       * Виробника ставимо завжди, коли бренд відомий.
+       *
+       * Довідник Rozetka знає не всі наші бренди — «Don Gastronom»,
+       * «Наминака» і ще п'ятнадцять у ньому просто відсутні. Нуль із
+       * назвою Rozetka приймає, і картка виходить із виробником, а не
+       * порожнім полем.
+       */
+      producer: brand ? { id: producerId ?? 0, title: brand } : null,
       weightKg,
-      weightAttrId,
+      attributes: ctx.categoryAttrs[String(catId)] ?? [],
+      facts: attrs,
     },
   }
 }
 
-/** Поля, які Rozetka приймає і на створення, і на оновлення. */
+/**
+ * Усе, що Rozetka приймає і на створення, і на оновлення.
+ *
+ * Оновлення тут не обмежене ціною й залишком навмисно: опис, фото,
+ * виробник і характеристики так само приїжджають кожним проходом. Інакше
+ * картка, заведена порожньою, лишилась би порожньою назавжди — а саме
+ * такими й були перші чотириста, поки описи дописувались.
+ *
+ * `name` і `name_ua` обов'язкові навіть тоді, коли змінюється сам лише
+ * залишок: без них Rozetka відповідає 1005.
+ */
 export function basicFields(item: RozetkaItemDraft) {
   return {
     name: item.name,
@@ -191,18 +222,89 @@ export function basicFields(item: RozetkaItemDraft) {
     available: item.available,
     price_offer_id: item.offerId,
     ...(item.article ? { article: item.article } : {}),
+    ...(item.description ? { description: item.description, description_ua: item.description } : {}),
+    ...(item.pictures.length ? { pictures: item.pictures.map(link => ({ link })) } : {}),
+    ...(item.producer ? { producer: item.producer } : {}),
   }
 }
 
-/** Характеристики. Порожнім масивом Rozetka не вдовольняється. */
+/**
+ * Наші поля → характеристики Rozetka.
+ *
+ * Зліва те, як поле зветься в нас, справа — як його шукати в категорії.
+ * Назви характеристик Rozetka тримає свої й у кожній категорії трохи
+ * інші, тому шукаємо за зразком, а не за точним рядком.
+ */
+const FIELD_TO_ATTR: [string, RegExp][] = [
+  ['Країна', /^країна[- ]виробник/i],
+  ['Склад', /^склад$/i],
+  ['Умови зберігання', /^умови зберігання/i],
+  ['Термін зберігання', /^термін зберігання/i],
+  ['Упаковка', /^упаковка$/i],
+]
+
+/** Типи, де Rozetka приймає лише id зі свого списку значень. */
+const LIST_TYPES = /^(List|ListValues|ComboBox|CheckBoxGroup|CheckBoxGroupValues)/
+
+/**
+ * Характеристики картки. Порожнім масивом Rozetka не вдовольняється,
+ * тож вага тут обов'язкова — решта додається, коли є що додати.
+ *
+ * Значення зі списку мусить збігтися з довідником Rozetka: вигадане
+ * «Україна» в категорії, де воно зветься інакше, картка проковтне
+ * мовчки, а характеристика лишиться порожньою.
+ */
 export function itemParams(item: RozetkaItemDraft) {
-  if (!item.weightAttrId || !item.weightKg) return []
-  return [{
-    id: item.weightAttrId,
-    title: 'Вага в упаковці',
-    type: 'Decimal',
+  const byPattern = (re: RegExp) => item.attributes.find(a => re.test(a.title ?? ''))
+  const params: { id: number; title: string; type: string; value: unknown }[] = []
+
+  const weightAttr = byPattern(/^вага в упаковці$/i)
+  if (!weightAttr || !item.weightKg) return []
+  params.push({
+    id: weightAttr.id, title: weightAttr.title, type: weightAttr.type,
     value: Math.round(item.weightKg * 1000) / 1000,
-  }]
+  })
+
+  for (const [field, pattern] of FIELD_TO_ATTR) {
+    const raw = (item.facts[field] ?? '').trim()
+    if (!raw) continue
+    const attr = byPattern(pattern)
+    if (!attr) continue
+
+    if (LIST_TYPES.test(attr.type)) {
+      const match = attr.values.find(v => v.value.trim().toLowerCase() === raw.toLowerCase())
+      if (!match) continue
+      params.push({ id: attr.id, title: attr.title, type: attr.type, value: [{ id: match.id, value: match.value }] })
+    } else {
+      params.push({ id: attr.id, title: attr.title, type: attr.type, value: raw })
+    }
+  }
+
+  return params
+}
+
+/**
+ * Відбиток картки — усе, що ми віддаємо Rozetka, одним рядком.
+ *
+ * Порівнювати ціну з ціною легко, а опис з описом і десяток
+ * характеристик — ні, поки не тримаєш їхньої копії в себе. Відбиток
+ * дешевший за копію й відповідає на єдине потрібне питання.
+ */
+export function contentHash(item: RozetkaItemDraft, params: unknown[]): string {
+  const parts = [
+    item.name, item.price, item.priceOld ?? '', item.stock, item.available ? 1 : 0,
+    item.description, item.pictures.join('|'),
+    item.producer ? `${item.producer.id}:${item.producer.title}` : '',
+    JSON.stringify(params),
+  ].join('\u0001')
+
+  /* FNV-1a: нам потрібне не криптостійке, а коротке й стабільне число */
+  let hash = 0x811c9dc5
+  for (let i = 0; i < parts.length; i++) {
+    hash ^= parts.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(36)
 }
 
 /**
@@ -213,11 +315,9 @@ export function itemParams(item: RozetkaItemDraft) {
  */
 export function needsUpdate(
   item: RozetkaItemDraft,
-  sent: { price?: number | null; price_old?: number | null; stock?: number | null; available?: boolean | null } | null,
+  params: unknown[],
+  sent: { content_hash?: string | null } | null,
 ): boolean {
-  if (!sent) return true
-  return Number(sent.price) !== item.price
-    || Number(sent.price_old ?? 0) !== Number(item.priceOld ?? 0)
-    || Number(sent.stock) !== item.stock
-    || Boolean(sent.available) !== item.available
+  if (!sent?.content_hash) return true
+  return sent.content_hash !== contentHash(item, params)
 }

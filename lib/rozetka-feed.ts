@@ -3,6 +3,7 @@ import { basePrice, roundOffer, categoryFor } from '@/lib/price-category'
 import {
   calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock,
 } from '@/lib/feed-xml'
+import { descriptionFor, attrsFor } from '@/lib/product-content'
 
 // --- Rozetka ---------------------------------------------------------------
 //
@@ -60,7 +61,7 @@ export function generateRozetkaYML(feed: any, ctx: RozetkaFeedContext): {
 
   for (const fp of activeFps) {
     const p = fp.product
-    const attrs = (p.attributes as Record<string, string>) ?? {}
+    const attrs = attrsFor(p)
     const params = (fp.custom_params ?? {}) as Record<string, string>
 
     // A product that is already a card on Rozetka must keep that card's id —
@@ -148,7 +149,7 @@ export function generateRozetkaYML(feed: any, ctx: RozetkaFeedContext): {
       ...pictures.map(u => `      <picture>${escapeXml(u)}</picture>`),
       p.vendor ? `      <vendor>${escapeXml(p.vendor)}</vendor>` : '',
       p.sku ? `      <article>${escapeXml(p.sku)}</article>` : '',
-      `      <description><![CDATA[${stripControlChars(p.description ?? '').slice(0, 50_000)}]]></description>`,
+      `      <description><![CDATA[${stripControlChars(descriptionFor(p)).slice(0, 50_000)}]]></description>`,
       ...paramXml,
       `    </offer>`,
     ].filter(Boolean).join('\n'))
