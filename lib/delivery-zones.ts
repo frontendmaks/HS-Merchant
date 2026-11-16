@@ -13,8 +13,22 @@ type Service = ReturnType<typeof createServiceClient>
 import { hasLatin, toCyrillic } from '@/lib/address-latin'
 import { GIVEN_NAMES } from '@/lib/given-names'
 
-export const ZONES_URL =
-  'https://halytska-svizhyna.ua/wp-content/uploads/2026/06/zona-dostavky-1.json'
+/**
+ * Звідки сайт бере карту.
+ *
+ * Файл карти міняють, завантажуючи новий JSON у налаштуваннях магазину, і
+ * адреса файлу щоразу інша (у червні був `zona-dostavky-1.json`, з 16.11.2026 —
+ * `zona-dostavky-2026-11-v3.json`). Тому питаємо сайт, який файл у нього
+ * зараз вибраний для Львова, — тим самим запитом, яким його карта тягне зони.
+ */
+const CITY_DATA_URL =
+  'https://halytska-svizhyna.ua/wp-admin/admin-ajax.php?action=get_city_data&city=' +
+  encodeURIComponent('Львів') + '&lang=uk'
+
+/** Сторінка, де карту видно людям — на неї веде посилання в Мерчанті. */
+export const ZONES_URL = 'https://halytska-svizhyna.ua/dostavka/'
+
+type Areas = Record<string, { color?: string; coordinates?: Point[] }>
 
 export interface Point { lat: number; lng: number }
 
@@ -52,13 +66,15 @@ export function insidePolygon(p: Point, poly: Point[]): boolean {
  */
 export async function refreshZones(service: Service): Promise<{ updated: number; error?: string }> {
   try {
-    const res = await fetch(ZONES_URL, { signal: AbortSignal.timeout(20_000) })
+    const res = await fetch(CITY_DATA_URL, { signal: AbortSignal.timeout(20_000) })
     if (!res.ok) return { updated: 0, error: `Сайт відповів ${res.status}` }
 
-    const data = await res.json() as {
-      areas?: Record<string, { color?: string; coordinates?: Point[] }>
-    }
+    const data = await res.json() as { areas?: Areas }
     const areas = data.areas ?? {}
+    // Порожня відповідь — це збій сайту, а не карта без зон. Затирати нічим.
+    if (Object.keys(areas).length === 0) {
+      return { updated: 0, error: 'Сайт не віддав жодної зони' }
+    }
     let updated = 0
 
     for (const [code, area] of Object.entries(areas)) {
