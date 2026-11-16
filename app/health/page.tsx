@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
 import { cronHealth, orderChecks, recentFailures, type JobState } from '@/lib/system-health'
+import { marketplacePriceCheck } from '@/lib/marketplace-price-check'
 
 /**
  * Стан системи.
@@ -38,11 +39,14 @@ export default async function HealthPage() {
   if (!canAccess('health', role)) redirect('/orders')
 
   const service = createServiceClient()
-  const [jobs, checks, failures] = await Promise.all([
+  const [jobs, baseChecks, failures, mpPrice] = await Promise.all([
     cronHealth(service),
     orderChecks(service),
     recentFailures(service),
+    /* Бітрікс може й не відповісти — від цього сторінка стану не має падати */
+    marketplacePriceCheck(service).catch(() => null),
   ])
+  const checks = mpPrice ? [...baseChecks, mpPrice] : baseChecks
 
   const broken = jobs.filter(j => j.state !== 'ok')
   const working = jobs.filter(j => j.state === 'ok')
