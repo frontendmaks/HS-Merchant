@@ -37,8 +37,22 @@ async function once<T>(method: string, path: string, body?: unknown): Promise<T>
   const data = await res.json()
   if (!data.success) {
     const e = data.errors
+    /*
+     * Деталі важливіші за опис.
+     *
+     * «Перевірте правильність введених даних» однакове на всі випадки —
+     * і на цілу ціну, і на недоступну категорію, і на фото з кирилицею.
+     * Що саме не так, Rozetka каже в `details`, і без них помилка не
+     * підказує нічого.
+     */
+    const details = e?.details
+      ? Object.entries(e.details as Record<string, unknown>)
+          .map(([field, msgs]) => `${field}: ${[msgs].flat().join('; ')}`)
+          .join(' | ')
+      : ''
     throw new Error(
-      `Rozetka API error${e?.code ? ` ${e.code}` : ''}: ${e?.description ?? e?.message ?? JSON.stringify(e)}`,
+      `Rozetka API error${e?.code ? ` ${e.code}` : ''}: ` +
+      `${e?.description ?? e?.message ?? JSON.stringify(e)}${details ? ` — ${details}` : ''}`,
     )
   }
   return data.content as T
@@ -244,4 +258,15 @@ export async function rozetkaAttributeValues(categoryId: number, attributeId: nu
     page++
   } while (page <= pageCount)
   return out
+}
+
+export interface RozetkaProducer { id: number; title: string; status: string }
+
+/** Виробники за точною назвою. Довідник величезний, тож лише пошук. */
+export async function rozetkaSearchProducers(title: string): Promise<RozetkaProducer[]> {
+  const qs = new URLSearchParams({ title, page: '1', pageSize: '50' })
+  const c = await rz<never>('GET', `/items-create/producers?${qs}`) as unknown as {
+    producers?: RozetkaProducer[]
+  }
+  return c.producers ?? []
 }

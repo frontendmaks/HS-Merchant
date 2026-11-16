@@ -75,6 +75,14 @@
     {
       "path": "/api/cron/zones-sunday",
       "schedule": "20 3 * * *"
+    },
+    {
+      "path": "/api/cron/rozetka-items",
+      "schedule": "25 * * * *"
+    },
+    {
+      "path": "/api/cron/rozetka-items?create=1&limit=60",
+      "schedule": "50 4 * * *"
     }
   ],
   "regions": [

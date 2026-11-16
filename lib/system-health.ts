@@ -66,6 +66,8 @@ export const JOBS: Job[] = [
     costs: 'ТТН і статуси з майданчиків застарівають' },
   { name: 'delivery-notify', label: 'Доставка: нагадування', everyMinutes: 15,
     costs: 'клієнт не отримує нагадування про привезення' },
+  { name: 'rozetka-items', label: 'Ціни й залишки на Rozetka', everyMinutes: 60,
+    costs: 'картки на Rozetka торгують учорашньою ціною і залишком' },
   { name: 'bitrix-check', label: 'Звірка з Бітріксом', everyMinutes: 60,
     costs: 'розбіжності між CRM і Мерчантом нікому не видно' },
   { name: 'mp-sync', label: 'Маркетплейси: повний прохід', everyMinutes: 1440,
