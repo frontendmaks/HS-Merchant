@@ -61,6 +61,25 @@ interface Deal {
  */
 const SHIPPING_KIND: Record<string, string> = { '176': 'courier', '425': 'np' }
 
+/**
+ * Кому належить угода: знайденому за її номером чи знайденому за нашим ключем.
+ *
+ * Порядок тут і є суттю. Номер угоди в замовленні з'являється останнім —
+ * уже після того, як угода створена в Бітріксі, — тож у перші секунди
+ * життя угоди знайти її можна лише за ключем. Якщо не шукати за ним,
+ * вийде друге замовлення на ту саму угоду; саме так і виходило.
+ *
+ * `claim` каже, що номер угоди замовленню ще треба дописати.
+ */
+export function ownerOfDeal<T>(
+  byDealId: T | null | undefined,
+  byOrderKey: T | null | undefined,
+): { order: T; claim: boolean } | null {
+  if (byDealId) return { order: byDealId, claim: false }
+  if (byOrderKey) return { order: byOrderKey, claim: true }
+  return null
+}
+
 const DEAL_FIELDS = [
   'ID', 'TITLE', 'STAGE_ID', 'CONTACT_ID', 'OPPORTUNITY', 'DATE_CREATE', 'DATE_MODIFY',
   'COMMENTS', 'UF_CRM_1607510002583', 'UF_BILL_ADRESS_LIST', 'UF_CRM_1606047095',
@@ -390,10 +409,45 @@ async function syncSiteOrdersUnlocked(
 
         const { updated_at: _timestamp, ...stableFields } = fields
         const fingerprint = createHash('sha256').update(JSON.stringify({ fields: stableFields, rows, knownRows })).digest('hex')
-        const { data: existing } = await service
+        let { data: existing } = await service
           .from('orders')
           .select('id, platform, status, address, delivery_date, manual_number, number_source, customer_phone, auto_problem, updated_at, sync_hash')
           .eq('bitrix_deal_id', Number(deal.ID)).maybeSingle()
+
+        /*
+         * Угоду могли завести ми самі — і секунду тому.
+         *
+         * Телефонне замовлення спершу лягає в Мерчант, потім створює
+         * угоду в Бітріксі, потім записує її номер собі. Між другим і
+         * третім кроком стоїть ще й вивантаження позицій, а це чотири-шість
+         * секунд, протягом яких угода в Бітріксі вже є, а `bitrix_deal_id`
+         * у замовлення ще немає. Синхронізація, що проходила в цю щілину,
+         * не впізнавала угоду й заводила друге замовлення — те саме, на
+         * той самий телефон і суму, але «з сайту». Чотири рази за місяць:
+         * №46 шостого, №69 тринадцятого, №32 чотирнадцятого, №29 сімнадцятого.
+         *
+         * Шукаємо ще й за нашим ключем. Його Бітрікс отримує тією самою
+         * командою, що створює угоду, тож він є від її першої миті —
+         * щілини, в яку можна провалитись, просто не лишається.
+         *
+         * Угоди з сайту сюди не потрапляють: у них ключ свій,
+         * `wc_order_…`, і жодному нашому external_id він не дорівнює.
+         */
+        const ourKey = deal.UF_ORDER_KEY?.trim()
+        if (!existing && ourKey) {
+          const { data: ours } = await service
+            .from('orders')
+            .select('id, platform, status, address, delivery_date, manual_number, number_source, customer_phone, auto_problem, updated_at, sync_hash')
+            .eq('external_id', ourKey).maybeSingle()
+
+          const owner = ownerOfDeal(existing, ours)
+          if (owner?.claim) {
+            await service.from('orders')
+              .update({ bitrix_deal_id: Number(deal.ID) })
+              .eq('id', owner.order.id).is('bitrix_deal_id', null)
+            existing = owner.order
+          }
+        }
 
         if (existing) {
           const releaseOrder = await acquireLease(`status:${existing.id}`, 180)
@@ -614,6 +668,18 @@ async function syncSiteOrdersUnlocked(
                 customerName: fields.customer_name ?? '',
               })
             }
+          } else if (error?.code === '23505') {
+            /*
+             * Замовлення на цю угоду вже є — його щойно створили поруч.
+             *
+             * База тримає одну угоду за одним замовленням, і саме тому
+             * сюди можна прийти лише в одному випадку: два проходи
+             * зійшлись на одній угоді. Другий нічого не втратив — усе,
+             * що він ніс, принесе наступний прохід, уже знайшовши
+             * замовлення. Це не поламка, тож і в журнал як поламку не
+             * пишемо.
+             */
+            result.skipped = (result.skipped ?? 0) + 1
           } else {
             /*
              * Невдала вставка більше не губиться.

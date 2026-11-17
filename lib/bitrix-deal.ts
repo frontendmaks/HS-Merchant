@@ -391,11 +391,19 @@ export async function pushOrderToBitrix(
       ? (await updateDealChecked(order.bitrix_deal_id, fields), order.bitrix_deal_id)
       : await addDealOnce(order.external_id ?? '', fields)
 
-    await bitrix('crm.deal.productrows.set', { id: dealId, rows })
-
+    /*
+     * Номер угоди записуємо одразу, ще до позицій.
+     *
+     * Доти він писався в кінці, після вивантаження позицій, — а це ще
+     * один виклик у Бітрікс і чотири-шість секунд, під час яких угода
+     * вже існує, а замовлення про неї не знає. Синхронізація, що
+     * проходила в цю мить, заводила друге замовлення на ту саму угоду.
+     */
     await service.from('orders')
       .update({ bitrix_deal_id: dealId, bitrix_error: null })
       .eq('id', orderId)
+
+    await bitrix('crm.deal.productrows.set', { id: dealId, rows })
 
     return { dealId }
   } catch (e) {

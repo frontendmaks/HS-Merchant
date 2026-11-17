@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { measureFor } from '@/lib/bitrix-deal'
+import { ownerOfDeal } from '@/lib/bitrix-sync'
 import { BITRIX_STAGES, stageId, stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
 import { foldSku, translitSku } from '@/lib/order-items'
 
@@ -80,5 +81,40 @@ describe('артикул, записаний чужою абеткою', () => {
   it('порожнє лишається порожнім, а не стає збігом для всього', () => {
     expect(foldSku(null)).toBe('')
     expect(translitSku(undefined)).toBe('')
+  })
+})
+
+describe('одна угода — одне замовлення', () => {
+  /*
+   * Телефонне замовлення спершу лягає в Мерчант, потім створює угоду в
+   * Бітріксі, і лише потім записує її номер собі. Синхронізація, що
+   * проходила в цю щілину, угоди не впізнавала й заводила друге
+   * замовлення — те саме, на той самий телефон і суму, але «з сайту».
+   * №46 шостого, №69 тринадцятого, №32 чотирнадцятого, №29 сімнадцятого
+   * листопада.
+   */
+  const order = { id: 'ord-1' }
+
+  it('знайдене за номером угоди лишається при своєму', () => {
+    expect(ownerOfDeal(order, null)).toEqual({ order, claim: false })
+  })
+
+  it('знайдене за нашим ключем забирає угоду собі', () => {
+    /* Саме ця гілка й рятує: номера угоди в замовленні ще немає,
+       але ключ у неї наш, тож друге замовлення не з'явиться */
+    expect(ownerOfDeal(null, order)).toEqual({ order, claim: true })
+  })
+
+  it('номер угоди головніший за ключ', () => {
+    const byDeal = { id: 'ord-deal' }
+    const byKey = { id: 'ord-key' }
+    expect(ownerOfDeal(byDeal, byKey)).toEqual({ order: byDeal, claim: false })
+  })
+
+  it('чужа угода лишається чужою', () => {
+    /* У сайтової угоди ключ свій — `wc_order_…`, і жодному нашому
+       external_id він не дорівнює. Для неї обидва пошуки порожні, і
+       замовлення створюється, як і створювалось */
+    expect(ownerOfDeal(null, null)).toBeNull()
   })
 })
