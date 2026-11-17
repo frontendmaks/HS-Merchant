@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { marketplaceLines } from '@/lib/order-lines'
 import {
   bareName, specFromAttr, unitFromRow, needsOwnQuery,
 } from '@/lib/catalog-match'
@@ -90,5 +91,48 @@ describe('назви, які ламають пошук списком', () => {
   it('проста назва йде списком', () => {
     expect(needsOwnQuery('Філе куряче')).toBe(false)
     expect(needsOwnQuery('Гомілка куряча')).toBe(false)
+  })
+})
+
+describe('позиції замовлення з Rozetka', () => {
+  /*
+   * Rozetka віддає `article` порожнім рядком, а код товару кладе в
+   * `price_offer_id`. Доти код брав article першим через `??`, який
+   * порожнього рядка не пропускає, — і кожна позиція виходила без коду.
+   * Тридцять шість рядків, жодного зіставлення з каталогом: склад
+   * отримав би назву й порожню номенклатуру.
+   */
+  const order = (purchase: Record<string, unknown>) => ({
+    platform: 'rozetka',
+    raw: { purchases: [{ id: 1, quantity: 2, price_with_discount: '42.00',
+      item_name: 'Смалець, 400 г', ...purchase }] },
+  })
+
+  it('порожній артикул не затуляє коду товару', () => {
+    const [line] = marketplaceLines(order({
+      item_id: 572706466,
+      item: { article: '', price_offer_id: '125476372' },
+    }))
+    expect(line.externalId).toBe('125476372')
+  })
+
+  it('коли коду немає — лишається артикул', () => {
+    const [line] = marketplaceLines(order({
+      item_id: 572706466, item: { article: 'ЯД017', price_offer_id: '' },
+    }))
+    expect(line.externalId).toBe('ЯД017')
+  })
+
+  it('останній рубіж — номер картки Rozetka, а не порожнеча', () => {
+    const [line] = marketplaceLines(order({ item_id: 572706466, item: {} }))
+    expect(line.externalId).toBe('572706466')
+  })
+
+  it('ціна й кількість лишаються позиційними', () => {
+    const [line] = marketplaceLines(order({
+      item_id: 1, item: { price_offer_id: '725069' },
+    }))
+    expect(line.unitPrice).toBe(42)
+    expect(line.quantity).toBe(2)
   })
 })

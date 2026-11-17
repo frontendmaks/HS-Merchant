@@ -54,9 +54,27 @@ export function marketplaceLines(order: any): MarketplaceLine[] {
     }
   } else if (order.platform === 'rozetka') {
     for (const p of order.raw?.purchases ?? []) {
+      /*
+       * Код товару Rozetka віддає в price_offer_id — тому самому, під яким
+       * ми завели картку. `article` у відповіді **порожній рядок**, а не
+       * відсутність, і доти його брали першим: `??` порожнього рядка не
+       * пропускає, тож умова ставала хибною і код виходив `null`. Для
+       * кожної позиції, усі тридцять шість: жодна не знайшла свого товару,
+       * а без товару немає ні коду 1С, ні ціни — склад отримав би назву й
+       * порожню номенклатуру.
+       *
+       * Тож беремо перше непорожнє, а не перше не-null.
+       */
+      const code = [
+        p.item?.price_offer_id,
+        p.item?.uploader_offer_id,
+        p.item?.article,
+        p.item_id,
+      ].map(v => (v == null ? '' : String(v).trim())).find(v => v !== '')
+
       out.push({
         itemId: p.id != null ? String(p.id) : null,
-        externalId: p.item?.article ?? p.item_id != null ? String(p.item?.article ?? p.item_id) : null,
+        externalId: code || null,
         title: p.item_name || 'Без назви',
         unitPrice: Number(p.price_with_discount ?? p.price ?? 0),
         quantity: Number(p.quantity ?? 1),
