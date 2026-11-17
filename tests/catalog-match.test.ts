@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { marketplaceLines } from '@/lib/order-lines'
+import { indexCatalog, buildLine } from '@/lib/order-items'
 import {
   bareName, specFromAttr, unitFromRow, needsOwnQuery,
 } from '@/lib/catalog-match'
@@ -134,5 +135,44 @@ describe('позиції замовлення з Rozetka', () => {
     }))
     expect(line.unitPrice).toBe(42)
     expect(line.quantity).toBe(2)
+  })
+})
+
+describe('від відповіді Rozetka до товару в каталозі', () => {
+  /*
+   * Увесь шлях одним тестом: те, що Rozetka реально присилає в
+   * замовленні, мусить знайти наш товар. Доти не знаходило жодного
+   * разу — тридцять шість рядків, нуль зіставлень.
+   *
+   * Код картки, який ми віддали при заведенні (price_offer_id), — це
+   * код товару на сайті. Rozetka повертає його незмінним, тож по ньому
+   * товар і знаходиться.
+   */
+  const catalog = indexCatalog([
+    { id: 'prod-1', name: 'Шашлик "Козацький", 400 г', sku: null,
+      external_id: '725069', price: 312, attributes: { 'Одиниця': 'кг', 'Мін': '0.4' }, uid_1c: 'guid-1' },
+  ] as never)
+
+  const purchase = {
+    id: 269550162, item_id: 572706466, quantity: 2,
+    price_with_discount: '148.00', item_name: 'Шашлик "Козацький", 400 г',
+    item: { article: '', price_offer_id: '725069', uploader_offer_id: '725069' },
+  }
+
+  it('позиція знаходить товар за кодом, який ми віддали при заведенні', () => {
+    const [line] = marketplaceLines({ platform: 'rozetka', raw: { purchases: [purchase] } })
+    const built = buildLine(line, catalog, 0)
+    expect(built.product_id).toBe('prod-1')
+    expect(built.product_external_id).toBe('725069')
+  })
+
+  it('без товару рядок лишився б без коду 1С — саме це й боліло', () => {
+    /* Та сама позиція, але код загублено: рядок доходить до складу
+       назвою, а номенклатура в 1С лишається порожньою */
+    const [line] = marketplaceLines({
+      platform: 'rozetka',
+      raw: { purchases: [{ ...purchase, item_id: null, item: { article: '' } }] },
+    })
+    expect(buildLine(line, catalog, 0).product_id).toBeNull()
   })
 })
