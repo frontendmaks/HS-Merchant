@@ -232,7 +232,15 @@ export async function mergeOrders(
     return { error: `Угоду створити не вдалося: ${e instanceof Error ? e.message : e}` }
   }
 
-  const { data: created, error } = await service.from('orders').insert({
+    /*
+     * Беремо рядок собі, якщо синхронізація встигла створити його першою.
+     *
+     * Угода народжується тут, а рядок замовлення — наступним викликом.
+     * Між ними встигає пройти синхронізація, побачити нову угоду й
+     * завести під неї своє замовлення. Рядок однаково наш: угоду ми й
+     * створили. Тож не сперечаємось за нього, а дописуємо своє поверх.
+     */
+  const { data: created, error } = await service.from('orders').upsert({
     external_id: `BX-${dealId}`,
     platform: 'site',
     bitrix_deal_id: dealId,
@@ -254,7 +262,7 @@ export async function mergeOrders(
       .map(l => `${l.title}, ${Number(l.ordered_qty)} ${l.unit ?? 'шт'} x ${Number(l.price_per_unit)} грн`)
       .join('\n'),
     share_token: randomBytes(18).toString('base64url'),
-  }).select('id').single()
+  }, { onConflict: 'bitrix_deal_id' }).select('id').single()
 
   if (error || !created) {
     return { error: `Угоду створено (#${dealId}), але замовлення — ні: ${error?.message}` }

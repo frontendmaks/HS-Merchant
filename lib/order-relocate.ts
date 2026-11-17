@@ -156,7 +156,15 @@ export async function relocateOrder(
    * шлях — огляд, бланк, скасування, накладна — починається з чистого
    * аркуша: це новий день і нова робота.
    */
-  const { data: created, error } = await service.from('orders').insert({
+    /*
+     * Беремо рядок собі, якщо синхронізація встигла створити його першою.
+     *
+     * Угода народжується тут, а рядок замовлення — наступним викликом.
+     * Між ними встигає пройти синхронізація, побачити нову угоду й
+     * завести під неї своє замовлення. Рядок однаково наш: угоду ми й
+     * створили. Тож не сперечаємось за нього, а дописуємо своє поверх.
+     */
+  const { data: created, error } = await service.from('orders').upsert({
     external_id: `BX-${dealId}`,
     platform: order.platform,
     bitrix_deal_id: dealId,
@@ -180,7 +188,7 @@ export async function relocateOrder(
     manual_number: reserved.number,
     number_source: 'sheet',
     share_token: randomBytes(18).toString('base64url'),
-  }).select('id').single()
+  }, { onConflict: 'bitrix_deal_id' }).select('id').single()
 
   if (error || !created) {
     // Угода вже є, тож номер лишається за нею — інакше склад шукав би
