@@ -80,16 +80,31 @@ export interface UploadResult {
   looked: number
   created: number
   updated: number
+  /** Скільком карткам цим проходом створили заявку на модерацію */
+  approved: number
   unchanged: number
   skipped: { name: string; reason: string }[]
   errors: { name: string; error: string }[]
 }
 
+/**
+ * `approve` — віддати картки на модерацію.
+ *
+ * Поки картка «Нова», вона не продається: Rozetka тримає її чернеткою,
+ * поки продавець не створить заявку. Створює її те саме оновлення, якщо
+ * передати `is_approve`. Тому прохід із `approve` не зважає на
+ * `content_hash` — віддати треба всі, навіть ті, що не змінились, —
+ * і бере лише ті, яких ще не віддавали: заявка робиться на кожен виклик,
+ * і повторний прохід плодив би їх на ті самі товари.
+ */
 export async function uploadRozetkaItems(
   service: Service,
-  { createLimit = 40, updateOnly = false }: { createLimit?: number; updateOnly?: boolean } = {},
+  { createLimit = 40, updateOnly = false, approve = false }:
+    { createLimit?: number; updateOnly?: boolean; approve?: boolean } = {},
 ): Promise<UploadResult> {
-  const out: UploadResult = { looked: 0, created: 0, updated: 0, unchanged: 0, skipped: [], errors: [] }
+  const out: UploadResult = {
+    looked: 0, created: 0, updated: 0, approved: 0, unchanged: 0, skipped: [], errors: [],
+  }
 
   const feed = await rozetkaFeed(service)
   if (!feed) throw new Error('Фіда Rozetka немає — нема з чого вивантажувати')
@@ -130,7 +145,7 @@ export async function uploadRozetkaItems(
 
   const { data: knownRows } = await service
     .from('rozetka_items')
-    .select('product_id, item_id, content_hash')
+    .select('product_id, item_id, content_hash, approved_at')
   const known = new Map((knownRows ?? []).map(r => [r.product_id as string, r]))
 
   const drafts: RozetkaItemDraft[] = []
@@ -144,17 +159,22 @@ export async function uploadRozetkaItems(
      гроші на вітрині. Створення — слідом, і лише стільки, скільки
      влазить у прохід */
   const toUpdate = drafts.filter(d => known.has(d.productId))
-  const batch: { draft: RozetkaItemDraft; payload: RozetkaUpdateItemPayload; hash: string }[] = []
+  const batch: {
+    draft: RozetkaItemDraft; payload: RozetkaUpdateItemPayload; hash: string; approving: boolean
+  }[] = []
   for (const draft of toUpdate) {
     const sent = known.get(draft.productId)!
     const params = itemParams(draft)
-    if (!needsUpdate(draft, params, sent)) { out.unchanged++; continue }
+    const approving = approve && !sent.approved_at
+    if (!approving && !needsUpdate(draft, params, sent)) { out.unchanged++; continue }
     batch.push({
       draft,
+      approving,
       hash: contentHash(draft, params),
       payload: {
         item_id: Number(sent.item_id),
         ...basicFields(draft),
+        ...(approving ? { is_approve: true } : {}),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...(params.length ? { params: params as any } : {}),
       },
@@ -166,6 +186,7 @@ export async function uploadRozetkaItems(
     try {
       await rozetkaUpdateItems(chunk.map(c => c.payload))
       out.updated += chunk.length
+      out.approved += chunk.filter(c => c.approving).length
       await remember(service, chunk, known)
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e)
@@ -193,7 +214,7 @@ export async function uploadRozetkaItems(
       const created = await rozetkaCreateItem({
         ...basicFields(draft),
         category_id: draft.categoryId,
-        is_approve: false,
+        is_approve: approve,
         pictures: draft.pictures.map(link => ({ link })),
         description: draft.description,
         description_ua: draft.description,
@@ -213,10 +234,12 @@ export async function uploadRozetkaItems(
         available: draft.available,
         content_hash: contentHash(draft, params),
         sent_at: new Date().toISOString(),
+        approved_at: approve ? new Date().toISOString() : null,
         error: null,
         updated_at: new Date().toISOString(),
       })
       out.created++
+      if (approve) out.approved++
     } catch (e) {
       out.errors.push({ name: draft.name, error: e instanceof Error ? e.message : String(e) })
     }
@@ -228,11 +251,12 @@ export async function uploadRozetkaItems(
 /** Запам'ятати те, що щойно віддали, — інакше наступний прохід віддасть знову */
 async function remember(
   service: Service,
-  sent: { draft: RozetkaItemDraft; hash: string }[],
-  known: Map<string, { item_id: number }>,
+  sent: { draft: RozetkaItemDraft; hash: string; approving: boolean }[],
+  known: Map<string, { item_id: number; approved_at?: string | null }>,
 ) {
   if (isTest || !sent.length) return
-  await service.from('rozetka_items').upsert(sent.map(({ draft: d, hash }) => ({
+  const now = new Date().toISOString()
+  await service.from('rozetka_items').upsert(sent.map(({ draft: d, hash, approving }) => ({
     product_id: d.productId,
     item_id: Number(known.get(d.productId)!.item_id),
     offer_id: d.offerId,
@@ -242,8 +266,9 @@ async function remember(
     stock: d.stock,
     available: d.available,
     content_hash: hash,
-    sent_at: new Date().toISOString(),
+    sent_at: now,
+    approved_at: approving ? now : known.get(d.productId)!.approved_at ?? null,
     error: null,
-    updated_at: new Date().toISOString(),
+    updated_at: now,
   })))
 }

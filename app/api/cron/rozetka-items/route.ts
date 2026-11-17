@@ -12,6 +12,10 @@ export const maxDuration = 300
  * складу. Раз на добу (`?create=1`) — ще й заведення карток, яких там
  * іще немає, порціями: створення йде поштучно, і чотириста карток за
  * один прохід не влізуть ні в час функції, ні в терпіння Rozetka.
+ *
+ * `?approve=1` віддає картки на модерацію. У розкладі його немає
+ * навмисно: заявка на модерацію — дія в один бік, і вирішує її людина,
+ * а не крон.
  */
 export async function GET(request: NextRequest) {
   if (request.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -21,12 +25,13 @@ export async function GET(request: NextRequest) {
   const url = new URL(request.url)
   const create = url.searchParams.get('create') === '1'
   const createLimit = Number(url.searchParams.get('limit') ?? 60)
+  const approve = url.searchParams.get('approve') === '1'
 
   const service = createServiceClient()
   const startedAt = Date.now()
 
   try {
-    const result = await uploadRozetkaItems(service, { updateOnly: !create, createLimit })
+    const result = await uploadRozetkaItems(service, { updateOnly: !create, createLimit, approve })
     await logCronRun(service, 'rozetka-items', startedAt, {
       ...result,
       /* Журнал читають очима, а чотириста назв у ньому читати нема як */

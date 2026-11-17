@@ -214,3 +214,46 @@ describe('наш опис головніший за сайтів', () => {
     expect('item' in built && built.item.description).toBe('з сайту')
   })
 })
+
+describe('назва без скорочень', () => {
+  /* Сім карток Rozetka відхилила з єдиним коментарем модератора —
+     «скорочення в назві». Розкрите лежить у name_own, і саме воно
+     мусить доїхати до картки; name із сайту лишається «в/г». */
+  it('name_own головніша за назву з сайту', () => {
+    const built = buildItem(line(product({
+      name: 'Ковбаса "Львівська" в/г, упак',
+      name_own: 'Ковбаса "Львівська" вищого ґатунку, в упаковці',
+    })), ctx)
+    if (!('item' in built)) throw new Error(built.error)
+    expect(built.item.name).toBe('Ковбаса "Львівська" вищого ґатунку, в упаковці, 400 г')
+  })
+
+  it('без name_own лишається назва з сайту', () => {
+    const built = buildItem(line(product({ name: 'Шашлик "Козацький"' })), ctx)
+    if (!('item' in built)) throw new Error(built.error)
+    expect(built.item.name).toBe('Шашлик "Козацький", 400 г')
+  })
+
+  it('порожня name_own не затирає назви', () => {
+    const built = buildItem(line(product({ name: 'Шашлик "Козацький"', name_own: '   ' })), ctx)
+    if (!('item' in built)) throw new Error(built.error)
+    expect(built.item.name).toBe('Шашлик "Козацький", 400 г')
+  })
+
+  it('назва в фіді важить більше за обидві', () => {
+    const built = buildItem(
+      { ...line(product({ name_own: 'Розкрита' })), custom_name: 'Назва з фіда' }, ctx,
+    )
+    if (!('item' in built)) throw new Error(built.error)
+    expect(built.item.name).toBe('Назва з фіда, 400 г')
+  })
+
+  it('нова назва змінює відбиток — інакше Rozetka її не побачить', () => {
+    const was = buildItem(line(product({ name: 'Ковбаса в/г' })), ctx)
+    const now = buildItem(line(product({ name: 'Ковбаса в/г', name_own: 'Ковбаса вищого ґатунку' })), ctx)
+    if (!('item' in was) || !('item' in now)) throw new Error('не збудувалось')
+    const hash = (i: RozetkaItemDraft) => contentHash(i, itemParams(i))
+    expect(hash(now.item)).not.toBe(hash(was.item))
+    expect(needsUpdate(now.item, itemParams(now.item), { content_hash: hash(was.item) })).toBe(true)
+  })
+})

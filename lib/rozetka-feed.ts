@@ -3,7 +3,7 @@ import { basePrice, roundOffer, categoryFor } from '@/lib/price-category'
 import {
   calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock,
 } from '@/lib/feed-xml'
-import { descriptionFor, attrsFor } from '@/lib/product-content'
+import { descriptionFor, attrsFor, nameFor } from '@/lib/product-content'
 
 // --- Rozetka ---------------------------------------------------------------
 //
@@ -85,7 +85,7 @@ export function generateRozetkaYML(feed: any, ctx: RozetkaFeedContext): {
     used.set(String(cat.id), cat)
 
     const weightLabel = minWeightLabel(attrs)
-    const baseName = fp.custom_name ?? p.name
+    const baseName = fp.custom_name ?? nameFor(p)
     const name = (weightLabel ? `${baseName}, ${weightLabel}` : baseName ?? '').slice(0, 255)
 
     const { price: baseForOffer } = basePrice(p, fp, feed.pricing)

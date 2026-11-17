@@ -10,7 +10,7 @@ import {
 import {
   generateRozetkaYML, type RozetkaFeedContext, type RzCategoryMeta,
 } from '@/lib/rozetka-feed'
-import { descriptionFor, attrsFor } from '@/lib/product-content'
+import { descriptionFor, attrsFor, nameFor } from '@/lib/product-content'
 
 export async function GET(
   request: NextRequest,
@@ -142,7 +142,7 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
       const p = fp.product
       const attrs = attrsFor(p)
       const weightLabel = minWeightLabel(attrs)
-      const baseName = fp.custom_name ?? p.name
+      const baseName = fp.custom_name ?? nameFor(p)
       const name = weightLabel ? `${baseName}, ${weightLabel}` : baseName
       const { price: baseForOffer } = basePrice(p, fp, feed.pricing)
       const mPrice = roundOffer(
@@ -270,7 +270,7 @@ function generateMaudauYML(
       const p = fp.product
       const attrs_map = { ...attrsFor(p), ...(fp.custom_params ?? {}) }
       const weightLabel = minWeightLabel(attrsFor(p))
-      const baseNameUa = fp.custom_name ?? p.name
+      const baseNameUa = fp.custom_name ?? nameFor(p)
       const nameUa = weightLabel ? `${baseNameUa}, ${weightLabel}` : baseNameUa
       const nameRu = fp.name_ru ?? nameUa
       // MauDau requires non-empty description — fall back to product name if empty

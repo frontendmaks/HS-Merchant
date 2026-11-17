@@ -16,6 +16,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Product = any
 
+/**
+ * Назва товару: наша, якщо ми її писали.
+ *
+ * Rozetka відхиляє скорочення — сім карток повернулися з єдиним
+ * коментарем модератора: «скорочення в назві». «в/г», «1/г», «с/к»,
+ * «упак» розкриті в `name_own`, і саме воно їде на маркетплейси.
+ */
+export const nameFor = (p: Product): string =>
+  (p?.name_own as string)?.trim() || (p?.name as string)?.trim() || ''
+
 export const descriptionFor = (p: Product): string =>
   (p?.description_own as string)?.trim() || (p?.description as string)?.trim() || ''
 

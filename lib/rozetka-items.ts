@@ -23,7 +23,7 @@
 import { promoFor, oldPriceFor, type Promo } from '@/lib/price-promo'
 import { basePrice, roundOffer, categoryFor, type PricingContext } from '@/lib/price-category'
 import { calcMarketplacePrice, minWeightLabel, offerStock } from '@/lib/feed-xml'
-import { descriptionFor, attrsFor } from '@/lib/product-content'
+import { descriptionFor, attrsFor, nameFor } from '@/lib/product-content'
 
 /** Rozetka відмовляє посиланням із кирилицею, пробілами й плюсом. */
 export const usablePicture = (url: string) =>
@@ -125,7 +125,7 @@ export function buildItem(
 ): { item: RozetkaItemDraft } | { error: string; name: string } {
   const p: Product = fp.product
   const attrs = attrsFor(p)
-  const label = String(fp.custom_name ?? p.name ?? p.id)
+  const label = String(fp.custom_name ?? nameFor(p) ?? p.id)
 
   const offerId = String(p.external_id ?? '').trim()
   if (!/^[A-Za-z0-9]+$/.test(offerId)) {
@@ -138,7 +138,7 @@ export function buildItem(
   }
 
   const weightLabel = minWeightLabel(attrs)
-  const baseName = String(fp.custom_name ?? p.name ?? '').trim()
+  const baseName = String(fp.custom_name ?? nameFor(p) ?? '').trim()
   const name = (weightLabel ? `${baseName}, ${weightLabel}` : baseName).slice(0, 255)
   if (!name) return { error: 'немає назви', name: label }
 
