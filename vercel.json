@@ -83,6 +83,10 @@
     {
       "path": "/api/cron/rozetka-items?create=1&limit=60",
       "schedule": "50 4 * * *"
+    },
+    {
+      "path": "/api/cron/prom-prices",
+      "schedule": "40 * * * *"
     }
   ],
   "regions": [

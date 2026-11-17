@@ -176,3 +176,38 @@ describe('від відповіді Rozetka до товару в каталоз�
     expect(buildLine(line, catalog, 0).product_id).toBeNull()
   })
 })
+
+describe('позиції замовлення з Prom', () => {
+  /* Prom кладе наш код товару в external_id позиції — той самий, під
+     яким товар поїхав у фіді. Без нього рядок не знайде товару, а без
+     товару склад отримає назву й порожню номенклатуру. */
+  const order = (product: Record<string, unknown>) => ({
+    platform: 'prom',
+    raw: { products: [{ id: 3088250181, quantity: 6, price: '112',
+      name: 'Сало "Snack", 250 г', ...product }] },
+  })
+
+  it('код товару беремо з external_id', () => {
+    const [line] = marketplaceLines(order({ external_id: '466132' }))
+    expect(line.externalId).toBe('466132')
+    expect(line.quantity).toBe(6)
+    expect(line.unitPrice).toBe(112)
+  })
+
+  it('порожній код не затуляє артикула', () => {
+    const [line] = marketplaceLines(order({ external_id: '', sku: 'ЯД017' }))
+    expect(line.externalId).toBe('ЯД017')
+  })
+
+  it('без коду лишається номер картки Prom', () => {
+    const [line] = marketplaceLines(order({ external_id: '' }))
+    expect(line.externalId).toBe('3088250181')
+  })
+
+  it('ціна рядком із пробілами читається числом', () => {
+    /* Prom віддає суми як «1 589 грн» — Number() на такому дає NaN,
+       і рядок поїхав би в угоду з нульовою ціною */
+    const [line] = marketplaceLines(order({ external_id: '1', price: '1 589 грн' }))
+    expect(line.unitPrice).toBe(1589)
+  })
+})
