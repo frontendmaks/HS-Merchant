@@ -80,7 +80,7 @@ export interface UploadResult {
   looked: number
   created: number
   updated: number
-  /** Скільком карткам цим проходом створили заявку на модерацію */
+  /** Скільки нових карток поїхало одразу із заявкою на модерацію */
   approved: number
   unchanged: number
   skipped: { name: string; reason: string }[]
@@ -88,14 +88,23 @@ export interface UploadResult {
 }
 
 /**
- * `approve` — віддати картки на модерацію.
+ * `approve` — заводити картку одразу із заявкою на модерацію.
  *
- * Поки картка «Нова», вона не продається: Rozetka тримає її чернеткою,
- * поки продавець не створить заявку. Створює її те саме оновлення, якщо
- * передати `is_approve`. Тому прохід із `approve` не зважає на
- * `content_hash` — віддати треба всі, навіть ті, що не змінились, —
- * і бере лише ті, яких ще не віддавали: заявка робиться на кожен виклик,
- * і повторний прохід плодив би їх на ті самі товари.
+ * Поки картка «Нова» (upload_status 0), вона не продається: Rozetka
+ * тримає її чернеткою, поки продавець не відправить її до підготовлених.
+ *
+ * Зробити це вже заведеній картці через API не можна. `is_approve` у
+ * `mass-update-basic-data` документація обіцяє, але на «Новій» картці
+ * воно не робить нічого: Rozetka відповідає items_updated і лишає
+ * статус 0. Перевірено на всіх трьох формах виклику — прапор у товарі,
+ * прапор на верхньому рівні, прапор числом. Ендпоінта зміни статусу
+ * немає, в XLS-шаблоні імпорту такої колонки теж немає; чотириста
+ * двадцять одну картку довелось відправляти кнопкою в кабінеті.
+ *
+ * А от при створенні `is_approve` описаний інакше — «відправити до
+ * підготовлених ТА створити заявку», тобто обидва кроки. Тому прапор
+ * лишається, але діє лише на створення: нові картки поїдуть на
+ * модерацію самі, без кабінету.
  */
 export async function uploadRozetkaItems(
   service: Service,
@@ -159,22 +168,17 @@ export async function uploadRozetkaItems(
      гроші на вітрині. Створення — слідом, і лише стільки, скільки
      влазить у прохід */
   const toUpdate = drafts.filter(d => known.has(d.productId))
-  const batch: {
-    draft: RozetkaItemDraft; payload: RozetkaUpdateItemPayload; hash: string; approving: boolean
-  }[] = []
+  const batch: { draft: RozetkaItemDraft; payload: RozetkaUpdateItemPayload; hash: string }[] = []
   for (const draft of toUpdate) {
     const sent = known.get(draft.productId)!
     const params = itemParams(draft)
-    const approving = approve && !sent.approved_at
-    if (!approving && !needsUpdate(draft, params, sent)) { out.unchanged++; continue }
+    if (!needsUpdate(draft, params, sent)) { out.unchanged++; continue }
     batch.push({
       draft,
-      approving,
       hash: contentHash(draft, params),
       payload: {
         item_id: Number(sent.item_id),
         ...basicFields(draft),
-        ...(approving ? { is_approve: true } : {}),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...(params.length ? { params: params as any } : {}),
       },
@@ -186,7 +190,6 @@ export async function uploadRozetkaItems(
     try {
       await rozetkaUpdateItems(chunk.map(c => c.payload))
       out.updated += chunk.length
-      out.approved += chunk.filter(c => c.approving).length
       await remember(service, chunk, known)
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e)
@@ -251,12 +254,12 @@ export async function uploadRozetkaItems(
 /** Запам'ятати те, що щойно віддали, — інакше наступний прохід віддасть знову */
 async function remember(
   service: Service,
-  sent: { draft: RozetkaItemDraft; hash: string; approving: boolean }[],
+  sent: { draft: RozetkaItemDraft; hash: string }[],
   known: Map<string, { item_id: number; approved_at?: string | null }>,
 ) {
   if (isTest || !sent.length) return
   const now = new Date().toISOString()
-  await service.from('rozetka_items').upsert(sent.map(({ draft: d, hash, approving }) => ({
+  await service.from('rozetka_items').upsert(sent.map(({ draft: d, hash }) => ({
     product_id: d.productId,
     item_id: Number(known.get(d.productId)!.item_id),
     offer_id: d.offerId,
@@ -267,7 +270,7 @@ async function remember(
     available: d.available,
     content_hash: hash,
     sent_at: now,
-    approved_at: approving ? now : known.get(d.productId)!.approved_at ?? null,
+    approved_at: known.get(d.productId)!.approved_at ?? null,
     error: null,
     updated_at: now,
   })))

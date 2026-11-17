@@ -260,6 +260,40 @@ export async function rozetkaAttributeValues(categoryId: number, attributeId: nu
   return out
 }
 
+/** Внутрішні статуси картки в Rozetka — ті, що нас обходять */
+export const RZ_STATUS = {
+  new: 0,          // заведена, але не відправлена: не продається
+  prepared: 8,     // відправлена, чекає на модератора
+  onModeration: 16,
+  rejected: 9,
+} as const
+
+export interface RozetkaGood {
+  item_id: number
+  rz_item_id: number | null
+  price_offer_id: string | null
+  name_ua: string
+  upload_status: number
+  upload_status_title: string | null
+  /** Чому відхилили — те, що написав модератор, своїми словами */
+  comment: string | null
+}
+
+/**
+ * Картки з певним статусом.
+ *
+ * `/goods/all` фільтрує за upload_status, і це єдиний спосіб побачити
+ * відхилені: ні `/goods/errors`, ні `/goods/not-valid` їх не показують —
+ * сім наших відхилених лежали там, поки обидва ці списки були порожні.
+ */
+export async function rozetkaGoods(uploadStatus: number, limit = 100): Promise<RozetkaGood[]> {
+  const c = await rz<never>('GET',
+    `/goods/all?upload_status=${uploadStatus}&page=1&pageSize=${limit}`) as unknown as {
+      items?: RozetkaGood[]
+    }
+  return c.items ?? []
+}
+
 export interface RozetkaProducer { id: number; title: string; status: string }
 
 /** Виробники за точною назвою. Довідник величезний, тож лише пошук. */
