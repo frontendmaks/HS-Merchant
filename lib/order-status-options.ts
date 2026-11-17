@@ -12,6 +12,10 @@ export const MAUDAU_STATUSES = [
   'Нове', 'Прийнято', 'Узгоджено', 'На доставці', 'Прибуло', 'Доставлено', 'Скасовано',
 ]
 
+export const PROM_STATUSES = [
+  'Нове', 'Прийнято', 'Доставлено', 'Скасовано',
+]
+
 export const ROZETKA_STATUSES = [
   'Нове', 'Опрацьовується', 'Комплектується', 'Передано в доставку',
   'Доставляється', 'Чекає в пункті', 'Доставлено', 'Скасовано',
@@ -27,5 +31,6 @@ export const SITE_STATUSES = STAGE_NAMES
 export function statusOptions(platform: string | null): string[] {
   if (platform === 'rozetka') return ROZETKA_STATUSES
   if (platform === 'maudau') return MAUDAU_STATUSES
+  if (platform === 'prom') return PROM_STATUSES
   return SITE_STATUSES
 }

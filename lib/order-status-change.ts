@@ -182,6 +182,23 @@ async function changeLocked({ id, status, actor }: StatusChange): Promise<NextRe
       } else if (dealId && !stage) {
         throw new Error(`Статус «${status}» не має стадії в Бітріксі`)
       }
+    } else if (platform === 'prom') {
+      /*
+       * Prom приймає статус одним викликом на список замовлень, і
+       * словник у нього свій, короткий: pending / received / delivered
+       * / canceled. Скасування без причини він не бере.
+       */
+      const { promSetOrderStatus } = await import('@/lib/prom-api')
+      const { PROM_STATUS_BACK } = await import('@/lib/sync-prom')
+      const target = PROM_STATUS_BACK[status]
+      if (!target) throw new Error(`Статус «${status}» не передається на Prom`)
+      await promSetOrderStatus(
+        [Number(external_id.replace(/^PR-/, ''))],
+        target,
+        status === 'Скасовано'
+          ? ((current.cancel_reason as string | null)?.trim() || 'other')
+          : undefined,
+      )
     } else if (platform === 'rozetka') {
       const numericId = external_id.replace(/^RZ-/, '')
 

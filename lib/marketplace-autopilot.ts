@@ -29,6 +29,7 @@ type Service = ReturnType<typeof createServiceClient>
 const ACCEPTED: Record<string, string> = {
   maudau: 'Прийнято',
   rozetka: 'Опрацьовується',
+  prom: 'Прийнято',
 }
 
 export interface MarketplaceResult {
@@ -63,7 +64,7 @@ async function processMarketplaceOrdersUnlocked(
     const { data } = await service
       .from('orders')
       .select('id, external_id, platform, status, bitrix_deal_id')
-      .in('platform', ['maudau', 'rozetka'])
+      .in('platform', ['maudau', 'rozetka', 'prom'])
       .is('bitrix_deal_id', null)
       /*
        * Два тижні, а не три дні.
@@ -217,7 +218,7 @@ async function startPicking(service: Service, result: MarketplaceResult): Promis
   const { data } = await service
     .from('orders')
     .select('id, external_id, platform, status, bitrix_deal_id, share_token, chat_sent_at, market_number')
-    .in('platform', ['maudau', 'rozetka'])
+    .in('platform', ['maudau', 'rozetka', 'prom'])
     .not('bitrix_deal_id', 'is', null)
     .neq('status', 'Скасовано')
     /*

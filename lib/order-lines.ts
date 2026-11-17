@@ -52,6 +52,21 @@ export function marketplaceLines(order: any): MarketplaceLine[] {
         })
       }
     }
+  } else if (order.platform === 'prom') {
+    for (const p of order.raw?.products ?? []) {
+      /* Prom віддає наш же код товару в external_id позиції — той самий,
+         що ми кладемо у фід. Його й беремо; id позиції — запасний */
+      const code = [p.external_id, p.sku, p.id]
+        .map(v => (v == null ? '' : String(v).trim())).find(v => v !== '')
+
+      out.push({
+        itemId: p.id != null ? String(p.id) : null,
+        externalId: code || null,
+        title: p.name || 'Без назви',
+        unitPrice: Number(String(p.price ?? 0).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0,
+        quantity: Number(p.quantity ?? 1),
+      })
+    }
   } else if (order.platform === 'rozetka') {
     for (const p of order.raw?.purchases ?? []) {
       /*

@@ -6,7 +6,7 @@
  * з сайту — період доставки, склад і бланк для комірника. Тому вкладка
  * «Замовлення» показує все разом, а працюють у двох окремих.
  */
-export const MARKETPLACE_PLATFORMS = ['maudau', 'rozetka'] as const
+export const MARKETPLACE_PLATFORMS = ['maudau', 'rozetka', 'prom'] as const
 
 /** Сайт і телефон — один потік: обидва веде оператор сам, без майданчика. */
 export const SITE_PLATFORMS = ['manual', 'site'] as const

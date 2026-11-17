@@ -10,6 +10,7 @@ import {
 import {
   generateRozetkaYML, type RozetkaFeedContext, type RzCategoryMeta,
 } from '@/lib/rozetka-feed'
+import { generatePromYML } from '@/lib/prom-feed'
 import { descriptionFor, attrsFor, nameFor } from '@/lib/product-content'
 
 export async function GET(
@@ -103,11 +104,15 @@ export async function GET(
   feed.promos = await loadPromos(supabase, feed.id)
   feed.pricing = await loadPricing(supabase, feed)
 
+  const isProm = feed.marketplace?.slug === 'prom'
+
   const { xml, offersCount, errorsCount, errors } = isMaudau
     ? generateMaudauYML(feed, slugToPortalId, catAttrsMap)
     : isRozetka
       ? generateRozetkaYML(feed, rzCtx)
-      : generateYML(feed)
+      : isProm
+        ? generatePromYML(feed)
+        : generateYML(feed)
 
   // Log access (fire-and-forget)
   const now = new Date().toISOString()

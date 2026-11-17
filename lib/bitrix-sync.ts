@@ -26,7 +26,7 @@ import { splitPersona } from '@/lib/phone'
 type Service = ReturnType<typeof createServiceClient>
 
 /** Чиї замовлення веде майданчик, а не ми */
-const MARKETPLACE_PLATFORMS = new Set(['maudau', 'rozetka'])
+const MARKETPLACE_PLATFORMS = new Set(['maudau', 'rozetka', 'prom'])
 
 const WAREHOUSE_BY_ID = new Map(
   Object.entries(WAREHOUSE_ID).map(([name, id]) => [String(id), name]),

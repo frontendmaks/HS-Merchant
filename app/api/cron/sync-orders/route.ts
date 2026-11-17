@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { syncMaudau } from '@/lib/sync-maudau'
 import { syncRozetka } from '@/lib/sync-rozetka'
+import { syncProm } from '@/lib/sync-prom'
 import { logCronRun } from '@/lib/cron-log'
 
 // String(err) on an Error prefixes "Error: " — the platform name is already
@@ -23,12 +24,17 @@ export async function GET(req: NextRequest) {
 
   let maudauSynced = 0
   let rozetkasynced = 0
+  let promSynced = 0
   let errorMsg: string | null = null
 
   try {
-    const [maudau, rozetka] = await Promise.allSettled([
+    /* allSettled, а не all: падіння одного майданчика не має залишати
+       два інші без замовлень. Саме так МауДау з простроченим підписом
+       тягнув би за собою Rozetka й Prom */
+    const [maudau, rozetka, prom] = await Promise.allSettled([
       syncMaudau(mode),
       syncRozetka(mode),
+      syncProm(mode),
     ])
 
     if (maudau.status === 'fulfilled') {
@@ -41,6 +47,12 @@ export async function GET(req: NextRequest) {
       rozetkasynced = rozetka.value.synced ?? 0
     } else {
       errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'Rozetka: ' + reasonText(rozetka.reason)
+    }
+
+    if (prom.status === 'fulfilled') {
+      promSynced = prom.value.synced ?? 0
+    } else {
+      errorMsg = (errorMsg ? errorMsg + '; ' : '') + 'Prom: ' + reasonText(prom.reason)
     }
   } catch (err) {
     errorMsg = String(err)
@@ -61,13 +73,15 @@ export async function GET(req: NextRequest) {
   /* Швидкий прохід має свій розклад і своє ім'я: інакше він ховав би
      в оглядi стан повного, і навпаки */
   await logCronRun(supabase, mode === 'quick' ? 'mp-sync-quick' : 'mp-sync', start,
-    { mode, maudau: maudauSynced, rozetka: rozetkasynced }, errorMsg ?? undefined)
+    { mode, maudau: maudauSynced, rozetka: rozetkasynced, prom: promSynced },
+    errorMsg ?? undefined)
 
   return NextResponse.json({
     success: !errorMsg,
     mode,
     maudau_synced: maudauSynced,
     rozetka_synced: rozetkasynced,
+    prom_synced: promSynced,
     duration_ms: duration,
     error: errorMsg,
   })
