@@ -32,6 +32,8 @@ export interface Thread {
   last_message: string | null
   unread: number
   closed_at: string | null
+  /** Тема розмови, як її назвав майданчик: «Запитання про товар №…» */
+  subject?: string | null
 }
 
 export interface Message {
@@ -121,6 +123,24 @@ export async function recordOutgoing(
 
 export async function markRead(service: Service, threadId: string): Promise<void> {
   await service.from('chat_threads').update({ unread: 0 }).eq('id', threadId)
+
+  /*
+   * Prom теж має знати, що ми прочитали: інакше в кабінеті магазину
+   * розмова висить непрочитаною, і на неї відповідають удруге. Не вийшло —
+   * не біда: наш лічильник уже обнулено, це лише чемність до майданчика.
+   */
+  const { data: thread } = await service
+    .from('chat_threads').select('channel, external_id').eq('id', threadId).maybeSingle()
+  if (thread?.channel !== 'prom') return
+  const { data: last } = await service
+    .from('chat_messages').select('external_id')
+    .eq('thread_id', threadId).eq('direction', 'in').not('external_id', 'is', null)
+    .order('sent_at', { ascending: false }).limit(1).maybeSingle()
+  if (!last?.external_id) return
+  try {
+    const { promChatMarkRead } = await import('@/lib/prom-api')
+    await promChatMarkRead(thread.external_id as string, Number(last.external_id))
+  } catch { /* див. вище */ }
 }
 
 /**
@@ -137,7 +157,7 @@ export async function reply(
   author: { id?: string | null; name?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
   const { data: thread } = await service
-    .from('chat_threads').select('channel, external_id').eq('id', threadId).maybeSingle()
+    .from('chat_threads').select('channel, external_id, meta').eq('id', threadId).maybeSingle()
 
   if (!thread) return { ok: false, error: 'Розмову не знайдено' }
 
@@ -147,6 +167,23 @@ export async function reply(
     const { sendMessage } = await import('@/lib/telegram')
     const sent = await sendMessage(service, thread.external_id as string, text)
     if (!sent.ok) error = sent.detail
+  } else if (thread.channel === 'prom') {
+    try {
+      const { promChatSend } = await import('@/lib/prom-api')
+      await promChatSend(thread.external_id as string, text)
+    } catch (e) { error = e instanceof Error ? e.message : String(e) }
+  } else if (thread.channel === 'rozetka') {
+    // Rozetka відповідає в розмову конкретному покупцеві: його id ми
+    // запам'ятали під час синхронізації
+    const receiver = Number((thread.meta as { receiver_id?: number } | null)?.receiver_id)
+    if (!receiver) {
+      error = 'Не знаю, кому відповідати в Rozetka — розмова ще не синхронізована'
+    } else {
+      try {
+        const { rozetkaChatSend } = await import('@/lib/rozetka-api')
+        await rozetkaChatSend(Number(thread.external_id), receiver, text)
+      } catch (e) { error = e instanceof Error ? e.message : String(e) }
+    }
   } else {
     error = `Відповідь у ${CHANNEL_LABEL[thread.channel as Channel] ?? thread.channel} `
       + 'поки недоступна — канал не під’єднано'

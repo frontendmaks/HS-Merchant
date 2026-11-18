@@ -331,3 +331,40 @@ export async function orderChecks(service: Service): Promise<Check[]> {
 
   return checks.filter(c => c.count > 0)
 }
+
+/**
+ * Штучний товар, якого сайт дозволяє купити частинку.
+ *
+ * Бекон «190 г» стояв на сайті штукою, але з мінімумом і кроком 0,19 —
+ * покупець брав «0,19 шт» за 30,59 ₴ замість пачки за 161 ₴, і так само
+ * це доїжджало до бланка й угоди. Ціна в таких товарів — за пачку, отже
+ * мінімум і крок мають бути цілими. Поки цього не видно, дізнаються про
+ * таке від комірника, коли він уже зважив.
+ */
+export async function fractionalPieceCheck(service: Service): Promise<Check | null> {
+  const { data } = await service
+    .from('products')
+    .select('name, external_id, attributes')
+    .eq('status', 'active')
+    .limit(5000)
+
+  const frac = (v: unknown) => {
+    const n = parseFloat(String(v ?? '').replace(',', '.'))
+    return Number.isFinite(n) && n > 0 && n % 1 !== 0
+  }
+  const bad = (data ?? []).filter(p => {
+    const a = (p.attributes ?? {}) as Record<string, string>
+    return (a['Одиниця'] ?? '').toLowerCase() === 'шт' && (frac(a['Мін']) || frac(a['Крок']))
+  })
+  if (!bad.length) return null
+
+  return {
+    key: 'fractional-piece',
+    label: 'Штучні товари з дробовим мінімумом',
+    why: 'сайт продає частину пачки: у замовленні «0,19 шт» і сума в кілька разів менша',
+    count: bad.length,
+    sample: bad.slice(0, 6).map(p => p.name as string),
+    severity: 'bad',
+    href: '/products',
+  }
+}

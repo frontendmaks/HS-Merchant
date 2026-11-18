@@ -10,8 +10,14 @@ const counts = unstable_cache(async (userId: string) => {
     p_user_id: userId, p_new: NEW_STATUSES, p_processing: PROCESSING_STATUSES,
   })
   if (error) throw error
-  return data
-}, ['nav-counts-v2'], { revalidate: 20 })
+
+  // Непрочитане в чатах — спільне для всіх, хто їх бачить, а не особисте
+  const { data: threads } = await createServiceClient()
+    .from('chat_threads').select('unread').gt('unread', 0)
+  const unread = (threads ?? []).reduce((n, t) => n + Number(t.unread ?? 0), 0)
+
+  return { ...(data as object), chats: { unread } }
+}, ['nav-counts-v3'], { revalidate: 20 })
 
 export async function GET() {
   const userId = await currentUserId()

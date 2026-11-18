@@ -304,3 +304,54 @@ export async function rozetkaSearchProducers(title: string): Promise<RozetkaProd
   }
   return c.producers ?? []
 }
+
+/* ── Повідомлення покупців ─────────────────────────────────────────────
+ * Rozetka зве розмови «chats» під шляхом /messages. Відправник у
+ * повідомленні: 2 — продавець (ми), 3 — покупець. Час — київський, без
+ * позначки зони. */
+
+export interface RozetkaChat {
+  id: number
+  created: string
+  updated: string
+  subject: string | null
+  user: { id: number; contact_fio: string | null } | null
+  user_id: number
+  order_id: number | null
+  item_id: number | null
+  type: number
+  unread_messages_count: number
+  messages?: RozetkaChatMessage[]
+}
+
+export interface RozetkaChatMessage {
+  id: number
+  chat_id: number
+  body: string | null
+  created: string
+  receiver_id: number
+  /** 2 — продавець, 3 — покупець */
+  sender: number
+  read: string | null
+}
+
+export const ROZETKA_SENDER_SELLER = 2
+
+export async function rozetkaChats(): Promise<RozetkaChat[]> {
+  const out: RozetkaChat[] = []
+  for (let page = 1; page <= 20; page++) {
+    const c = await rz<{ chats: RozetkaChat[]; _meta?: { pageCount?: number } }>(
+      'GET', `/messages/search?page=${page}`)
+    out.push(...(c.chats ?? []))
+    if (!c._meta?.pageCount || page >= c._meta.pageCount) break
+  }
+  return out
+}
+
+export async function rozetkaChat(id: number): Promise<RozetkaChat> {
+  return rz<RozetkaChat>('GET', `/messages/${id}?expand=messages`)
+}
+
+export async function rozetkaChatSend(chatId: number, receiverId: number, body: string): Promise<void> {
+  await rz('POST', '/messages/create', { chat_id: chatId, receiver_id: receiverId, body })
+}

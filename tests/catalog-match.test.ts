@@ -277,3 +277,11 @@ describe('Prom зі старих карток', () => {
     expect(catalog.find('42', 'Сало канапкове "Українське"')?.id).toBe('by-code')
   })
 })
+
+describe('час повідомлень Rozetka', () => {
+  it('київський час без зони стає UTC з урахуванням літнього часу', async () => {
+    const { kyivToIso } = await import('@/lib/chat-marketplaces')
+    expect(kyivToIso('2026-09-04 16:29:16')).toBe('2026-09-04T13:29:16.000Z') // літо, UTC+3
+    expect(kyivToIso('2026-01-19 09:33:10')).toBe('2026-01-19T07:33:10.000Z') // зима, UTC+2
+  })
+})

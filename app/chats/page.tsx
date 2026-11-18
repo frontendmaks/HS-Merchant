@@ -1,13 +1,13 @@
 import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
-import { CHANNEL_LABEL, type Thread, type Message, type Channel } from '@/lib/chats'
+import { CHANNEL_LABEL, markRead, type Thread, type Message, type Channel } from '@/lib/chats'
 import ChatsClient from './ChatsClient'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * Листування з покупцями.
+ * Чати з покупцями.
  *
  * Канали різні, робота однакова — тож і список один, з позначкою, звідки
  * прийшло. Канал, до якого немає доступу, у списку не вдає порожнечу:
@@ -26,7 +26,7 @@ export default async function ChatsPage({
 
   const { data: threads } = await service
     .from('chat_threads')
-    .select('id, channel, external_id, customer_name, customer_phone, last_message_at, last_message, unread, closed_at')
+    .select('id, channel, external_id, customer_name, customer_phone, last_message_at, last_message, unread, closed_at, subject')
     .order('last_message_at', { ascending: false, nullsFirst: false })
     .limit(100)
 
@@ -42,6 +42,13 @@ export default async function ChatsPage({
       .order('sent_at')
       .limit(200)
     messages = (data ?? []) as unknown as Message[]
+
+    // Відкрили — отже, прочитали: лічильник у меню має згаснути
+    const open = list.find(t => t.id === picked)
+    if (open && open.unread > 0) {
+      await markRead(service, picked)
+      open.unread = 0
+    }
   }
 
   /* Канали, яких ще немає: мовчазна порожнеча читається як поломка */
@@ -51,16 +58,14 @@ export default async function ChatsPage({
   const on = new Set((integrations ?? []).filter(i => i.enabled).map(i => i.key as string))
 
   if (!on.has('telegram')) missing.push({ channel: 'telegram', why: 'бота не під’єднано' })
-  missing.push({ channel: 'rozetka', why: 'API магазину не має доступу до листування' })
-  missing.push({ channel: 'prom', why: 'магазин не під’єднано' })
   missing.push({ channel: 'viber', why: 'потрібен бізнес-акаунт Viber' })
 
   return (
     <div className="bg-zinc-950 text-white space-y-4">
       <div>
-        <h1 className="text-xl sm:text-2xl font-bold">Листування</h1>
+        <h1 className="text-xl sm:text-2xl font-bold">Чати</h1>
         <p className="text-zinc-400 text-sm mt-0.5">
-          Повідомлення покупців з усіх каналів — прочитати й відповісти
+          Повідомлення покупців з Rozetka, Prom і Telegram — прочитати й відповісти
         </p>
       </div>
 

@@ -67,7 +67,7 @@ export default function ChatsClient({ threads, picked, messages }: {
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-5 py-10 text-center">
         <p className="text-zinc-400 text-sm">Повідомлень поки немає</p>
         <p className="text-zinc-600 text-xs mt-1">
-          Щойно покупець напише в Telegram, розмова з&apos;явиться тут
+          Щойно покупець напише в Rozetka, Prom чи Telegram, розмова з&apos;явиться тут
         </p>
       </div>
     )
@@ -101,6 +101,9 @@ export default function ChatsClient({ threads, picked, messages }: {
                 </span>
               )}
             </div>
+            {t.subject && (
+              <div className="text-zinc-400 text-[11px] mt-1 truncate">{t.subject}</div>
+            )}
             <div className="text-zinc-500 text-xs mt-1 truncate">{t.last_message}</div>
             <div className="text-zinc-600 text-[11px] mt-0.5">{when(t.last_message_at)}</div>
           </button>
@@ -121,6 +124,9 @@ export default function ChatsClient({ threads, picked, messages }: {
               {CHANNEL_LABEL[open.channel as Channel] ?? open.channel}
             </span>
           </div>
+        )}
+        {open?.subject && (
+          <div className="px-4 py-2 border-b border-zinc-800 text-zinc-400 text-xs">{open.subject}</div>
         )}
 
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">

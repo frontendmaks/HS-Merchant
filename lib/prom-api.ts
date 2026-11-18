@@ -144,3 +144,65 @@ export async function promUpdateProducts(items: PromPriceUpdate[]): Promise<numb
   const r = await prom<{ processed_ids?: number[] }>('POST', '/products/edit', items)
   return r.processed_ids?.length ?? items.length
 }
+
+/* ── Чат ───────────────────────────────────────────────────────────────
+ * Розмови покупців із магазином. Кімнату Prom знає за `ident`
+ * («<покупець>_<магазин>_buyer»): ним і відповідають, і фільтрують історію.
+ * Час у відповідях — UTC без позначки зони, як і в замовленнях. */
+
+export interface PromChatRoom {
+  id: string
+  ident: string
+  status: string
+  buyer_client_id: number
+  last_message_id: number
+  date_sent: string
+}
+
+export interface PromChatMessage {
+  id: number
+  room_ident: string
+  body: string | null
+  date_sent: string
+  /** message — текст; context — картка товару чи замовлення, з якої почали */
+  type: string
+  /** new — ще не прочитане */
+  status: string
+  context_item_id: number | null
+  context_item_type: string | null
+  user_name: string | null
+  user_phone: string | null
+  /** true — це написали ми */
+  is_sender: boolean
+}
+
+interface PromChatAnswer<T> { status?: string; message?: unknown; data?: T }
+
+/** Prom про помилку чату каже статусом у тілі, а не кодом відповіді */
+function chatData<T>(answer: PromChatAnswer<T>, what: string): T {
+  if (answer.status === 'error' || !answer.data) {
+    throw new Error(`Prom ${what}: ${JSON.stringify(answer.message ?? answer).slice(0, 300)}`)
+  }
+  return answer.data
+}
+
+export async function promChatRooms(): Promise<PromChatRoom[]> {
+  const a = await prom<PromChatAnswer<{ rooms: PromChatRoom[] }>>('GET', '/chat/rooms?limit=100')
+  return chatData(a, 'розмови').rooms ?? []
+}
+
+export async function promChatMessages(roomIdent: string): Promise<PromChatMessage[]> {
+  const a = await prom<PromChatAnswer<{ messages: PromChatMessage[] }>>(
+    'GET', `/chat/messages_history?room_ident=${encodeURIComponent(roomIdent)}&limit=100`)
+  return chatData(a, 'повідомлення').messages ?? []
+}
+
+export async function promChatSend(roomIdent: string, body: string): Promise<void> {
+  const a = await prom<PromChatAnswer<unknown>>('POST', '/chat/send_message', { room_ident: roomIdent, body })
+  // Тестовий режим повертає порожню відповідь: надсилання притримане, це не помилка
+  if (a && Object.keys(a).length) chatData(a, 'відповідь')
+}
+
+export async function promChatMarkRead(roomIdent: string, messageId: number): Promise<void> {
+  await prom('POST', '/chat/mark_message_read', { room_ident: roomIdent, message_id: messageId })
+}

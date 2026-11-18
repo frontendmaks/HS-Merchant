@@ -35,10 +35,12 @@ const nav = [
       { href: '/orders/marketplaces', label: 'Маркетплейси', roles: PAGE_ROLES.orders },
       { href: '/orders/site', label: 'Сайт', roles: PAGE_ROLES.orders },
       { href: '/orders/zones', label: 'Зони доставки', roles: PAGE_ROLES.orders },
+      // Розмови з покупцями майданчиків — про ті самі замовлення, тож тут.
+      // Останньою: це не список замовлень, а те, що про них питають
+      { href: '/chats', label: 'Чати', roles: PAGE_ROLES.chats },
     ],
   },
   { href: '/customers', label: 'Клієнти',       icon: '☻', roles: PAGE_ROLES.customers },
-  { href: '/chats',    label: 'Листування',     icon: '✉', roles: PAGE_ROLES.chats },
   { href: '/news',     label: 'Новини',         icon: '◫', roles: PAGE_ROLES.news },
   {
     href: '/requests', label: 'Запити', icon: '✉', roles: PAGE_ROLES.requests,
@@ -74,6 +76,8 @@ interface Profile {
 interface NavCounts {
   requests: { new: number; inProgress: number }
   orders: { new: number; processing: number }
+  /** Непрочитані повідомлення покупців у всіх чатах */
+  chats?: { unread: number }
 }
 
 const COUNTS_POLL_MS = 30_000
@@ -411,7 +415,10 @@ export default function Sidebar() {
                         : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
                     }`}
                   >
-                    {sub.label}
+                    <span className="flex-1 min-w-0 truncate">{sub.label}</span>
+                    {sub.href === '/chats' && (
+                      <NavBadge count={counts?.chats?.unread ?? 0} tone="red" title="Непрочитані повідомлення" />
+                    )}
                   </Link>
                 ))}
               </div>
