@@ -34,6 +34,8 @@ export interface Thread {
   closed_at: string | null
   /** Тема розмови, як її назвав майданчик: «Запитання про товар №…» */
   subject?: string | null
+  /** Наше замовлення, з якого почалась розмова */
+  order_id?: string | null
 }
 
 export interface Message {

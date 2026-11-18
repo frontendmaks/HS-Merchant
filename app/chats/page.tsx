@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
 import { CHANNEL_LABEL, markRead, type Thread, type Message, type Channel } from '@/lib/chats'
-import ChatsClient from './ChatsClient'
+import ChatsClient, { type OrderLink } from './ChatsClient'
+import { marketNumberLabel } from '@/lib/order-source'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +27,7 @@ export default async function ChatsPage({
 
   const { data: threads } = await service
     .from('chat_threads')
-    .select('id, channel, external_id, customer_name, customer_phone, last_message_at, last_message, unread, closed_at, subject')
+    .select('id, channel, external_id, customer_name, customer_phone, last_message_at, last_message, unread, closed_at, subject, order_id')
     .order('last_message_at', { ascending: false, nullsFirst: false })
     .limit(100)
 
@@ -34,6 +35,8 @@ export default async function ChatsPage({
   const picked = id && list.some(t => t.id === id) ? id : list[0]?.id ?? null
 
   let messages: Message[] = []
+  const orderLinks: Record<string, OrderLink> = {}
+  let threadOrder: OrderLink | null = null
   if (picked) {
     const { data } = await service
       .from('chat_messages')
@@ -42,6 +45,37 @@ export default async function ChatsPage({
       .order('sent_at')
       .limit(200)
     messages = (data ?? []) as unknown as Message[]
+
+    /*
+     * Замовлення, про які розмова: щоб відповідати, дивлячись у нього.
+     *
+     * Prom кладе в розмову картку замовлення — у нас вона стає рядком
+     * «Питання щодо замовлення №…». Номер у ній майданчиковий, а
+     * переглядати замовлення треба в нас, тож зводимо його з нашим.
+     */
+    const open0 = list.find(t => t.id === picked)
+    const promNumbers = open0?.channel === 'prom'
+      ? [...new Set(messages.flatMap(m => [...m.body.matchAll(/замовлення №(\d+)/g)].map(x => x[1])))]
+      : []
+    const external = promNumbers.map(n => `PR-${n}`)
+    const { data: orders } = (external.length || open0?.order_id)
+      ? await service.from('orders')
+          .select('id, external_id, platform, market_number, order_date')
+          .or([
+            external.length ? `external_id.in.(${external.join(',')})` : '',
+            open0?.order_id ? `id.eq.${open0.order_id}` : '',
+          ].filter(Boolean).join(','))
+      : { data: [] }
+    for (const o of orders ?? []) {
+      const link: OrderLink = {
+        label: marketNumberLabel(o.platform as string, o.market_number as number | null)
+          ?? (o.external_id as string),
+        href: `/orders/marketplaces?month=${String(o.order_date).slice(0, 7)}`
+          + `&search=${encodeURIComponent(o.external_id as string)}`,
+      }
+      orderLinks[(o.external_id as string).replace(/^PR-/, '')] = link
+      if (o.id === open0?.order_id) threadOrder = link
+    }
 
     // Відкрили — отже, прочитали: лічильник у меню має згаснути
     const open = list.find(t => t.id === picked)
@@ -76,7 +110,8 @@ export default async function ChatsPage({
         </div>
       )}
 
-      <ChatsClient threads={list} picked={picked} messages={messages} />
+      <ChatsClient threads={list} picked={picked} messages={messages}
+        orderLinks={orderLinks} threadOrder={threadOrder} />
     </div>
   )
 }

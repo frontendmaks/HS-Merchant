@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { CHANNEL_LABEL, type Thread, type Message, type Channel } from '@/lib/chats'
 
 const CHANNEL_TONE: Record<string, string> = {
@@ -16,10 +17,18 @@ const when = (iso: string | null) => iso
     })
   : ''
 
-export default function ChatsClient({ threads, picked, messages }: {
+/** Куди вести з розмови, щоб побачити замовлення, про яке питають */
+export interface OrderLink { label: string; href: string }
+
+/** «↪ Питання щодо замовлення №440020110» → номер замовлення на майданчику */
+const orderRef = (body: string) => body.match(/^↪ Питання щодо замовлення №(\d+)/)?.[1] ?? null
+
+export default function ChatsClient({ threads, picked, messages, orderLinks = {}, threadOrder = null }: {
   threads: Thread[]
   picked: string | null
   messages: Message[]
+  orderLinks?: Record<string, OrderLink>
+  threadOrder?: OrderLink | null
 }) {
   const router = useRouter()
   const [, start] = useTransition()
@@ -120,7 +129,13 @@ export default function ChatsClient({ threads, picked, messages }: {
             {open.customer_phone && (
               <span className="text-zinc-500 text-xs">{open.customer_phone}</span>
             )}
-            <span className="ml-auto text-zinc-600 text-xs">
+            {threadOrder && (
+              <Link href={threadOrder.href}
+                className="ml-auto text-xs px-2 py-1 rounded bg-zinc-800 text-red-400 hover:text-red-300">
+                Замовлення {threadOrder.label} →
+              </Link>
+            )}
+            <span className={`${threadOrder ? '' : 'ml-auto '}text-zinc-600 text-xs`}>
               {CHANNEL_LABEL[open.channel as Channel] ?? open.channel}
             </span>
           </div>
@@ -137,7 +152,19 @@ export default function ChatsClient({ threads, picked, messages }: {
                   ? 'bg-red-950/60 text-zinc-100'
                   : 'bg-zinc-800 text-zinc-200'
               }`}>
-                <div className="whitespace-pre-wrap break-words">{m.body}</div>
+                {(() => {
+                  // Картка замовлення веде на саме замовлення: відповідати
+                  // треба, бачачи склад, статус і ТТН, а не лише номер
+                  const ref = orderRef(m.body)
+                  const link = ref ? orderLinks[ref] : undefined
+                  return link ? (
+                    <Link href={link.href} className="text-red-400 hover:text-red-300 underline underline-offset-2">
+                      {m.body} · {link.label} →
+                    </Link>
+                  ) : (
+                    <div className="whitespace-pre-wrap break-words">{m.body}</div>
+                  )
+                })()}
                 <div className="text-[11px] text-zinc-500 mt-1">
                   {when(m.sent_at)}
                   {m.author_name ? ` · ${m.author_name}` : ''}
