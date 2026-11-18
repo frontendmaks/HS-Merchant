@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     const q = service
       .from('orders')
       .select('id, external_id')
-      .in('platform', ['maudau', 'rozetka'])
+      .in('platform', ['maudau', 'rozetka', 'prom'])
       .not('bitrix_deal_id', 'is', null)
 
     const { data } = only

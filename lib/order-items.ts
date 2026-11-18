@@ -80,10 +80,27 @@ export interface CatalogProduct {
   uid_1c?: string | null
 }
 
+/**
+ * Назва товару без того, чим вона різниться між майданчиками.
+ *
+ * Лапки (“”, «», ", '), регістр, пробіли й вага в кінці («, 250 г») —
+ * у кожного майданчика свої, а товар той самий. Канапкове сало в нас
+ * «Сало канапкове "Мексиканське"», на Prom — «Сало канапкове
+ * “Мексиканське”, 250 г», і без зведення вони не зустрічаються.
+ */
+export const foldName = (s: string | null | undefined): string =>
+  (s ?? '')
+    .toLowerCase()
+    .replace(/[“”„«»"'’ʼ`]/g, '')
+    .replace(/,?\s*\d+(?:[.,]\d+)?\s*(?:кг|г|мл|л)\.?\s*$/i, '')
+    .replace(/[\s,]+/g, ' ')
+    .trim()
+
 /** Index the catalogue once, then resolve lines against it. */
 export function indexCatalog(products: CatalogProduct[]) {
   const byExternalId = new Map<string, CatalogProduct>()
   const bySku = new Map<string, CatalogProduct>()
+  const byName = new Map<string, CatalogProduct[]>()
 
   /*
    * Живий товар головніший за привида.
@@ -105,17 +122,39 @@ export function indexCatalog(products: CatalogProduct[]) {
       put(bySku, foldSku(p.sku), p)
       put(bySku, translitSku(p.sku), p)
     }
+    const key = foldName(p.name)
+    if (key) byName.set(key, [...(byName.get(key) ?? []), p])
   }
+
+  /*
+   * За назвою — лише коли відповідь одна.
+   *
+   * Prom продає й зі старих карток, заведених до нашого фіда: їхній
+   * external_id — номер того давнього вивантаження, і в каталозі його
+   * немає. Назва ж та сама. Але назва — слабший ключ за код: «Ковбаса
+   * "Палермо"» у нас на п'яти рядках. Тож беремо лише товари з кодом 1С
+   * (решта — сліди старих завантажень) і лише коли вони зводяться до
+   * одного коду 1С. Два різні товари з однаковою назвою — не вгадуємо.
+   */
+  const byTitle = (title: string | null | undefined): CatalogProduct | null => {
+    const found = byName.get(foldName(title)) ?? []
+    const real = found.filter(p => p.uid_1c)
+    const codes = new Set(real.map(p => p.uid_1c))
+    return codes.size === 1 ? real[0] : null
+  }
+
   return {
-    find(externalId: string | null | undefined): CatalogProduct | null {
+    find(externalId: string | null | undefined, title?: string | null): CatalogProduct | null {
       const key = (externalId ?? '').trim()
-      if (!key) return null
       // The marketplace sends the WooCommerce id for most lines and a SKU for
       // the rest, so try both — and a SKU in either spelling.
-      return byExternalId.get(key)
-        ?? bySku.get(foldSku(key))
-        ?? bySku.get(translitSku(key))
-        ?? null
+      const byCode = key
+        ? byExternalId.get(key)
+          ?? bySku.get(foldSku(key))
+          ?? bySku.get(translitSku(key))
+          ?? null
+        : null
+      return byCode ?? (title ? byTitle(title) : null)
     },
   }
 }
@@ -198,7 +237,7 @@ export function buildLine(
   catalog: ReturnType<typeof indexCatalog>,
   position: number,
 ): OrderLine {
-  const product = catalog.find(line.externalId)
+  const product = catalog.find(line.externalId, line.title)
   const unit = unitOf(product, line.title)
   const unitWeight = unitWeightOf(product, line.title, unit)
 

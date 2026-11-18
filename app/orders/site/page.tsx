@@ -16,6 +16,7 @@ import { lastCronRun } from '@/lib/cron-log'
 import EditButton from './EditButton'
 import MergePreorders from './MergePreorders'
 import DeleteButton from './DeleteButton'
+import OperatorNote from '../OperatorNote'
 
 /**
  * Замовлення з сайту й телефону.
@@ -46,6 +47,8 @@ interface Row {
   auto_done_at: string | null; auto_problem: string | null; chat_sent_at: string | null; chat_error: string | null
   bitrix_deal_id: number | null; bitrix_error: string | null
   customer_comment: string | null
+  /** Нотатка оператора — та сама, що в маркетплейсних замовленнях */
+  operator_comment: string | null
   /** courier — наш кур'єр, np — Нова Пошта */
   shipping: string | null
   /** Оцінка клієнта, якщо він її лишив */
@@ -196,7 +199,7 @@ export default async function SiteOrdersPage({
 
   const supabase = createServiceClient()
 
-  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, chat_error, bitrix_deal_id, bitrix_error, customer_comment, shipping, review:order_reviews(rating, comment)'
+  const COLUMNS = 'id, external_id, manual_number, number_source, platform, order_date, customer_name, customer_phone, address, warehouse, delivery_zone, delivery_date, delivery_slot, total, status, share_token, auto_done_at, auto_problem, chat_sent_at, chat_error, bitrix_deal_id, bitrix_error, customer_comment, operator_comment, shipping, review:order_reviews(rating, comment)'
 
   const pager = <T,>(q: unknown) => q as unknown as {
     range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
@@ -565,6 +568,8 @@ export default async function SiteOrdersPage({
                 </div>
               )}
 
+              <OperatorNote orderId={o.id} initial={o.operator_comment} readOnly={readOnly} />
+
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
                 {o.auto_problem && (
                   <span className="text-amber-500">⚠ бракує: {o.auto_problem}</span>
@@ -624,6 +629,7 @@ export default async function SiteOrdersPage({
             <thead>
               <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
                 <th className="text-left px-3 py-2 whitespace-nowrap">Номер</th>
+                <th className="text-left px-3 py-2 whitespace-nowrap">Коментар оператора</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Джерело</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Доставка</th>
                 <th className="text-left px-3 py-2 whitespace-nowrap">Склад</th>
@@ -639,7 +645,7 @@ export default async function SiteOrdersPage({
             <tbody>
               {orders.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="text-center py-12 text-zinc-500">
+                  <td colSpan={12} className="text-center py-12 text-zinc-500">
                     {monthly ? 'За цей місяць тут порожньо' : 'На цю дату тут порожньо'} —{' '}
                     <Link href="/orders/manual" className="text-red-400 hover:text-red-300">
                       створити замовлення
@@ -734,6 +740,11 @@ export default async function SiteOrdersPage({
                         {o.review[0].comment ? ' ✍' : ''}
                       </span>
                     )}
+                  </td>
+                  {/* Нотатка поруч із номером, як у маркетплейсах: пишуть її,
+                      дивлячись на номер, і читати треба раніше за решту рядка */}
+                  <td className="px-3 py-2 align-top min-w-[170px] max-w-[220px]">
+                    <OperatorNote orderId={o.id} initial={o.operator_comment} readOnly={readOnly} />
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     <span className="inline-block px-2 py-0.5 rounded text-xs font-medium

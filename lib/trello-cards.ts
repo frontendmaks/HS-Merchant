@@ -112,7 +112,8 @@ interface OrderRow {
  * замовленням: картка з правильними полями, але чужою адресою — гірша за
  * картку з порожньою адресою, бо виглядає справною.
  */
-const isMarketplace = (o: OrderRow) => o.platform === 'maudau' || o.platform === 'rozetka'
+const isMarketplace = (o: OrderRow) =>
+  o.platform === 'maudau' || o.platform === 'rozetka' || o.platform === 'prom'
 
 function issuesOf(card: TrelloCard, order: OrderRow): string[] {
   const out: string[] = []
@@ -246,7 +247,7 @@ export async function enrichNewCards(
         .is('delivery_date', null)
         .gte('order_date', day(-10)),
       service.from('orders').select(COLUMNS)
-        .in('platform', ['maudau', 'rozetka'])
+        .in('platform', ['maudau', 'rozetka', 'prom'])
         .gte('order_date', day(-14)).lte('order_date', day(1)),
     ])
 

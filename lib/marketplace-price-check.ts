@@ -14,6 +14,7 @@
  * Тут ми дивимось самі: беремо живі маркетплейсні угоди й порівнюємо
  * ціну кожного рядка з тією, яка мала б там стояти.
  */
+import { marketNumberLabel } from '@/lib/order-source'
 import { createServiceClient } from '@/lib/supabase/service'
 import { bitrix } from '@/lib/bitrix'
 import { CLOSED_STAGES } from '@/lib/bitrix-stages'
@@ -165,9 +166,9 @@ export async function marketplacePriceCheck(service: Service): Promise<Check | n
     const rows = rowsByDeal.get(Number(order.bitrix_deal_id))
     if (!rows?.length) continue
     if (underpriced(rows, expected).length) {
-      hit.push(order.market_number != null
-        ? `${order.platform === 'rozetka' ? 'R' : 'M'}${order.market_number}`
-        : (order.external_id ?? '—'))
+      // Мітка та сама, що всюди: P для Prom, R для Rozetka, M для MauDau
+      hit.push(marketNumberLabel(order.platform, order.market_number)
+        ?? (order.external_id ?? '—'))
     }
   }
 

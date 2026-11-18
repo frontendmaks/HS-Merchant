@@ -53,12 +53,14 @@ const buildAddress = (o: PromOrder) =>
   [o.delivery_option?.name, o.delivery_address]
     .map(s => (s ?? '').trim()).filter(Boolean).join(', ') || ''
 
+/* Назви позицій — українською: російська на старих картках Prom буває
+   зіпсована, а склад читає саме цей список */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const buildItems = (products: any[]) =>
   (products ?? [])
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .map((p: any) =>
-      `${p.name ?? ''}, ${Number(p.quantity ?? 1)} ${p.measure_unit ?? 'шт'} x ${money(p.price)} грн`)
+      `${p.name_multilang?.uk || p.name || ''}, ${Number(p.quantity ?? 1)} ${p.measure_unit ?? 'шт'} x ${money(p.price)} грн`)
     .join('\n')
 
 export function promOrderToRow(o: PromOrder) {

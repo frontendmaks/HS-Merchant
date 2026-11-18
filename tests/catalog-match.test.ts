@@ -166,12 +166,18 @@ describe('від відповіді Rozetka до товару в каталоз�
     expect(built.product_external_id).toBe('725069')
   })
 
-  it('без товару рядок лишився б без коду 1С — саме це й боліло', () => {
-    /* Та сама позиція, але код загублено: рядок доходить до складу
-       назвою, а номенклатура в 1С лишається порожньою */
+  it('код загублено — рятує назва, якщо вона наша', () => {
     const [line] = marketplaceLines({
       platform: 'rozetka',
       raw: { purchases: [{ ...purchase, item_id: null, item: { article: '' } }] },
+    })
+    expect(buildLine(line, catalog, 0).product_id).toBe('prod-1')
+  })
+
+  it('без коду й без знайомої назви рядок лишається без товару — не вгадуємо', () => {
+    const [line] = marketplaceLines({
+      platform: 'rozetka',
+      raw: { purchases: [{ ...purchase, item_id: null, item_name: 'Щось інше, 400 г', item: { article: '' } }] },
     })
     expect(buildLine(line, catalog, 0).product_id).toBeNull()
   })
@@ -209,5 +215,65 @@ describe('позиції замовлення з Prom', () => {
        і рядок поїхав би в угоду з нульовою ціною */
     const [line] = marketplaceLines(order({ external_id: '1', price: '1 589 грн' }))
     expect(line.unitPrice).toBe(1589)
+  })
+})
+
+describe('Prom зі старих карток', () => {
+  // Замовлення P1, 13.11.2026: Prom продав зі старої картки, external_id
+  // якої — номер давнього вивантаження, і в каталозі його немає.
+  // Позиції пішли в угоду без коду 1С, а назва була російська й зіпсована.
+  const prom = {
+    platform: 'prom',
+    raw: {
+      products: [{
+        id: 3088250181,
+        sku: '',
+        external_id: '125476048',
+        name: 'Сало канапковое “íнская”, 250 г',
+        name_multilang: { ru: 'Сало канапковое “íнская”, 250 г', uk: 'Сало канапкове “Мексиканське”, 250 г' },
+        price: '88 грн',
+        quantity: 1,
+      }],
+    },
+  }
+  const product = (over: Record<string, unknown>) => ({
+    id: 'x', name: '', sku: null, external_id: null, price: 100, attributes: null, uid_1c: null, ...over,
+  })
+
+  it('назва позиції — українська, а не зіпсована російська', () => {
+    const [line] = marketplaceLines(prom)
+    expect(line.title).toBe('Сало канапкове “Мексиканське”, 250 г')
+  })
+
+  it('без нашого коду товар знаходиться за назвою', () => {
+    const catalog = indexCatalog([
+      product({ id: 'mex', name: 'Сало канапкове "Мексиканське"', sku: 'Я0025', external_id: '484562', uid_1c: 'u-mex' }),
+    ])
+    const [line] = marketplaceLines(prom)
+    expect(buildLine(line, catalog, 0).product_id).toBe('mex')
+  })
+
+  it('за назвою не вгадує, коли товарів із нею два різні', () => {
+    const catalog = indexCatalog([
+      product({ id: 'a', name: 'Ковбаса "Палермо"', uid_1c: 'u-a' }),
+      product({ id: 'b', name: 'Ковбаса «Палермо»', uid_1c: 'u-b' }),
+    ])
+    expect(catalog.find('999', 'Ковбаса “Палермо”, 400 г')).toBeNull()
+  })
+
+  it('за назвою не чіпляється до сліду без коду 1С', () => {
+    const catalog = indexCatalog([
+      product({ id: 'ghost', name: 'Сало "Snack" 1/г, 250 г' }),
+      product({ id: 'real', name: 'Сало "Snack" 1/г, 250 г', uid_1c: 'u-snack' }),
+    ])
+    expect(catalog.find('125475737', 'Сало “Snack” 1/г, 250 г')?.id).toBe('real')
+  })
+
+  it('код головніший за назву', () => {
+    const catalog = indexCatalog([
+      product({ id: 'by-code', name: 'Інша назва', external_id: '42', uid_1c: 'u1' }),
+      product({ id: 'by-name', name: 'Сало канапкове "Українське"', uid_1c: 'u2' }),
+    ])
+    expect(catalog.find('42', 'Сало канапкове "Українське"')?.id).toBe('by-code')
   })
 })

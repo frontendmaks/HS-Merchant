@@ -62,7 +62,10 @@ export function marketplaceLines(order: any): MarketplaceLine[] {
       out.push({
         itemId: p.id != null ? String(p.id) : null,
         externalId: code || null,
-        title: p.name || 'Без назви',
+        /* Українська назва, а не `name`: та — російська, і на старих
+           картках Prom вона буває зіпсована («Сало канапковое “íнская”»
+           замість «Мексиканське»). Склад читає українською */
+        title: p.name_multilang?.uk || p.name || 'Без назви',
         unitPrice: Number(String(p.price ?? 0).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0,
         quantity: Number(p.quantity ?? 1),
       })
@@ -158,7 +161,6 @@ export async function relinkLines(
     .select('id, product_external_id, title')
     .eq('order_id', orderId)
     .is('product_id', null)
-    .not('product_external_id', 'is', null)
 
   const orphans = data ?? []
   if (!orphans.length) return 0
@@ -167,7 +169,7 @@ export async function relinkLines(
   let linked = 0
 
   for (const row of orphans) {
-    const product = catalog.find(row.product_external_id as string)
+    const product = catalog.find(row.product_external_id as string | null, row.title as string | null)
     if (!product) continue
     await service.from('order_items').update({ product_id: product.id }).eq('id', row.id)
     linked++
