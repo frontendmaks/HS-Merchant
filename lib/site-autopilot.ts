@@ -21,7 +21,7 @@ import { resolveAddress, GeocoderUnavailable, areaFromDisplay } from '@/lib/deli
 import { reserveNumber, linkNumber } from '@/lib/manual-register'
 import { bitrix } from '@/lib/bitrix'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
-import { CLOSED_STAGES } from '@/lib/bitrix-stages'
+import { CLOSED_STAGES, stageId } from '@/lib/bitrix-stages'
 
 type Service = ReturnType<typeof createServiceClient>
 
@@ -91,6 +91,9 @@ function missingFields(order: Row, items: number): string[] {
 /** Самі цифри номера: «+38 (067) 335-71-55» і «380673357155» — одне й те саме */
 const digits = (phone: string | null | undefined) => (phone ?? '').replace(/\D/g, '').slice(-9)
 
+/** Причина, за якою закривається доведений дубль. Не відмова клієнта. */
+export const DUPLICATE_REASON = 'дубль замовлення'
+
 /** Скільки часу між двома однаковими замовленнями ще означає подвійне натискання */
 const TWIN_MINUTES = 30
 
@@ -129,7 +132,7 @@ async function twinOf(service: Service, order: Row): Promise<Row | null> {
 
   const { data } = await service
     .from('orders')
-    .select('id, external_id, manual_number, customer_phone, total, created_at, delivery_slot')
+    .select('id, external_id, manual_number, customer_phone, total, created_at, delivery_slot, bitrix_deal_id')
     .in('platform', ['site', 'manual'])
     .eq('delivery_date', order.delivery_date)
     .eq('order_date', order.order_date)
@@ -346,6 +349,39 @@ export async function sendMissingSheets(
   return out
 }
 
+/**
+ * Чи це той самий кошик, покладений двічі.
+ *
+ * Збіг телефону, дня, періоду й суми робить дубль вірогідним, але не
+ * доведеним: родина може замовити двічі поспіль на ту саму копійку. Тому
+ * перед тим, як самим щось скасовувати, питаємо першоджерело — сайт.
+ *
+ * WooCommerce рахує для кожного замовлення відбиток кошика. Один відбиток
+ * у двох замовлень означає, що кошик був один, а натискань — два: інакше
+ * ці числа не збігаються. Це вже не здогад, а факт із того самого місця,
+ * де замовлення й народилось.
+ *
+ * Коли сайт мовчить або відбитка немає, нічого не доводимо й нічого не
+ * чіпаємо: краще лишити оператору помітку, ніж скасувати замовлення,
+ * якого ми не роздивились.
+ */
+async function sameCart(a: Row, b: Row): Promise<boolean> {
+  const left = Number(a.bitrix_deal_id ?? 0)
+  const right = Number(b.bitrix_deal_id ?? 0)
+  if (!left || !right) return false
+
+  try {
+    const { wcCartHashes } = await import('@/lib/wc-order')
+    const hashes = await wcCartHashes([left, right])
+    const one = hashes.get(left)
+    const two = hashes.get(right)
+    return !!one && one === two
+  } catch (e) {
+    console.error('cart hash check failed:', e instanceof Error ? e.message : e)
+    return false
+  }
+}
+
 export async function autoProcessSiteOrders(...args: Parameters<typeof autoProcessSiteOrdersUnlocked>) {
   const release = await acquireLease('autoProcessSiteOrders', 600)
   if (!release) return { looked: 0, numbered: 0, rezoned: 0, problems: 0, postponed: 0, twins: 0 }
@@ -456,6 +492,50 @@ async function autoProcessSiteOrdersUnlocked(
         const which = twin.manual_number != null
           ? `№${twin.manual_number}`
           : twin.external_id ?? 'попереднього'
+
+        /*
+         * Доведений дубль закриваємо самі.
+         *
+         * Доти ми лише писали «перевірте й скасуйте зайве» — і зайве
+         * лишалось висіти в «Потребує уваги», поки до нього дійдуть
+         * руки. 20 листопада таких висіло двоє за день, і обидва
+         * довелось закривати оператору; за цей час друге замовлення
+         * бачать на дошці, в журналі й у складі.
+         *
+         * Скасовуємо лише те, що доведене відбитком кошика, і лише
+         * поки з ним ніхто не почав працювати: номера в нього ще
+         * немає, бланк не пішов, стадія — «В обробці». Угоду в
+         * Бітріксі закриваємо тією ж дією, щоб 1С не забрала її вслід
+         * за оригіналом.
+         */
+        const untouched = order.manual_number == null
+          && (order.status === 'В обробці' || order.status === 'ПЕРЕДЗАМОВЛЕННЯ')
+
+        if (untouched && await sameCart(order, twin)) {
+          const canceled = stageId('Скасовано')
+          if (order.bitrix_deal_id && canceled) {
+            try {
+              await updateDealChecked(Number(order.bitrix_deal_id), {
+                STAGE_ID: canceled,
+                [FIELD.boxNumber]: '',
+                COMMENTS: `Дубль замовлення ${which} — той самий кошик на сайті`,
+              })
+            } catch (e) {
+              console.error('duplicate deal close failed:', e instanceof Error ? e.message : e)
+            }
+          }
+          patch.status = 'Скасовано'
+          patch.cancel_reason = DUPLICATE_REASON
+          patch.auto_problem = `дубль замовлення ${which} — той самий кошик на сайті, `
+            + 'скасовано автоматично'
+          patch.duplicate_of = twin.id
+          patch.auto_done_at = new Date().toISOString()
+          await service.from('orders').update(patch).eq('id', order.id)
+          touched = order.id
+          result.twins++
+          continue
+        }
+
         patch.auto_problem = `схоже на дублікат ${which} — та сама сума й телефон; `
           + 'перевірте й скасуйте зайве'
         /*
