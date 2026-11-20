@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { loadPromos, promoFor, oldPriceFor } from '@/lib/price-promo'
 import { loadPricing, basePrice, roundOffer, categoryFor } from '@/lib/price-category'
 import {
-  calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock,
+  calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock, offerAttrs,
 } from '@/lib/feed-xml'
 import {
   generateRozetkaYML, type RozetkaFeedContext, type RzCategoryMeta,
@@ -145,7 +145,7 @@ function generateYML(feed: any): { xml: string; offersCount: number; errorsCount
     .filter((fp: any) => fp.is_active && fp.product)
     .map((fp: any) => {
       const p = fp.product
-      const attrs = attrsFor(p)
+      const attrs = offerAttrs(attrsFor(p), fp.custom_params)
       const weightLabel = minWeightLabel(attrs)
       const baseName = fp.custom_name ?? nameFor(p)
       const name = weightLabel ? `${baseName}, ${weightLabel}` : baseName
@@ -273,8 +273,9 @@ function generateMaudauYML(
   const offersXml = activeFps
     .map((fp: any) => {
       const p = fp.product
+      const packAttrs = offerAttrs(attrsFor(p), fp.custom_params)
       const attrs_map = { ...attrsFor(p), ...(fp.custom_params ?? {}) }
-      const weightLabel = minWeightLabel(attrsFor(p))
+      const weightLabel = minWeightLabel(packAttrs)
       const baseNameUa = fp.custom_name ?? nameFor(p)
       const nameUa = weightLabel ? `${baseNameUa}, ${weightLabel}` : baseNameUa
       const nameRu = fp.name_ru ?? nameUa
@@ -293,8 +294,7 @@ function generateMaudauYML(
         : fp.custom_price
           ? Number(fp.custom_price)
           : roundOffer(
-              calcMarketplacePrice(baseForOffer, p.attributes as Record<string, string> | null)
-                ?? baseForOffer,
+              calcMarketplacePrice(baseForOffer, packAttrs) ?? baseForOffer,
               categoryFor(fp, feed.pricing),
             )
 
@@ -357,7 +357,7 @@ function generateMaudauYML(
       // Sale price: p.price = current (discounted), p.price_old = original price before discount
       // Only include if price_old > price (genuine sale) and no manual marketplace price override
       const realOldM = !customParamPrice && p.price_old && Number(p.price_old) > Number(p.price)
-        ? (calcMarketplacePrice(Number(p.price_old), p.attributes as Record<string, string> | null) ?? Number(p.price_old))
+        ? (calcMarketplacePrice(Number(p.price_old), packAttrs) ?? Number(p.price_old))
         : null
       // Намальована акція діє й там, де справжньої знижки немає
       const oldPriceM = customParamPrice

@@ -1,7 +1,7 @@
 import { promoFor, oldPriceFor } from '@/lib/price-promo'
 import { basePrice, roundOffer, categoryFor } from '@/lib/price-category'
 import {
-  calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock,
+  calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock, offerAttrs,
 } from '@/lib/feed-xml'
 import { descriptionFor, attrsFor, nameFor } from '@/lib/product-content'
 
@@ -61,7 +61,7 @@ export function generateRozetkaYML(feed: any, ctx: RozetkaFeedContext): {
 
   for (const fp of activeFps) {
     const p = fp.product
-    const attrs = attrsFor(p)
+    const attrs = offerAttrs(attrsFor(p), fp.custom_params)
     const params = (fp.custom_params ?? {}) as Record<string, string>
 
     // A product that is already a card on Rozetka must keep that card's id —

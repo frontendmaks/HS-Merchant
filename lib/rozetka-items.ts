@@ -22,7 +22,7 @@
  */
 import { promoFor, oldPriceFor, type Promo } from '@/lib/price-promo'
 import { basePrice, roundOffer, categoryFor, type PricingContext } from '@/lib/price-category'
-import { calcMarketplacePrice, minWeightLabel, offerStock } from '@/lib/feed-xml'
+import { calcMarketplacePrice, minWeightLabel, offerStock, offerAttrs } from '@/lib/feed-xml'
 import { descriptionFor, attrsFor, nameFor } from '@/lib/product-content'
 
 /** Rozetka відмовляє посиланням із кирилицею, пробілами й плюсом. */
@@ -124,7 +124,7 @@ export function buildItem(
   fp: FeedProduct, ctx: RozetkaItemContext,
 ): { item: RozetkaItemDraft } | { error: string; name: string } {
   const p: Product = fp.product
-  const attrs = attrsFor(p)
+  const attrs = offerAttrs(attrsFor(p), fp.custom_params)
   const label = String(fp.custom_name ?? nameFor(p) ?? p.id)
 
   const offerId = String(p.external_id ?? '').trim()

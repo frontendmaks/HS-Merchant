@@ -20,6 +20,41 @@ export function calcMarketplacePrice(price: number, attrs: Record<string, string
   return null
 }
 
+/**
+ * Поля фасування, які маркетплейс може перебити.
+ *
+ * Більше нічого з рядка фіда у властивості товару не потрапляє:
+ * `custom_params` тримає ще й характеристики маркетплейсу («Вид»,
+ * «Сорт», «Вага»), і вони тут нічого не важать.
+ */
+const PACK_KEYS = ['Мін', 'Крок', 'Одиниця', 'Вага шт'] as const
+
+/**
+ * Фасування товару для цього маркетплейсу.
+ *
+ * Фасування в нас одне — те, що стоїть на сайті, і щоночі воно
+ * звідти ж і приїжджає. Але маркетплейс інколи просить інше: рулет на
+ * MauDau має продаватись порціями по 500 г, хоч мінімум на сайті —
+ * 600. Писати це на сайт не можна: там змінилась би мінімальна порція
+ * для покупця, якого ніхто про це не просив.
+ *
+ * Тож виняток живе поруч із товаром у самому фіді — у `custom_params`
+ * того ж рядка, окремо для кожного маркетплейсу. Що написано там, те й
+ * важить; решта — як у товарі.
+ */
+export function offerAttrs(
+  attrs: Record<string, string> | null,
+  customParams: Record<string, unknown> | null | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = { ...(attrs ?? {}) }
+  for (const key of PACK_KEYS) {
+    const value = customParams?.[key]
+    const text = value == null ? '' : String(value).trim()
+    if (text) out[key] = text
+  }
+  return out
+}
+
 /** Min weight label for product name (weight products only, in grams) */
 export function minWeightLabel(attrs: Record<string, string> | null): string | null {
   const unit = (attrs?.['Одиниця'] ?? '').toLowerCase()

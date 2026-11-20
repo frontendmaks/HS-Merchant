@@ -19,7 +19,7 @@
 import { promoFor, oldPriceFor } from '@/lib/price-promo'
 import { basePrice, roundOffer, categoryFor } from '@/lib/price-category'
 import {
-  calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock,
+  calcMarketplacePrice, minWeightLabel, escapeXml, stripControlChars, offerStock, offerAttrs,
 } from '@/lib/feed-xml'
 import { descriptionFor, attrsFor, nameFor } from '@/lib/product-content'
 
@@ -51,7 +51,7 @@ export function generatePromYML(feed: any): {
 
   for (const fp of active) {
     const p = fp.product
-    const attrs = attrsFor(p)
+    const attrs = offerAttrs(attrsFor(p), fp.custom_params)
 
     const offerId = String(p.external_id ?? '').trim()
     if (!offerId) {

@@ -49,3 +49,47 @@ describe('втрачена націнка в маркетплейсній уго
     expect(underpriced([row('Голови курячі', 10)], expected)).toHaveLength(0)
   })
 })
+
+/*
+ * Фасування для маркетплейсу.
+ *
+ * Рулет курячий зі шпинатом на сайті продається від 600 г, і саме це
+ * число МауДау писав у назву й множив на ціну кілограма. Тарас попросив
+ * 500 — але на самому сайті мінімальна порція має лишитись як була, тож
+ * виняток живе в рядку фіда.
+ */
+import { offerAttrs, minWeightLabel, calcMarketplacePrice } from '@/lib/feed-xml'
+
+describe('фасування для окремого маркетплейсу', () => {
+  const product = { 'Мін': '0.6', 'Крок': '0.6', 'Одиниця': 'кг' }
+
+  it('без винятку все лишається як у товарі', () => {
+    expect(offerAttrs(product, null)).toEqual(product)
+    expect(offerAttrs(product, { Вид: 'Батон' })).toEqual(product)
+  })
+
+  it('виняток у фіді перебиває фасування товару', () => {
+    const attrs = offerAttrs(product, { 'Мін': '0.5', 'Крок': '0.5' })
+    expect(attrs['Мін']).toBe('0.5')
+    expect(minWeightLabel(attrs)).toBe('500 г')
+    expect(calcMarketplacePrice(431, attrs)).toBe(215.5)
+  })
+
+  it('товар без фасування отримує його з фіда', () => {
+    const attrs = offerAttrs({ 'Одиниця': 'кг' }, { 'Мін': '0.5' })
+    expect(minWeightLabel(attrs)).toBe('500 г')
+    expect(calcMarketplacePrice(399, attrs)).toBe(199.5)
+  })
+
+  /* Характеристики маркетплейсу — не фасування: «Вага» на картці МауДау
+     це текст для покупця, а не число, на яке множиться ціна */
+  it('характеристики маркетплейсу фасування не чіпають', () => {
+    const attrs = offerAttrs(product, { 'Вага': '400 г', 'Вага упаковки': '0.6 кг' })
+    expect(attrs['Мін']).toBe('0.6')
+    expect(attrs['Вага']).toBeUndefined()
+  })
+
+  it('порожній виняток не стирає того, що є', () => {
+    expect(offerAttrs(product, { 'Мін': '', 'Крок': '   ' })['Мін']).toBe('0.6')
+  })
+})
