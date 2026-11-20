@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { refreshZones } from '@/lib/delivery-zones'
+import { refreshShopHours } from '@/lib/shop-hours'
 import { logCronRun } from '@/lib/cron-log'
 
 /**
@@ -15,8 +16,11 @@ export async function GET(request: NextRequest) {
   }
   const service = createServiceClient()
   const startedAt = Date.now()
-  const result = await refreshZones(service)
+  const zones = await refreshZones(service)
+  /* Години складів міняють там само, де й карту, — беремо їх тим самим проходом */
+  const hours = await refreshShopHours(service)
+  const result = { ...zones, hours }
   await logCronRun(service, 'zones', startedAt, result,
-    (result as { error?: string }).error)
+    zones.error ?? hours.error)
   return NextResponse.json(result)
 }

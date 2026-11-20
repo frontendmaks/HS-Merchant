@@ -12,6 +12,7 @@ import { bitrix } from '@/lib/bitrix'
 import { createServiceClient } from '@/lib/supabase/service'
 import { stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
 import { deliveryDayFor } from '@/lib/delivery-day'
+import { loadShopHours, slotFromShopHours } from '@/lib/shop-hours'
 import { WAREHOUSE_ID, CATEGORY_ID, updateDealChecked } from '@/lib/bitrix-deal'
 import {
   bareName, specFromAttr, unitFromRow, needsOwnQuery, type Spec,
@@ -305,6 +306,14 @@ async function syncSiteOrdersUnlocked(
   let touched: string | null = null
   /** Угоди, яким ми переставили день доставки: #угоди → з чого на що */
   const movedDays = new Map<number, { from: string | null; to: string | null }>()
+  /*
+   * Години складів — копія з сайту.
+   *
+   * Період в угоді лежить числом, і підпис до нього Бітрікс тримає один
+   * на портал. Та сайт тримає години по складах. Пояснення — у
+   * `lib/shop-hours.ts`.
+   */
+  const shopHours = await loadShopHours(service)
 
   try {
     for (let page = 0; page < maxPages; page++) {
@@ -363,6 +372,8 @@ async function syncSiteOrdersUnlocked(
          * лягає у вчорашній, уже закритий. Правило й пояснення — у
          * `lib/delivery-day.ts`.
          */
+        const warehouse = WAREHOUSE_BY_ID.get(deal.UF_BILL_ADRESS_LIST ?? '') ?? null
+
         const day = deliveryDayFor(
           deal.DATE_CREATE,
           deal.UF_CRM_1606047095?.slice(0, 10) || null,
@@ -397,8 +408,9 @@ async function syncSiteOrdersUnlocked(
            */
           delivery_date: day.date,
           shipping: SHIPPING_KIND[(deal.UF_SHIPPING ?? '').trim()] ?? null,
-          delivery_slot: await slotLabel(deal.UF_CRM_1606047143435),
-          warehouse: WAREHOUSE_BY_ID.get(deal.UF_BILL_ADRESS_LIST ?? '') ?? null,
+          delivery_slot: slotFromShopHours(shopHours, warehouse, deal.UF_CRM_1606047143435)
+            ?? await slotLabel(deal.UF_CRM_1606047143435),
+          warehouse,
           customer_name: person?.name || persona.name || deal.TITLE,
           customer_phone: person?.phone ?? persona.phone,
           address: deal.UF_CRM_1606294264905 ?? null,
