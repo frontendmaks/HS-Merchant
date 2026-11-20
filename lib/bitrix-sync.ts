@@ -11,6 +11,7 @@ import { randomBytes, createHash } from 'node:crypto'
 import { bitrix } from '@/lib/bitrix'
 import { createServiceClient } from '@/lib/supabase/service'
 import { stageName, CLOSED_STAGES } from '@/lib/bitrix-stages'
+import { deliveryDayFor } from '@/lib/delivery-day'
 import { WAREHOUSE_ID, CATEGORY_ID, updateDealChecked } from '@/lib/bitrix-deal'
 import {
   bareName, specFromAttr, unitFromRow, needsOwnQuery, type Spec,
@@ -302,6 +303,8 @@ async function syncSiteOrdersUnlocked(
    * сторінка, яка перечитує себе на кожне, перестає відповідати.
    */
   let touched: string | null = null
+  /** Угоди, яким ми переставили день доставки: #угоди → з чого на що */
+  const movedDays = new Map<number, { from: string | null; to: string | null }>()
 
   try {
     for (let page = 0; page < maxPages; page++) {
@@ -353,6 +356,19 @@ async function syncSiteOrdersUnlocked(
          */
         const persona = splitPersona(deal.UF_DEST_PERSONA)
 
+        /*
+         * Вечірнє замовлення сьогодні вже не поїде.
+         *
+         * Сайт інколи лишає в ньому сьогоднішній день — і замовлення
+         * лягає у вчорашній, уже закритий. Правило й пояснення — у
+         * `lib/delivery-day.ts`.
+         */
+        const day = deliveryDayFor(
+          deal.DATE_CREATE,
+          deal.UF_CRM_1606047095?.slice(0, 10) || null,
+        )
+        if (day.moved) movedDays.set(Number(deal.ID), { from: day.from, to: day.date })
+
         const fields = {
           external_id: `BX-${deal.ID}`,
           platform: 'site',
@@ -367,7 +383,7 @@ async function syncSiteOrdersUnlocked(
            * type date». Два жовтневі замовлення так і не потрапили в
            * Мерчант — вони просто не мали дати.
            */
-          delivery_date: deal.UF_CRM_1606047095?.slice(0, 10) || null,
+          delivery_date: day.date,
           shipping: SHIPPING_KIND[(deal.UF_SHIPPING ?? '').trim()] ?? null,
           delivery_slot: await slotLabel(deal.UF_CRM_1606047143435),
           warehouse: WAREHOUSE_BY_ID.get(deal.UF_BILL_ADRESS_LIST ?? '') ?? null,
@@ -702,6 +718,35 @@ async function syncSiteOrdersUnlocked(
     }
   } catch (e) {
     result.error = e instanceof Error ? e.message : String(e)
+  }
+
+  /*
+   * Про переставлений день кажемо вголос і в обидва боки.
+   *
+   * У Бітріксі день лишився б учорашнім — а там із замовленням працюють
+   * оператори, і звідти його забирає 1С. У журналі замовлення без запису
+   * вийшло б, що день помінявся сам собою.
+   */
+  for (const [dealId, { from, to }] of movedDays) {
+    if (!to) continue
+    const { data: order } = await service.from('orders')
+      .select('id').eq('bitrix_deal_id', dealId).maybeSingle()
+    if (!order) continue
+
+    try {
+      const { updateDealChecked, FIELD } = await import('@/lib/bitrix-deal')
+      await updateDealChecked(dealId, { [FIELD.deliveryDate]: `${to}T03:00:00+03:00` })
+    } catch (e) {
+      console.error('delivery day push failed:', e instanceof Error ? e.message : e)
+    }
+
+    const { data: already } = await service.from('order_events')
+      .select('id').eq('order_id', order.id).eq('type', 'delivery_day').limit(1)
+    if (already?.length) continue
+
+    await logOrderEvent(service, order.id as string, 'delivery_day',
+      { old: from, new: to, details: { reason: 'замовлення зроблене після 18:00' } },
+      { id: '', name: 'Мерчант' })
   }
 
   if (touched) await broadcastOrderChange(touched, 'sync')

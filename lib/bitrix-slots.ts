@@ -91,11 +91,22 @@ export async function slotLabel(id: string | null | undefined): Promise<string |
   const key = String(id ?? '').trim()
   if (!key || key === '0') return null
 
-  if (KNOWN[key]) return KNOWN[key]
-  if (learned.has(key)) return learned.get(key) as string
-
+  /*
+   * Питаємо Бітрікс перший, пам'ять — другою.
+   *
+   * Доти список напам'ять вигравав завжди, і коли сайт із 16 листопада
+   * почав продавати вікна «14:00 — 18:00» і «18:00 — 20:00», Мерчант
+   * і далі писав у замовлення «14:00 — 17:00» та «17:00 — 20:00»:
+   * сорок вісім замовлень за два дні обіцяли клієнтові одне вікно, а
+   * складу називали інше. Значення поля ті самі, змінились підписи — і
+   * побачити це можна лише там, де вони живуть.
+   *
+   * Пам'ять лишається для випадку, коли Бітрікс мовчить: краще
+   * торішній підпис, ніж порожній період, через який замовлення не
+   * дістане номера.
+   */
   await learn()
-  return learned.get(key) ?? null
+  return learned.get(key) ?? KNOWN[key] ?? null
 }
 
 /** Значення поля за підписом — щоб записати період назад в угоду */
@@ -103,10 +114,11 @@ export async function slotId(label: string | null | undefined): Promise<number |
   const want = normalizeSlot(String(label ?? ''))
   if (!want) return ''
 
-  for (const [id, text] of Object.entries(KNOWN)) if (text === want) return Number(id)
-
   await learn()
   for (const [id, text] of learned) if (text === want) return Number(id)
+
+  // Те саме міркування, що й у `slotLabel`: пам'ять — запасний варіант
+  for (const [id, text] of Object.entries(KNOWN)) if (text === want) return Number(id)
 
   return ''
 }
