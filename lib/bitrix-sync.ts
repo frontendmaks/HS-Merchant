@@ -367,7 +367,19 @@ async function syncSiteOrdersUnlocked(
           deal.DATE_CREATE,
           deal.UF_CRM_1606047095?.slice(0, 10) || null,
         )
-        if (day.moved) movedDays.set(Number(deal.ID), { from: day.from, to: day.date })
+        /*
+         * Закритих не чіпаємо.
+         *
+         * Переставляти день замовленню, яке вже виконали чи скасували,
+         * нема навіщо: везти його не будуть. А повний перечит угод за
+         * місяці назад інакше переписав би дати сотням торішніх —
+         * і в Бітріксі, де їх читають як історію.
+         */
+        if (day.moved && !CLOSED_STAGES.includes(status)) {
+          movedDays.set(Number(deal.ID), { from: day.from, to: day.date })
+        } else if (day.moved) {
+          day.date = day.from
+        }
 
         const fields = {
           external_id: `BX-${deal.ID}`,
