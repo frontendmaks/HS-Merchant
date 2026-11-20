@@ -18,7 +18,7 @@ export const EVENT_META: Record<OrderEventType, { label: string; icon: string }>
   marketplace_push: { label: 'надіслав зміни на маркетплейс', icon: '⇪' },
   shipment:      { label: 'вказав вагу відправлення', icon: '⚖' },
   operator_comment: { label: 'залишив коментар',      icon: '✎' },
-  delivery_day:  { label: 'переставив день доставки', icon: '⇥' },
+  delivery_day:  { label: 'виправив день доставки', icon: '⇥' },
 }
 
 /** Who is acting, resolved from the session cookie. Null for cron/sync. */

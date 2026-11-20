@@ -304,8 +304,8 @@ async function syncSiteOrdersUnlocked(
    * сторінка, яка перечитує себе на кожне, перестає відповідати.
    */
   let touched: string | null = null
-  /** Угоди, яким ми переставили день доставки: #угоди → з чого на що */
-  const movedDays = new Map<number, { from: string | null; to: string | null }>()
+  /** Угоди, яким ми виправили день доставки: #угоди → з чого на що */
+  const fixedDays = new Map<number, { from: string | null; to: string | null }>()
   /*
    * Години складів — копія з сайту.
    *
@@ -368,9 +368,9 @@ async function syncSiteOrdersUnlocked(
         /*
          * Вечірнє замовлення сьогодні вже не поїде.
          *
-         * Сайт інколи лишає в ньому сьогоднішній день — і замовлення
-         * лягає у вчорашній, уже закритий. Правило й пояснення — у
-         * `lib/delivery-day.ts`.
+         * Сайт інколи віддає в ньому день, якого сам не пропонував, —
+         * сьогоднішній, із періодом, що вже минув. Правило й пояснення —
+         * у `lib/delivery-day.ts`.
          */
         const warehouse = WAREHOUSE_BY_ID.get(deal.UF_BILL_ADRESS_LIST ?? '') ?? null
 
@@ -381,14 +381,14 @@ async function syncSiteOrdersUnlocked(
         /*
          * Закритих не чіпаємо.
          *
-         * Переставляти день замовленню, яке вже виконали чи скасували,
+         * Виправляти день замовленню, яке вже виконали чи скасували,
          * нема навіщо: везти його не будуть. А повний перечит угод за
          * місяці назад інакше переписав би дати сотням торішніх —
          * і в Бітріксі, де їх читають як історію.
          */
-        if (day.moved && !CLOSED_STAGES.includes(status)) {
-          movedDays.set(Number(deal.ID), { from: day.from, to: day.date })
-        } else if (day.moved) {
+        if (day.fixed && !CLOSED_STAGES.includes(status)) {
+          fixedDays.set(Number(deal.ID), { from: day.from, to: day.date })
+        } else if (day.fixed) {
           day.date = day.from
         }
 
@@ -745,13 +745,13 @@ async function syncSiteOrdersUnlocked(
   }
 
   /*
-   * Про переставлений день кажемо вголос і в обидва боки.
+   * Про виправлений день кажемо вголос і в обидва боки.
    *
    * У Бітріксі день лишився б учорашнім — а там із замовленням працюють
    * оператори, і звідти його забирає 1С. У журналі замовлення без запису
    * вийшло б, що день помінявся сам собою.
    */
-  for (const [dealId, { from, to }] of movedDays) {
+  for (const [dealId, { from, to }] of fixedDays) {
     if (!to) continue
     const { data: order } = await service.from('orders')
       .select('id').eq('bitrix_deal_id', dealId).maybeSingle()
@@ -769,7 +769,8 @@ async function syncSiteOrdersUnlocked(
     if (already?.length) continue
 
     await logOrderEvent(service, order.id as string, 'delivery_day',
-      { old: from, new: to, details: { reason: 'замовлення зроблене після 18:00' } },
+      { old: from, new: to,
+        details: { reason: 'сайт віддав день, період якого вже минув' } },
       { id: '', name: 'Мерчант' })
   }
 

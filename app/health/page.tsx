@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
-import { cronHealth, orderChecks, recentFailures, fractionalPieceCheck, movedDayCheck, type JobState } from '@/lib/system-health'
+import { cronHealth, orderChecks, recentFailures, fractionalPieceCheck, fixedDayCheck, type JobState } from '@/lib/system-health'
 import { marketplacePriceCheck } from '@/lib/marketplace-price-check'
 import { rozetkaModerationCheck } from '@/lib/rozetka-moderation'
 
@@ -40,7 +40,7 @@ export default async function HealthPage() {
   if (!canAccess('health', role)) redirect('/orders')
 
   const service = createServiceClient()
-  const [jobs, baseChecks, failures, mpPrice, rzModeration, fractional, movedDay] = await Promise.all([
+  const [jobs, baseChecks, failures, mpPrice, rzModeration, fractional, fixedDay] = await Promise.all([
     cronHealth(service),
     orderChecks(service),
     recentFailures(service),
@@ -48,9 +48,9 @@ export default async function HealthPage() {
     marketplacePriceCheck(service).catch(() => null),
     rozetkaModerationCheck().catch(() => null),
     fractionalPieceCheck(service).catch(() => null),
-    movedDayCheck(service).catch(() => null),
+    fixedDayCheck(service).catch(() => null),
   ])
-  const checks = [...baseChecks, mpPrice, rzModeration, fractional, movedDay].filter(c => c != null)
+  const checks = [...baseChecks, mpPrice, rzModeration, fractional, fixedDay].filter(c => c != null)
 
   const broken = jobs.filter(j => j.state !== 'ok')
   const working = jobs.filter(j => j.state === 'ok')
