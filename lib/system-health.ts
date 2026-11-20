@@ -368,3 +368,63 @@ export async function fractionalPieceCheck(service: Service): Promise<Check | nu
     href: '/products',
   }
 }
+
+/**
+ * Замовлення, яким ми самі переставили день доставки.
+ *
+ * Сайт інколи лишає у вечірньому замовленні сьогоднішній день —
+ * №968385 оформили 19 листопада о 23:57 на «19.11, 14:00 — 17:00».
+ * Після вісімнадцятої сьогодні вже не везуть, тож Мерчант переставляє
+ * такі на наступний день сам (`lib/delivery-day.ts`).
+ *
+ * Робить він це тихо, і в цьому біда: рішення правильне, але людина про
+ * нього не знає. А знати варто — клієнт обирав сьогодні, і його хтось
+ * має попередити. Тож показуємо тут усе, що переставилось за тиждень:
+ * і щоб передзвонити, і щоб бачити, чи сайт часом не почав робити це
+ * щодня замість чотирьох разів на місяць.
+ */
+export async function movedDayCheck(service: Service): Promise<Check | null> {
+  const since = new Date(Date.now() - 7 * 86_400_000).toISOString()
+
+  const { data: events } = await service
+    .from('order_events')
+    .select('order_id, old_value, new_value, created_at')
+    .eq('type', 'delivery_day')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  if (!events?.length) return null
+
+  const { data: orders } = await service
+    .from('orders')
+    .select('id, manual_number, customer_name, external_id, status')
+    .in('id', events.map(e => e.order_id as string))
+
+  const byId = new Map((orders ?? []).map(o => [o.id as string, o]))
+  /** «2026-11-19» → «19.11» — у списку важить день, а не рік */
+  const short = (iso: string | null) => {
+    const m = String(iso ?? '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    return m ? `${m[3]}.${m[2]}` : '—'
+  }
+
+  const lines = events.map(e => {
+    const order = byId.get(e.order_id as string)
+    const who = order?.manual_number != null
+      ? `№${order.manual_number}`
+      : (order?.external_id as string | null) ?? 'замовлення'
+    const name = (order?.customer_name as string | null)?.trim()
+    return `${who}${name ? ` · ${name}` : ''} · ${short(e.old_value as string)} → ${short(e.new_value as string)}`
+  })
+
+  return {
+    key: 'moved-delivery-day',
+    label: 'День доставки переставлено на наступний',
+    why: 'замовлення зробили після 18:00 на сьогодні — сьогодні їх уже не везуть; '
+      + 'клієнт обирав інший день, варто передзвонити',
+    count: lines.length,
+    sample: lines.slice(0, 6),
+    severity: 'warn',
+    href: '/orders/site',
+  }
+}
