@@ -266,6 +266,10 @@ export const RZ_STATUS = {
   prepared: 8,     // відправлена, чекає на модератора
   onModeration: 16,
   rejected: 9,
+  /** Ціну визнано аномальною — картка висить, поки ціну не виправити */
+  oddPrice: 14,
+  /** Rozetka сховала картку в архів. Не продається і сама не повернеться */
+  archived: 15,
 } as const
 
 export interface RozetkaGood {
@@ -277,6 +281,8 @@ export interface RozetkaGood {
   upload_status_title: string | null
   /** Чому відхилили — те, що написав модератор, своїми словами */
   comment: string | null
+  /** Коли картку завели. Потрібне, щоб знати, скільки вона вже чекає */
+  created_at: string | null
 }
 
 /**
@@ -292,6 +298,27 @@ export async function rozetkaGoods(uploadStatus: number, limit = 100): Promise<R
       items?: RozetkaGood[]
     }
   return c.items ?? []
+}
+
+/**
+ * Усі наші картки, з усіма статусами.
+ *
+ * Фільтр `upload_status` у `/goods/all` відповідає порожнечею на частину
+ * значень — на «архівний» теж. Саме архівними лежали сімдесят шість
+ * карток, якими ми продавали до вересня: Rozetka сховала їх своєю
+ * задачею, нікому про це не сказала, і замовлення просто припинились.
+ * Тому беремо список цілком і розкладаємо за статусами вже в себе.
+ */
+export async function rozetkaAllGoods(maxPages = 10): Promise<RozetkaGood[]> {
+  const out: RozetkaGood[] = []
+  for (let page = 1; page <= maxPages; page++) {
+    const c = await rz<never>('GET',
+      `/goods/all?page=${page}&pageSize=100`) as unknown as { items?: RozetkaGood[] }
+    const items = c.items ?? []
+    out.push(...items)
+    if (items.length < 100) break
+  }
+  return out
 }
 
 export interface RozetkaProducer { id: number; title: string; status: string }

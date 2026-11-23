@@ -6,7 +6,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { getCurrentRole, canAccess } from '@/lib/getRole'
 import { cronHealth, orderChecks, recentFailures, fractionalPieceCheck, fixedDayCheck, type JobState } from '@/lib/system-health'
 import { marketplacePriceCheck } from '@/lib/marketplace-price-check'
-import { rozetkaModerationCheck } from '@/lib/rozetka-moderation'
+import { rozetkaCatalogChecks } from '@/lib/rozetka-moderation'
 
 /**
  * Стан системи.
@@ -40,17 +40,17 @@ export default async function HealthPage() {
   if (!canAccess('health', role)) redirect('/orders')
 
   const service = createServiceClient()
-  const [jobs, baseChecks, failures, mpPrice, rzModeration, fractional, fixedDay] = await Promise.all([
+  const [jobs, baseChecks, failures, mpPrice, rzCatalog, fractional, fixedDay] = await Promise.all([
     cronHealth(service),
     orderChecks(service),
     recentFailures(service),
     /* Бітрікс може й не відповісти — від цього сторінка стану не має падати */
     marketplacePriceCheck(service).catch(() => null),
-    rozetkaModerationCheck().catch(() => null),
+    rozetkaCatalogChecks().catch(() => []),
     fractionalPieceCheck(service).catch(() => null),
     fixedDayCheck(service).catch(() => null),
   ])
-  const checks = [...baseChecks, mpPrice, rzModeration, fractional, fixedDay].filter(c => c != null)
+  const checks = [...baseChecks, mpPrice, ...rzCatalog, fractional, fixedDay].filter(c => c != null)
 
   const broken = jobs.filter(j => j.state !== 'ok')
   const working = jobs.filter(j => j.state === 'ok')
