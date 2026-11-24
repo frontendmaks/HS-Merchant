@@ -131,3 +131,23 @@ describe('стара ціна — не втрачена націнка', () => {
     expect(hit).toHaveLength(1)
   })
 })
+
+describe('допуск до базової ціни — копійки, не відсотки', () => {
+  const base: Record<string, number> = { 'Рулет по-галицьки варений': 329 }
+  const baseOf = (r: DealRow) => base[r.PRODUCT_NAME] ?? null
+  const expected = (r: DealRow) => {
+    const b = baseOf(r)
+    return b == null ? null : Math.round(Math.ceil(b * 1.18 / 0.1) * 0.1 * 100) / 100
+  }
+
+  it('329,30 при базі 329 — стара ціна, не гола картка', () => {
+    /* 279,07 × 1,18 = 329,30: націнка була, просто база відтоді зросла */
+    expect(underpriced([row('Рулет по-галицьки варений', 329.3)], expected, baseOf))
+      .toHaveLength(0)
+  })
+
+  it('329 при базі 329 — гола картка', () => {
+    expect(underpriced([row('Рулет по-галицьки варений', 329)], expected, baseOf))
+      .toHaveLength(1)
+  })
+})
