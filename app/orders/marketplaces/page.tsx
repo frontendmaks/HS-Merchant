@@ -11,7 +11,7 @@ import MonthTabs from '../MonthTabs'
 import OrderRow from '../OrderRow'
 import WideScroll from '../WideScroll'
 import { arrivalTime } from '@/lib/order-arrival'
-import { MARKETPLACE_PLATFORMS, marketplaceLabel } from '@/lib/order-source'
+import { MARKETPLACE_PLATFORMS } from '@/lib/order-source'
 
 const UA_MONTHS = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень']
 
@@ -36,21 +36,6 @@ function monthDateRange(month: string): { from: string; to: string } {
   return { from, to }
 }
 
-function platformBadge(platform: string | null) {
-  const p = platform || ''
-  const cls = p === 'maudau'
-    ? 'bg-purple-900 text-purple-300'
-    : p === 'rozetka'
-    ? 'bg-pink-900 text-pink-300'
-    : p === 'prom'
-    ? 'bg-sky-900 text-sky-300'
-    : 'bg-zinc-700 text-zinc-300'
-  return (
-    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
-      {marketplaceLabel(p)}
-    </span>
-  )
-}
 
 function pct(part: number, total: number) {
   if (!total) return '0%'

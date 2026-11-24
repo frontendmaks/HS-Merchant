@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { marketNumberLabel } from '@/lib/order-source'
+import { marketNumberLabel, marketplaceLabel } from '@/lib/order-source'
 import OrderJournal from './OrderJournal'
 import OrderItemsEditor from './OrderItemsEditor'
 import ShipmentDialog from './ShipmentDialog'
@@ -56,17 +56,18 @@ const ROZETKA_CANCEL_REASONS = [
 
 const TERMINAL_STATUSES = new Set(['Скасовано', 'Доставлено'])
 
+const PLATFORM_COLORS: Record<string, string> = {
+  maudau: 'bg-purple-900 text-purple-300',
+  rozetka: 'bg-pink-900 text-pink-300',
+  prom: 'bg-sky-900 text-sky-300',
+}
+
 function platformBadge(platform: string | null) {
   const p = platform || ''
-  const cls =
-    p === 'maudau'
-      ? 'bg-purple-900 text-purple-300'
-      : p === 'rozetka'
-      ? 'bg-pink-900 text-pink-300'
-      : 'bg-zinc-700 text-zinc-300'
+  const cls = PLATFORM_COLORS[p] ?? 'bg-zinc-700 text-zinc-300'
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
-      {p === 'maudau' ? 'MauDau' : p === 'rozetka' ? 'Rozetka' : p}
+      {marketplaceLabel(p)}
     </span>
   )
 }
