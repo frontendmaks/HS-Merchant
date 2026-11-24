@@ -23,7 +23,7 @@ import { notifyIntegrations } from '@/lib/integration-webhooks'
  * вводимо, бо на них зав'язані кошики статусів, вибір у списку й
  * Бітрікс.
  */
-const STATUS_MAP: Record<string, string> = {
+export const STATUS_MAP: Record<string, string> = {
   pending: 'Нове',
   draft: 'Нове',
   received: 'Прийнято',

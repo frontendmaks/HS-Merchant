@@ -223,7 +223,7 @@ export async function buildOrders(
       status: o.status,
       can: {
         record_picking: canRecordPicking(o.status, o.ttn),
-        change_payment: canTogglePaid(o.status),
+        change_payment: canTogglePaid(o.status, o.platform),
       },
       payment: {
         is_paid: !!o.is_paid,

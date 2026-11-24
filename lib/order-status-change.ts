@@ -13,7 +13,7 @@ import { NextResponse, after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt, patchMaudauStatus } from '@/lib/maudau'
 import { rozetkaToken } from '@/lib/rozetka-auth'
-import { isHandedOver, requiresPayment, isCashOnDelivery } from '@/lib/order-statuses'
+import { isHandedOver, requiresPayment } from '@/lib/order-statuses'
 import { orderSource } from '@/lib/order-source'
 import { acquireLease } from '@/lib/job-lease'
 import { drainOrderEffects } from '@/lib/order-effects'
@@ -76,7 +76,7 @@ export async function changeOrderStatus(input: StatusChange): Promise<NextRespon
 async function changeLocked({ id, status, actor }: StatusChange): Promise<NextResponse> {
   const supabase = createServiceClient()
   const { data: current, error: readError } = await supabase.from('orders')
-    .select('status, ttn, cancel_reason, is_paid, bitrix_deal_id, platform, external_id, updated_at, raw')
+    .select('status, ttn, cancel_reason, is_paid, bitrix_deal_id, platform, external_id, updated_at')
     .eq('id', id).single()
   if (readError || !current) return NextResponse.json({ success: false, error: 'Не вдалося прочитати замовлення' }, { status: 503 })
   // Derive platform/identifier from the database, never from the request body.
@@ -105,15 +105,7 @@ async function changeLocked({ id, status, actor }: StatusChange): Promise<NextRe
   // Правило маркетплейсне: там замовлення йдуть передоплатою. Замовлення з
   // сайту й телефону везуть з оплатою на місці, і вимагати позначки «оплачено»
   // перед доставкою означало б просити оператора збрехати.
-  //
-  // Накладений платіж — виняток: там передоплати не буде ніколи, бо гроші
-  // бере перевізник при видачі. Усі замовлення з Prom такі, і правило
-  // тримало їх у «Прийнято» намертво.
-  const payment = (current.raw as { payment_option?: { name?: string } } | null)
-    ?.payment_option?.name ?? null
-  const cashOnDelivery = isCashOnDelivery(payment)
-  if (orderSource(platform) === 'marketplace' && requiresPayment(status)
-      && !current?.is_paid && !cashOnDelivery) {
+  if (orderSource(platform) === 'marketplace' && requiresPayment(status) && !current?.is_paid) {
     return NextResponse.json(
       {
         success: false,

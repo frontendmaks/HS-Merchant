@@ -3,7 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { currentActor, logOrderEvent } from '@/lib/order-events'
 import { broadcastOrderChange } from '@/lib/order-broadcast'
 import { notifyIntegrations } from '@/lib/integration-webhooks'
-import { canTogglePaid, isHandedOver } from '@/lib/order-statuses'
+import { canTogglePaid, isHandedOver, PAYMENT_STAGE_BY_PLATFORM } from '@/lib/order-statuses'
 
 /**
  * Позначка про передоплату.
@@ -24,7 +24,7 @@ export async function PATCH(
 
   const supabase = createServiceClient()
   const { data: current } = await supabase
-    .from('orders').select('status, ttn, is_paid').eq('id', id).single()
+    .from('orders').select('status, ttn, is_paid, platform').eq('id', id).single()
 
   if (!current) {
     return NextResponse.json({ success: false, error: 'Замовлення не знайдено' }, { status: 404 })
@@ -37,9 +37,14 @@ export async function PATCH(
     )
   }
 
-  if (!canTogglePaid(current.status as string)) {
+  if (!canTogglePaid(current.status as string, current.platform as string)) {
     return NextResponse.json(
-      { success: false, error: 'Оплату можна позначити лише на статусі «Узгоджено»' },
+      {
+        success: false,
+        error: 'Оплату позначають на статусі «'
+          + ((PAYMENT_STAGE_BY_PLATFORM[current.platform as string] ?? ['Узгоджено'])[0])
+          + '»',
+      },
       { status: 409 },
     )
   }

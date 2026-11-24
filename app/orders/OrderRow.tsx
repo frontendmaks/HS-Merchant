@@ -7,9 +7,9 @@ import OrderItemsEditor from './OrderItemsEditor'
 import ShipmentDialog from './ShipmentDialog'
 import { useRouter } from 'next/navigation'
 import { PROM_CANCEL_REASONS } from '@/lib/cancel-reasons'
+import { PAYMENT_STAGE_BY_PLATFORM } from '@/lib/order-statuses'
 import {
   canCreateWaybill, canEditItems, isHandedOver, canTogglePaid, requiresPayment,
-  isCashOnDelivery,
 } from '@/lib/order-statuses'
 import { statusOptions } from '@/lib/order-status-options'
 
@@ -93,8 +93,6 @@ interface OrderRowProps {
   commission: number | null
   status: string | null
   is_paid?: boolean | null
-  /** Як платить покупець. «Наложенный платеж» означає, що передоплати не буде */
-  payment_option?: string | null
   ttn: string | null
   cancel_reason: string | null
   /** What the buyer wrote when ordering — delivery notes, corrected addresses */
@@ -188,10 +186,10 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
       setPaidLoading(false)
     }
   }
-  /* Накладений платіж: гроші візьме перевізник, тож чекати на передоплату
-     нема чого — інакше замовлення не вийде зі свого статусу ніколи */
-  const cod = isCashOnDelivery(props.payment_option)
-  const needsPayment = (s: string) => requiresPayment(s) && !paid && !cod
+  /* Працюємо передоплатою, тож оплату має позначити оператор. Стадія, на
+     якій це роблять, у кожного майданчика своя */
+  const payStage = canTogglePaid(status, props.platform)
+  const needsPayment = (s: string) => requiresPayment(s) && !paid
   const readOnlyStatus = (s: string) => props.platform === 'prom' && s === 'Нове'
 
   const cancelReasonOptions: { id: number; name: string }[] =
@@ -427,25 +425,25 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
             нього, тож це окремий перемикач, а не ще один статус. */}
         <button
           type="button"
-          disabled={readOnly || paidLoading || cod || !canTogglePaid(status) || locked}
+          disabled={readOnly || paidLoading || !payStage || locked}
           onClick={() => togglePaid()}
           title={
-            cod
-              ? 'Накладений платіж — гроші бере перевізник при видачі'
-              : canTogglePaid(status)
-                ? (paid ? 'Знято оплату' : 'Позначити як оплачене')
-                : 'Оплату позначають на статусі «Узгоджено»'
+            payStage
+              ? (paid ? 'Знято оплату' : 'Позначити як оплачене')
+              : `Оплату позначають на статусі «${
+                  (PAYMENT_STAGE_BY_PLATFORM[props.platform] ?? ['Узгоджено'])[0]
+                }»`
           }
           className={`mt-1.5 w-full px-2 py-1 rounded text-xs font-medium transition-colors
                       disabled:cursor-default ${
             paid
               ? 'bg-emerald-900/60 text-emerald-300 enabled:hover:bg-emerald-900'
-              : canTogglePaid(status)
+              : payStage
                 ? 'bg-amber-900/60 text-amber-300 enabled:hover:bg-amber-900'
                 : 'bg-zinc-800 text-zinc-500'
           }`}
         >
-          {paidLoading ? '…' : paid ? '₴ Оплачено' : cod ? '₴ Накладений платіж' : '₴ Не оплачено'}
+          {paidLoading ? '…' : paid ? '₴ Оплачено' : '₴ Не оплачено'}
         </button>
       </td>
 

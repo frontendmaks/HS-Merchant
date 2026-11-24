@@ -21,7 +21,7 @@ const BASE = process.env.ROZETKA_BASE!
  * зав'язані і кошики статусів, і вибір у списку, і Бітрікс. Відтінок
  * («повернено», «брак», «фейк») не губиться — він іде в cancel_reason.
  */
-const STATUS_MAP: Record<number, string> = {
+export const STATUS_MAP: Record<number, string> = {
   // Прийшло, ще ніхто не брав
   1: 'Нове',
   52: 'Нове',           // за 1 клік

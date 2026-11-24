@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { isCashOnDelivery, requiresPayment } from '@/lib/order-statuses'
+import { canTogglePaid, requiresPayment } from '@/lib/order-statuses'
 import { PROM_STATUSES, statusOptions } from '@/lib/order-status-options'
+import { PAYMENT_STAGE_BY_PLATFORM } from '@/lib/order-statuses'
 import { PROM_STATUS_BACK } from '@/lib/sync-prom'
 import { PROM_CANCEL_REASONS, PROM_REASON_CODE } from '@/lib/cancel-reasons'
 
@@ -30,18 +31,29 @@ describe('статуси Prom', () => {
   })
 })
 
-describe('накладений платіж', () => {
-  it('упізнається так, як його пише Prom', () => {
-    expect(isCashOnDelivery('Наложенный платеж')).toBe(true)
-    expect(isCashOnDelivery('Післяплата')).toBe(true)
+describe('оплату позначає оператор', () => {
+  it('у Prom — на «Прийнято», бо інших стадій у нього немає', () => {
+    expect(canTogglePaid('Прийнято', 'prom')).toBe(true)
+    expect(canTogglePaid('Оплачено', 'prom')).toBe(true)
   })
 
-  it('передоплата лишається передоплатою', () => {
-    expect(isCashOnDelivery('Оплата картою онлайн')).toBe(false)
-    expect(isCashOnDelivery(null)).toBe(false)
+  it('кожен майданчик має стадію, на якій чекають гроші', () => {
+    for (const [platform, stages] of Object.entries(PAYMENT_STAGE_BY_PLATFORM)) {
+      expect(stages.length, platform).toBeGreaterThan(0)
+      for (const stage of stages) {
+        expect(statusOptions(platform), `${platform}/${stage}`).toContain(stage)
+      }
+    }
   })
 
-  it('«Доставлено» саме по собі досі вимагає оплати', () => {
+  it('МауДау лишився на «Узгоджено», не раніше', () => {
+    expect(canTogglePaid('Узгоджено', 'maudau')).toBe(true)
+    expect(canTogglePaid('Прийнято', 'maudau')).toBe(false)
+    expect(canTogglePaid('Нове', 'maudau')).toBe(false)
+  })
+
+  it('без оплати замовлення не їде — на всіх майданчиках', () => {
     expect(requiresPayment('Доставлено')).toBe(true)
+    expect(requiresPayment('На доставці')).toBe(true)
   })
 })

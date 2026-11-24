@@ -9,7 +9,7 @@ import { patchMaudauStatus } from '@/lib/maudau'
 
 const BASE = process.env.MAUDAU_BASE!
 
-const STATUS_MAP: Record<string, string> = {
+export const STATUS_MAP: Record<string, string> = {
   new_order: 'Нове',
   accepted: 'Прийнято',
   approved: 'Узгоджено',
