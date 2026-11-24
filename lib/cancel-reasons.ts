@@ -46,3 +46,24 @@ export const SITE_CANCEL_REASONS: { group: string; items: CancelReason[] }[] = [
 ]
 
 export const ALL_SITE_CANCEL_REASONS = SITE_CANCEL_REASONS.flatMap(g => g.items)
+
+/**
+ * Причини скасування для Prom.
+ *
+ * Їх рівно дві. Prom перевіряє `cancellation_reason` за власним
+ * переліком і на все інше відповідає «Incorrect cancellation_reason
+ * value» — зокрема на `other`, яке ми надсилали, і на весь список
+ * МауДау, який показувався в Prom-замовленнях за відсутністю свого.
+ * Тобто скасувати замовлення Prom із Мерчанта не вдавалось жодного
+ * разу: всі чотири скасовані скасував покупець на самому Prom.
+ */
+export const PROM_CANCEL_REASONS = [
+  { id: 1, name: 'Немає в наявності' },
+  { id: 2, name: 'Дубль замовлення' },
+]
+
+/** Наше слово → слово Prom. Чого тут немає, того Prom не приймає. */
+export const PROM_REASON_CODE: Record<string, string> = {
+  'Немає в наявності': 'not_available',
+  'Дубль замовлення': 'duplicate',
+}

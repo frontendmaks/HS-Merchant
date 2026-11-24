@@ -6,8 +6,10 @@ import OrderJournal from './OrderJournal'
 import OrderItemsEditor from './OrderItemsEditor'
 import ShipmentDialog from './ShipmentDialog'
 import { useRouter } from 'next/navigation'
+import { PROM_CANCEL_REASONS } from '@/lib/cancel-reasons'
 import {
   canCreateWaybill, canEditItems, isHandedOver, canTogglePaid, requiresPayment,
+  isCashOnDelivery,
 } from '@/lib/order-statuses'
 import { statusOptions } from '@/lib/order-status-options'
 
@@ -91,6 +93,8 @@ interface OrderRowProps {
   commission: number | null
   status: string | null
   is_paid?: boolean | null
+  /** Як платить покупець. «Наложенный платеж» означає, що передоплати не буде */
+  payment_option?: string | null
   ttn: string | null
   cancel_reason: string | null
   /** What the buyer wrote when ordering — delivery notes, corrected addresses */
@@ -184,10 +188,18 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
       setPaidLoading(false)
     }
   }
+  /* Накладений платіж: гроші візьме перевізник, тож чекати на передоплату
+     нема чого — інакше замовлення не вийде зі свого статусу ніколи */
+  const cod = isCashOnDelivery(props.payment_option)
+  const needsPayment = (s: string) => requiresPayment(s) && !paid && !cod
+  const readOnlyStatus = (s: string) => props.platform === 'prom' && s === 'Нове'
+
   const cancelReasonOptions: { id: number; name: string }[] =
     props.platform === 'rozetka'
       ? ROZETKA_CANCEL_REASONS
-      : maudauReasons
+      : props.platform === 'prom'
+        ? PROM_CANCEL_REASONS
+        : maudauReasons
 
   async function handleStatusChange(newStatus: string) {
     // Cancelling happens through the reason, never through this dropdown: a
@@ -397,11 +409,12 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
                   // Greyed out until a reason is picked, so the rule is visible
                   // before the click rather than explained after it
                   disabled={(s === 'Скасовано' && !cancelReason.trim())
-                    || (requiresPayment(s) && !paid)}
+                    || needsPayment(s) || (readOnlyStatus(s) && s !== status)}
                 >
                   {s}
                   {s === 'Скасовано' && !cancelReason.trim() ? ' — оберіть причину' : ''}
-                  {requiresPayment(s) && !paid ? ' — спершу оплата' : ''}
+                  {needsPayment(s) ? ' — спершу оплата' : ''}
+                  {readOnlyStatus(s) && s !== status ? ' — ставить Prom' : ''}
                 </option>
               ))}
             </select>
@@ -414,12 +427,14 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
             нього, тож це окремий перемикач, а не ще один статус. */}
         <button
           type="button"
-          disabled={readOnly || paidLoading || !canTogglePaid(status) || locked}
+          disabled={readOnly || paidLoading || cod || !canTogglePaid(status) || locked}
           onClick={() => togglePaid()}
           title={
-            canTogglePaid(status)
-              ? (paid ? 'Знято оплату' : 'Позначити як оплачене')
-              : 'Оплату позначають на статусі «Узгоджено»'
+            cod
+              ? 'Накладений платіж — гроші бере перевізник при видачі'
+              : canTogglePaid(status)
+                ? (paid ? 'Знято оплату' : 'Позначити як оплачене')
+                : 'Оплату позначають на статусі «Узгоджено»'
           }
           className={`mt-1.5 w-full px-2 py-1 rounded text-xs font-medium transition-colors
                       disabled:cursor-default ${
@@ -430,7 +445,7 @@ export default function OrderRow(props: OrderRowProps & { readOnly?: boolean }) 
                 : 'bg-zinc-800 text-zinc-500'
           }`}
         >
-          {paidLoading ? '…' : paid ? '₴ Оплачено' : '₴ Не оплачено'}
+          {paidLoading ? '…' : paid ? '₴ Оплачено' : cod ? '₴ Накладений платіж' : '₴ Не оплачено'}
         </button>
       </td>
 

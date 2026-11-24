@@ -95,7 +95,7 @@ export default async function MarketplaceOrdersPage({
 
   let query = supabase
     .from('orders')
-    .select('id,external_id,market_number,platform,order_date,customer_name,customer_phone,address,branch,items,total,commission,status,is_paid,ttn,cancel_reason,customer_comment,operator_comment, md_placed:raw->>created_at, rz_placed:raw->>created', { count: 'exact' })
+    .select('id,external_id,market_number,platform,order_date,customer_name,customer_phone,address,branch,items,total,commission,status,is_paid,ttn,cancel_reason,customer_comment,operator_comment, md_placed:raw->>created_at, rz_placed:raw->>created, pay_option:raw->payment_option->>name', { count: 'exact' })
     .in('platform', [...MARKETPLACE_PLATFORMS])
     .gte('order_date', from)
     .lte('order_date', to)
@@ -244,6 +244,7 @@ export default async function MarketplaceOrdersPage({
                     commission={order.commission}
                     status={order.status}
                     is_paid={order.is_paid}
+                    payment_option={order.pay_option}
                     ttn={order.ttn}
                     cancel_reason={order.cancel_reason}
                     customer_comment={order.customer_comment}

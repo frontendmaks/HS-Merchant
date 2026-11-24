@@ -13,7 +13,7 @@ import { NextResponse, after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getMaudauJwt, patchMaudauStatus } from '@/lib/maudau'
 import { rozetkaToken } from '@/lib/rozetka-auth'
-import { isHandedOver, requiresPayment } from '@/lib/order-statuses'
+import { isHandedOver, requiresPayment, isCashOnDelivery } from '@/lib/order-statuses'
 import { orderSource } from '@/lib/order-source'
 import { acquireLease } from '@/lib/job-lease'
 import { drainOrderEffects } from '@/lib/order-effects'
@@ -76,7 +76,7 @@ export async function changeOrderStatus(input: StatusChange): Promise<NextRespon
 async function changeLocked({ id, status, actor }: StatusChange): Promise<NextResponse> {
   const supabase = createServiceClient()
   const { data: current, error: readError } = await supabase.from('orders')
-    .select('status, ttn, cancel_reason, is_paid, bitrix_deal_id, platform, external_id, updated_at')
+    .select('status, ttn, cancel_reason, is_paid, bitrix_deal_id, platform, external_id, updated_at, raw')
     .eq('id', id).single()
   if (readError || !current) return NextResponse.json({ success: false, error: 'Не вдалося прочитати замовлення' }, { status: 503 })
   // Derive platform/identifier from the database, never from the request body.
@@ -105,7 +105,15 @@ async function changeLocked({ id, status, actor }: StatusChange): Promise<NextRe
   // Правило маркетплейсне: там замовлення йдуть передоплатою. Замовлення з
   // сайту й телефону везуть з оплатою на місці, і вимагати позначки «оплачено»
   // перед доставкою означало б просити оператора збрехати.
-  if (orderSource(platform) === 'marketplace' && requiresPayment(status) && !current?.is_paid) {
+  //
+  // Накладений платіж — виняток: там передоплати не буде ніколи, бо гроші
+  // бере перевізник при видачі. Усі замовлення з Prom такі, і правило
+  // тримало їх у «Прийнято» намертво.
+  const payment = (current.raw as { payment_option?: { name?: string } } | null)
+    ?.payment_option?.name ?? null
+  const cashOnDelivery = isCashOnDelivery(payment)
+  if (orderSource(platform) === 'marketplace' && requiresPayment(status)
+      && !current?.is_paid && !cashOnDelivery) {
     return NextResponse.json(
       {
         success: false,
@@ -192,13 +200,25 @@ async function changeLocked({ id, status, actor }: StatusChange): Promise<NextRe
       const { PROM_STATUS_BACK } = await import('@/lib/sync-prom')
       const target = PROM_STATUS_BACK[status]
       if (!target) throw new Error(`Статус «${status}» не передається на Prom`)
-      await promSetOrderStatus(
-        [Number(external_id.replace(/^PR-/, ''))],
-        target,
-        status === 'Скасовано'
-          ? ((current.cancel_reason as string | null)?.trim() || 'other')
-          : undefined,
-      )
+
+      /*
+       * Причину скасування Prom звіряє зі своїм переліком, а він короткий:
+       * not_available і duplicate. Наше слово — людське, тож перекладаємо.
+       * Доти туди їхало `other`, і Prom відмовляв кожного разу.
+       */
+      let reason: string | undefined
+      if (status === 'Скасовано') {
+        const { PROM_REASON_CODE } = await import('@/lib/cancel-reasons')
+        const picked = (current.cancel_reason as string | null)?.trim() ?? ''
+        reason = PROM_REASON_CODE[picked]
+        if (!reason) {
+          throw new Error(
+            `Prom не приймає причину «${picked}». Оберіть «Немає в наявності» `
+            + 'або «Дубль замовлення» — інших Prom не знає',
+          )
+        }
+      }
+      await promSetOrderStatus([Number(external_id.replace(/^PR-/, ''))], target, reason)
     } else if (platform === 'rozetka') {
       const numericId = external_id.replace(/^RZ-/, '')
 

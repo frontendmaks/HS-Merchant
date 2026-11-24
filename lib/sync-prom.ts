@@ -27,13 +27,14 @@ const STATUS_MAP: Record<string, string> = {
   pending: 'Нове',
   draft: 'Нове',
   received: 'Прийнято',
-  paid: 'Прийнято',
+  paid: 'Оплачено',
   delivered: 'Доставлено',
   canceled: 'Скасовано',
 }
 
 export const PROM_STATUS_BACK: Record<string, string> = {
   'Прийнято': 'received',
+  'Оплачено': 'paid',
   'Доставлено': 'delivered',
   'Скасовано': 'canceled',
 }
