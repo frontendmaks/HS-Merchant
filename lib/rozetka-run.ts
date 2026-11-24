@@ -82,6 +82,8 @@ export interface UploadResult {
   updated: number
   /** Скільки нових карток поїхало одразу із заявкою на модерацію */
   approved: number
+  /** Скільки карток пішли на оновлення лише заради фото */
+  photosResent: number
   unchanged: number
   skipped: { name: string; reason: string }[]
   errors: { name: string; error: string }[]
@@ -112,7 +114,8 @@ export async function uploadRozetkaItems(
     { createLimit?: number; updateOnly?: boolean; approve?: boolean } = {},
 ): Promise<UploadResult> {
   const out: UploadResult = {
-    looked: 0, created: 0, updated: 0, approved: 0, unchanged: 0, skipped: [], errors: [],
+    looked: 0, created: 0, updated: 0, approved: 0, unchanged: 0,
+    photosResent: 0, skipped: [], errors: [],
   }
 
   const feed = await rozetkaFeed(service)
@@ -157,6 +160,29 @@ export async function uploadRozetkaItems(
     .select('product_id, item_id, content_hash, approved_at')
   const known = new Map((knownRows ?? []).map(r => [r.product_id as string, r]))
 
+  /*
+   * Картки, у яких Rozetka не взяла фото.
+   *
+   * Заведення чотирьохсот карток однією ніччю закінчилось тим, що в
+   * шістдесяти семи фото не завантажилось: Rozetka ходить по знімок сама,
+   * і частина походів не вдалась. Помилки при цьому не було — картка
+   * створилась, лише з порожнім `photo` і заглушкою `no-image.svg`.
+   *
+   * Самі вони не полагодяться: оновлення йде лише тоді, коли змінився
+   * вміст, а вміст той самий. Тому питаємо Rozetka, де фото немає, і
+   * женемо ці картки на оновлення попри незмінний відбиток.
+   */
+  const photoless = new Set<number>()
+  try {
+    const { rozetkaAllGoods } = await import('@/lib/rozetka-api')
+    for (const good of await rozetkaAllGoods()) {
+      if (good.photo_upload_status !== 1) photoless.add(Number(good.item_id))
+    }
+  } catch (e) {
+    /* Не змогли спитати — просто не чинимо фото цього проходу */
+    console.error('rozetka photo check failed:', e instanceof Error ? e.message : e)
+  }
+
   const drafts: RozetkaItemDraft[] = []
   for (const fp of active) {
     const built = buildItem(fp, ctx)
@@ -172,7 +198,9 @@ export async function uploadRozetkaItems(
   for (const draft of toUpdate) {
     const sent = known.get(draft.productId)!
     const params = itemParams(draft)
-    if (!needsUpdate(draft, params, sent)) { out.unchanged++; continue }
+    const needsPhoto = photoless.has(Number(sent.item_id)) && draft.pictures.length > 0
+    if (!needsPhoto && !needsUpdate(draft, params, sent)) { out.unchanged++; continue }
+    if (needsPhoto) out.photosResent++
     batch.push({
       draft,
       hash: contentHash(draft, params),

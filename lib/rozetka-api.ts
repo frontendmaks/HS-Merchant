@@ -283,6 +283,8 @@ export interface RozetkaGood {
   comment: string | null
   /** Коли картку завели. Потрібне, щоб знати, скільки вона вже чекає */
   created_at: string | null
+  /** 1 — знімок у Rozetka. Інше означає, що вона його не взяла */
+  photo_upload_status: number | null
 }
 
 /**

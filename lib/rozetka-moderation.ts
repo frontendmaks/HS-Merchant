@@ -88,5 +88,21 @@ export async function rozetkaCatalogChecks(): Promise<Check[]> {
     })
   }
 
+  /*
+   * Фото Rozetka тягне до себе сама, і коли похід по знімок не вдався,
+   * картка однаково створюється — з порожнім `photo` і заглушкою
+   * «no-image». Помилки немає ніде, тому шістдесят сім таких пролежали
+   * непоміченими від самого заведення.
+   */
+  const photoless = goods.filter(g => g.photo_upload_status !== 1)
+  if (photoless.length) {
+    checks.push({
+      key: 'rozetka-no-photo',
+      label: 'Rozetka не взяла фото',
+      why: 'у картці заглушка замість знімка — наступний прохід вивантаження надішле його ще раз',
+      count: photoless.length, sample: names(photoless), severity: 'warn', href: '/feeds',
+    })
+  }
+
   return checks
 }
