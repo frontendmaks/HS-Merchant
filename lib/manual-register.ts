@@ -489,6 +489,44 @@ export async function registerStatus(service: Service, date: string) {
  * Стирається лише ім'я, а не номер: номер належить аркушу, і рядок має
  * лишитись вільним для наступного замовлення, а не зникнути.
  */
+/**
+ * Номер, який замовлення вже мало, — назад.
+ *
+ * Перенесення й скасування знімають номер із замовлення: у ящику того
+ * дня його не буде. Але в журналі число лишається за ним, із позначкою
+ * «перенесено на 25.11» замість імені — щоб другий «шостий» того самого
+ * дня не з'явився.
+ *
+ * А далі буває так, як із замовленням Драгомірова: перенесли на 25-те,
+ * тоді передумали — скасували нову копію, а старе повернули в роботу на
+ * 24-те. Номер при цьому не повертався нікуди: ні в замовлення, ні в
+ * угоду. Комірник бачив «Спаковано» без числа й не знав, у який ящик
+ * складати, а в журналі навпроти шостого стояло «перенесено».
+ *
+ * Тому повернення в роботу відновлює все троє: число в замовленні, ім'я
+ * в журналі й номер ящика в угоді.
+ */
+export async function restoreNumber(
+  service: Service,
+  { orderId, date, customerName }:
+    { orderId: string; date: string; customerName: string | null },
+): Promise<number | null> {
+  const { data } = await service.from('order_numbers')
+    .select('number')
+    .eq('order_id', orderId).eq('delivery_date', date).is('released_at', null)
+    .order('number')
+    .limit(1)
+
+  const number = data?.[0]?.number as number | undefined
+  if (number == null) return null
+
+  await service.from('order_numbers')
+    .update({ customer_name: customerName || 'замовлення' })
+    .eq('order_id', orderId).eq('delivery_date', date).eq('number', number)
+
+  return Number(number)
+}
+
 export async function releaseNumber(
   service: Service,
   { number, date, reason = 'рядок звільнено' }: {

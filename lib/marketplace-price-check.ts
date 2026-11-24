@@ -47,19 +47,39 @@ const TOLERANCE = 0.011
 /**
  * Рядки, які втратили націнку.
  *
- * `expected` віддає ціну, яка мала б стояти; `null` означає «не знаємо
- * базової ціни» — такий рядок мовчить, бо звинувачувати можна лише тоді,
- * коли є з чим порівняти.
+ * `expected` віддає ціну, яка мала б стояти, `base` — ціну без
+ * коефіцієнта; `null` в обох означає «не знаємо» — такий рядок мовчить,
+ * бо звинувачувати можна лише тоді, коли є з чим порівняти.
+ *
+ * «Дешевше за належне» саме по собі ще нічого не доводить. Ціна в угоді
+ * застигла такою, якою була в день замовлення, а наша базова живе далі:
+ * тарталетки коштували 49,58 (у замовленні 58,50), потім подорожчали до
+ * 56 — і порівняння з сьогоднішньою ціною оголосило три замовлення Prom
+ * недоплаченими, хоч покупець заплатив рівно стільки, скільки бачив.
+ *
+ * Втрата націнки має інший почерк, і він точний: рядок переписали в 1С,
+ * і в ньому стоїть гола ціна картки — та сама базова, без коефіцієнта.
+ * Саме так М13 віддав рулет по 431 при базі 431. Тому шукаємо збіг із
+ * базою, а не просто «менше, ніж хотілось би».
  */
 export function underpriced(
   rows: DealRow[],
   expected: (row: DealRow) => number | null,
+  base?: (row: DealRow) => number | null,
 ): DealRow[] {
   return rows.filter(row => {
     if (isServiceItem(row.PRODUCT_NAME)) return false
     const want = expected(row)
     if (want == null || !(want > 0)) return false
-    return Number(row.PRICE) < want - TOLERANCE
+    const price = Number(row.PRICE)
+    if (!(price < want - TOLERANCE)) return false
+
+    /* Без базової ціни лишаємось при старому правилі */
+    const raw = base?.(row)
+    if (raw == null || !(raw > 0)) return true
+
+    /* Копійка різниці — те саме число: 1С округлює по-своєму */
+    return Math.abs(price - raw) <= Math.max(0.02, raw * 0.005)
   })
 }
 
@@ -154,10 +174,13 @@ export async function marketplacePriceCheck(service: Service): Promise<Check | n
     if (p.price != null) ourPrice.set(p.uid_1c as string, Number(p.price))
   }
 
-  const expected = (row: DealRow) => {
+  const baseOf = (row: DealRow) => {
     const id = Number(row.PRODUCT_ID)
     const uid = uidByBitrix.get(id)
-    const base = (uid ? ourPrice.get(uid) : undefined) ?? bxPrice.get(id)
+    return (uid ? ourPrice.get(uid) : undefined) ?? bxPrice.get(id) ?? null
+  }
+  const expected = (row: DealRow) => {
+    const base = baseOf(row)
     return base && base > 0 ? round(base * multiplier) : null
   }
 
@@ -165,7 +188,7 @@ export async function marketplacePriceCheck(service: Service): Promise<Check | n
   for (const order of orders) {
     const rows = rowsByDeal.get(Number(order.bitrix_deal_id))
     if (!rows?.length) continue
-    if (underpriced(rows, expected).length) {
+    if (underpriced(rows, expected, baseOf).length) {
       // Мітка та сама, що всюди: P для Prom, R для Rozetka, M для MauDau
       hit.push(marketNumberLabel(order.platform, order.market_number)
         ?? (order.external_id ?? '—'))
@@ -177,7 +200,7 @@ export async function marketplacePriceCheck(service: Service): Promise<Check | n
   return {
     key: 'mp-underpriced',
     label: 'Маркетплейс: в угоді ціна нижча за категорійну',
-    why: 'рядок переписали в 1С, і він пішов у накладну без націнки',
+    why: 'рядок переписали в 1С, і в накладну пішла гола ціна картки — без націнки',
     count: hit.length,
     sample: hit.slice(0, 6),
     severity: 'warn',

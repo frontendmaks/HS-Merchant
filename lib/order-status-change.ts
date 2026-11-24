@@ -76,7 +76,7 @@ export async function changeOrderStatus(input: StatusChange): Promise<NextRespon
 async function changeLocked({ id, status, actor }: StatusChange): Promise<NextResponse> {
   const supabase = createServiceClient()
   const { data: current, error: readError } = await supabase.from('orders')
-    .select('status, ttn, cancel_reason, is_paid, bitrix_deal_id, platform, external_id, updated_at')
+    .select('status, ttn, cancel_reason, is_paid, bitrix_deal_id, platform, external_id, updated_at, manual_number, delivery_date, customer_name')
     .eq('id', id).single()
   if (readError || !current) return NextResponse.json({ success: false, error: 'Не вдалося прочитати замовлення' }, { status: 503 })
   // Derive platform/identifier from the database, never from the request body.
@@ -251,6 +251,40 @@ async function changeLocked({ id, status, actor }: StatusChange): Promise<NextRe
       { success: false, error: marketplaceReason(e) },
       { status: 500 },
     )
+  }
+
+  /*
+   * Замовлення повернули в роботу — поверни йому й номер ящика.
+   *
+   * Перенесення й скасування знімають номер: у ящику того дня його не
+   * буде. Та коли передумали й повернули замовлення назад, номер не
+   * повертався нікуди — ні в замовлення, ні в угоду. Комірник бачив
+   * «Спаковано» без числа.
+   */
+  if (orderSource(platform) === 'site' && current.status === 'Скасовано'
+      && status !== 'Скасовано' && current.manual_number == null && current.delivery_date) {
+    try {
+      const { restoreNumber } = await import('@/lib/manual-register')
+      const number = await restoreNumber(supabase, {
+        orderId: id,
+        date: current.delivery_date as string,
+        customerName: (current.customer_name as string | null) ?? null,
+      })
+      if (number != null) {
+        await supabase.from('orders')
+          .update({ manual_number: number, cancel_reason: null, moved_to_order_id: null })
+          .eq('id', id)
+        if (current.bitrix_deal_id) {
+          const { updateDealChecked, FIELD } = await import('@/lib/bitrix-deal')
+          await updateDealChecked(Number(current.bitrix_deal_id), {
+            [FIELD.boxNumber]: String(number),
+          })
+        }
+      }
+    } catch (e) {
+      /* Номер — не привід завалити зміну статусу; про невдачу скаже журнал */
+      console.error('restore number failed:', e instanceof Error ? e.message : e)
+    }
   }
 
   const { data: committed, error: commitError } = await supabase.rpc('merchant_commit_status', {

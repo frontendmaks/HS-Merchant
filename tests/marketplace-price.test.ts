@@ -93,3 +93,41 @@ describe('фасування для окремого маркетплейсу', 
     expect(offerAttrs(product, { 'Мін': '', 'Крок': '   ' })['Мін']).toBe('0.6')
   })
 })
+
+/*
+ * Друга половина правила: «дешевше за належне» ще не означає «втратили
+ * націнку». Ціна в угоді застигла такою, якою була в день замовлення,
+ * а наша базова живе далі.
+ */
+describe('стара ціна — не втрачена націнка', () => {
+  const base: Record<string, number> = {
+    'Тарталетки 100г ТМ Дом. прод.(18)': 56,
+    'Рулет курячий з ШПИНАТОМ печений': 431,
+  }
+  const baseOf = (r: DealRow) => base[r.PRODUCT_NAME] ?? null
+  const expected = (r: DealRow) => {
+    const b = baseOf(r)
+    return b == null ? null : Math.round(Math.ceil(b * 1.18 / 0.1) * 0.1 * 100) / 100
+  }
+
+  it('рядок за старою ціною мовчить', () => {
+    /* 58,50 — це 49,58 × 1,18: покупець заплатив рівно стільки, скільки бачив */
+    const hit = underpriced([row('Тарталетки 100г ТМ Дом. прод.(18)', 58.5)], expected, baseOf)
+    expect(hit).toHaveLength(0)
+  })
+
+  it('гола ціна картки 1С — знахідка', () => {
+    const hit = underpriced([row('Рулет курячий з ШПИНАТОМ печений', 431)], expected, baseOf)
+    expect(hit).toHaveLength(1)
+  })
+
+  it('копійчана різниця з базою — та сама гола ціна', () => {
+    const hit = underpriced([row('Рулет курячий з ШПИНАТОМ печений', 430.99)], expected, baseOf)
+    expect(hit).toHaveLength(1)
+  })
+
+  it('без базової ціни лишається старе правило', () => {
+    const hit = underpriced([row('Рулет курячий з ШПИНАТОМ печений', 431)], expected, () => null)
+    expect(hit).toHaveLength(1)
+  })
+})
