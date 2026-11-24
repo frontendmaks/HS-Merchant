@@ -58,6 +58,8 @@ export interface PromOrder {
   status: string
   status_name: string | null
   cancellation: { reason?: string | null; text?: string | null } | null
+  /** Комісія Prom за замовлення. На скасованих її повертають */
+  cpa_commission: { amount: string | number | null; is_refunded?: boolean } | null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   products: any[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -100,10 +102,21 @@ async function paged<T extends { id: number }>(
   return out
 }
 
-/** Замовлення, змінені з цієї дати (YYYY-MM-DD). Без дати — всі. */
+/**
+ * Замовлення, **змінені** з цієї дати (YYYY-MM-DD). Без дати — всі.
+ *
+ * Саме змінені, а не створені. `date_from` фільтрує за датою створення, і
+ * на ньому прохід втрачав усе, що міняється пізніше: одне замовлення
+ * створили 28 серпня, а скасували 10 жовтня — за `date_from` ми б про це
+ * не дізнались ніколи, бо день створення давно позаду. Статуси в панелі
+ * просто застигали такими, якими приїхали першого разу.
+ *
+ * `last_modified_from` Prom перевіряє по-справжньому: на неправильну дату
+ * відповідає «Incorrect datetime format», а не мовчазним списком усього.
+ */
 export async function promOrders(since?: string): Promise<PromOrder[]> {
   return paged<PromOrder>(
-    `/orders/list${since ? `?date_from=${since}` : ''}`, 'orders')
+    `/orders/list${since ? `?last_modified_from=${since}` : ''}`, 'orders')
 }
 
 export async function promOrder(id: number): Promise<PromOrder> {
@@ -137,6 +150,32 @@ export interface PromPriceUpdate {
   price?: number
   presence?: 'available' | 'not_available'
   quantity_in_stock?: number
+}
+
+/**
+ * Номер накладної — на замовлення в Prom.
+ *
+ * Без нього покупець на Prom не бачить, де його посилка: в замовленні
+ * `declaration_number: null`, хоч накладна давно створена й лежить у нас.
+ * Доти ми його туди не віддавали зовсім — `pushTtnToMarketplace` мовчки
+ * повертав успіх для всього, що не МауДау й не Rozetka.
+ *
+ * Службу доставки Prom вимагає назвати окремо і приймає рівно чотири:
+ * nova_poshta, ukrposhta, meest, rozetka_delivery.
+ */
+export const PROM_DELIVERY_TYPES = ['nova_poshta', 'ukrposhta', 'meest', 'rozetka_delivery']
+
+export async function promSetDeclaration(
+  orderId: number, declarationId: string, deliveryType: string,
+): Promise<void> {
+  const r = await prom<{ status?: string; message?: string }>(
+    'POST', '/delivery/save_declaration_id',
+    { order_id: orderId, declaration_id: declarationId, delivery_type: deliveryType },
+  )
+  /* Prom відповідає двомастами й на відмову теж — помилка живе в тілі */
+  if (r?.status === 'error') {
+    throw new Error(`Prom не взяв накладну: ${r.message ?? JSON.stringify(r).slice(0, 200)}`)
+  }
 }
 
 export async function promUpdateProducts(items: PromPriceUpdate[]): Promise<number> {

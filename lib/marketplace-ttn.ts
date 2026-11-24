@@ -9,11 +9,28 @@
 
 import { getMaudauJwt, patchMaudauStatus, patchMaudauTtn } from '@/lib/maudau'
 import { rozetkaToken } from '@/lib/rozetka-auth'
+import { promOrder, promSetDeclaration, PROM_DELIVERY_TYPES } from '@/lib/prom-api'
 
-/** What the order becomes once the marketplace has the number. */
+/**
+ * What the order becomes once the marketplace has the number.
+ *
+ * Prom навмисно відсутній: прийнявши накладну, він статусу не міняє —
+ * між «Прийнято» і доставкою в нього нічого немає. Тому ми й не
+ * прикидаємось, ніби замовлення кудись перейшло.
+ */
 export const SHIPPED_STATUS: Record<string, string> = {
   maudau: 'На доставці',
   rozetka: 'Передано в доставку',
+}
+
+/** Якою службою везуть — так, як це називає Prom */
+async function promDeliveryType(orderId: number): Promise<string> {
+  const order = await promOrder(orderId)
+  const provider = String(order.delivery_provider_data?.provider ?? '').trim()
+  if (PROM_DELIVERY_TYPES.includes(provider)) return provider
+  throw new Error(
+    `Prom не знає служби «${provider || '—'}». Накладну для неї треба внести в кабінеті`,
+  )
 }
 
 interface RozetkaStatusEntry {
@@ -148,6 +165,13 @@ export async function pushTtnToMarketplace(
       // Past that step already — the number can still be attached on its own,
       // but the status is not ours to claim
       await putRozetka(numericId, { ttn })
+      return { ok: true }
+    }
+
+    if (platform === 'prom') {
+      const orderId = Number(externalId.replace(/^PR-/, ''))
+      await promSetDeclaration(orderId, ttn, await promDeliveryType(orderId))
+      /* Статус лишається тим, що був: Prom його на накладну не міняє */
       return { ok: true }
     }
 

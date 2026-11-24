@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef, useEffect, useTransition } from 'react'
+import { MARKETPLACE_PLATFORMS, marketplaceLabel } from '@/lib/order-source'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { useOrderUpdatesThrottled } from '@/lib/use-order-updates'
 
@@ -62,10 +63,11 @@ export default function OrdersToolbar() {
     }
   }
 
+  /* Береться з одного переліку, щоб новий майданчик не доводилось
+     згадувати ще й тут — саме так загубився Prom */
   const platforms = [
     { value: '', label: 'Всі' },
-    { value: 'maudau', label: 'MauDau' },
-    { value: 'rozetka', label: 'Rozetka' },
+    ...MARKETPLACE_PLATFORMS.map(p => ({ value: p, label: marketplaceLabel(p) })),
   ]
 
   const statuses = [

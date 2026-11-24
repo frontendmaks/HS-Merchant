@@ -78,7 +78,9 @@ export function promOrderToRow(o: PromOrder) {
     branch: o.delivery_option?.name ?? null,
     items: buildItems(o.products),
     total: money(o.price),
-    commission: 0,
+    /* Комісію Prom називає cpa_commission. На скасованих її повертають —
+       тоді ми нічого не платимо, і в звіті має стояти нуль, а не сума */
+    commission: o.cpa_commission?.is_refunded ? 0 : money(o.cpa_commission?.amount),
     status,
     status_raw: String(o.status),
     /* Причину скасування Prom кладе в окремий об'єкт, і буває, що там
@@ -97,7 +99,9 @@ type SyncMode = 'quick' | 'full'
 export async function syncProm(mode: SyncMode = 'full'): Promise<{ synced: number }> {
   const supabase = createServiceClient()
 
-  /* Швидкий прохід дивиться добу назад, повний — від початку року */
+  /* Швидкий прохід дивиться добу назад, повний — від початку року.
+     Рахується від дати зміни, тож давнє замовлення, яке щойно скасували,
+     прохід побачить. */
   const since = mode === 'quick'
     ? new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
     : `${new Date().getFullYear()}-01-01`

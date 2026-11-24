@@ -8,6 +8,23 @@
  */
 export const MARKETPLACE_PLATFORMS = ['maudau', 'rozetka', 'prom'] as const
 
+/**
+ * Як майданчик зветься в очі.
+ *
+ * Перелік один на всю панель. Доти назви лежали в кожному місці свої, і
+ * Prom додали в `MARKETPLACE_PLATFORMS`, у значок і в синхронізацію — а
+ * у фільтр над списком забули. Замовлень з Prom на сторінці не було
+ * видно взагалі, хоч вони там і лежали.
+ */
+export const MARKETPLACE_LABELS: Record<string, string> = {
+  maudau: 'MauDau',
+  rozetka: 'Rozetka',
+  prom: 'Prom',
+}
+
+export const marketplaceLabel = (platform: string | null): string =>
+  MARKETPLACE_LABELS[platform ?? ''] ?? (platform ?? '')
+
 /** Сайт і телефон — один потік: обидва веде оператор сам, без майданчика. */
 export const SITE_PLATFORMS = ['manual', 'site'] as const
 

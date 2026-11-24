@@ -11,7 +11,7 @@ import MonthTabs from '../MonthTabs'
 import OrderRow from '../OrderRow'
 import WideScroll from '../WideScroll'
 import { arrivalTime } from '@/lib/order-arrival'
-import { MARKETPLACE_PLATFORMS } from '@/lib/order-source'
+import { MARKETPLACE_PLATFORMS, marketplaceLabel } from '@/lib/order-source'
 
 const UA_MONTHS = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень']
 
@@ -42,10 +42,12 @@ function platformBadge(platform: string | null) {
     ? 'bg-purple-900 text-purple-300'
     : p === 'rozetka'
     ? 'bg-pink-900 text-pink-300'
+    : p === 'prom'
+    ? 'bg-sky-900 text-sky-300'
     : 'bg-zinc-700 text-zinc-300'
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
-      {p === 'maudau' ? 'MauDau' : p === 'rozetka' ? 'Rozetka' : p}
+      {marketplaceLabel(p)}
     </span>
   )
 }
@@ -156,7 +158,7 @@ export default async function MarketplaceOrdersPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-white">Замовлення (Маркетплейси)</h1>
-          <p className="text-zinc-400 text-sm mt-0.5">MauDau та Rozetka — статуси, ТТН, комплектація</p>
+          <p className="text-zinc-400 text-sm mt-0.5">MauDau, Rozetka і Prom — статуси, ТТН, комплектація</p>
         </div>
       </div>
 

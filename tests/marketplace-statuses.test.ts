@@ -16,6 +16,10 @@ import { STATUS_MAP as PROM_IN } from '@/lib/sync-prom'
 import { STATUS_MAP as ROZETKA_IN } from '@/lib/sync-rozetka'
 import { statusOptions } from '@/lib/order-status-options'
 import { PAYMENT_STAGE_BY_PLATFORM } from '@/lib/order-statuses'
+import { promOrderToRow } from '@/lib/sync-prom'
+import {
+  MARKETPLACE_PLATFORMS, MARKETPLACE_LABELS, marketplaceLabel,
+} from '@/lib/order-source'
 
 const INCOMING: Record<string, Record<string | number, string>> = {
   maudau: MAUDAU_IN,
@@ -40,5 +44,42 @@ describe('статуси майданчиків', () => {
         expect(statusOptions(platform), `${platform}/${stage}`).toContain(stage)
       }
     }
+  })
+})
+
+describe('комісія Prom', () => {
+  it('береться з cpa_commission, а не лишається нулем', () => {
+    const row = promOrderToRow({
+      id: 1, status: 'received', price: '2 429,30 грн', products: [],
+      cpa_commission: { amount: '391.00', is_refunded: false },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
+    expect(row.commission).toBe(391)
+    expect(row.total).toBe(2429.3)
+  })
+
+  it('на скасованому замовленні комісію повертають — отже нуль', () => {
+    const row = promOrderToRow({
+      id: 2, status: 'canceled', price: '2 129,60 грн', products: [],
+      cpa_commission: { amount: '333.26', is_refunded: true },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
+    expect(row.commission).toBe(0)
+  })
+
+  it('без комісії в відповіді — нуль, а не NaN', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const row = promOrderToRow({ id: 3, status: 'received', price: '10 грн', products: [] } as any)
+    expect(row.commission).toBe(0)
+  })
+})
+
+describe('фільтр майданчиків', () => {
+  it('кожен майданчик має назву в очі', () => {
+    for (const p of MARKETPLACE_PLATFORMS) {
+      expect(marketplaceLabel(p), p).not.toBe(p === 'prom' ? '' : null)
+      expect(marketplaceLabel(p).length, p).toBeGreaterThan(0)
+    }
+    expect(Object.keys(MARKETPLACE_LABELS).sort()).toEqual([...MARKETPLACE_PLATFORMS].sort())
   })
 })
